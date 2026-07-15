@@ -1,0 +1,86 @@
+[
+  {
+    "title": "Playbook - Picking Profitable AI Use Cases",
+    "type": "playbook",
+    "level": "core",
+    "scope": "IN: an end-to-end procedure for selecting AI use cases that actually pay off — filtering by error tolerance, choosing augmentation before automation, scoring value against verification and integration cost, buy-vs-build under deflation, and setting a kill criterion. OUT: the unit-economics math (link Concept - Unit Economics of LLM Products, 22), the build-vs-buy tradeoff in detail (link Decision - Build vs Buy vs Wrap, 22), per-function benchmarks (link Reference - AI Impact by Business Function, 21), enterprise adoption pitfalls (link Gotchas - Enterprise AI Adoption, 23).",
+    "key_points": [
+      "Step 1 — filter by error tolerance: map the task onto the capability-reliability gap. Tasks where a wrong answer is cheap to catch and undo (draft-then-review) fit today; unattended high-stakes correctness mostly does not, per the METR 50/80 reliability gap (E2/E3; link Concept - METR Time Horizons, Concept - The Capability-Reliability Gap, 20).",
+      "Step 2 — augmentation before automation: the Anthropic Economic Index (2025-26) finds ~52% augmentation vs ~45% automation usage, and the Brynjolfsson-Li-Raymond call-center RCT (2023) shows +14% overall but +34% for novices and ~0 for experts — value concentrates where AI closes a skill gap (E3 RCT / E2 AEI).",
+      "Step 3 — score value = (value per task) x (volume) x (automatable fraction) − (verification + integration cost); high-volume, low-stakes, language-in/language-out tasks (support deflection, drafting, coding assist) dominate real wins (link Concept - Support Deflection Economics, 21; Reference - AI Impact by Business Function, 21).",
+      "Step 4 — verification cost is the hidden killer: if checking the output costs as much as doing the task the ROI evaporates, which is why MIT NANDA (2025) found ~95% of pilots showed no P&L impact — prefer tasks with cheap verification like tests, schemas, or human skim (E2; link Concept - The Pilot-to-Production Gap, 23).",
+      "Step 5 — buy vs build vs wrap: default to buy/wrap for commodity capability given ~10x/yr token-price deflation and model churn; build only where you own proprietary data or a durable workflow (link Concept - Token Price Deflation, 22; Decision - Build vs Buy vs Wrap, 22; Concept - Moats in the AI Application Layer, 22).",
+      "Step 6 — set a kill criterion up front: define the 6-month measurable-KPI bar MIT used to separate the 5% that worked; if a pilot cannot name its metric and baseline, do not start it (link Concept - The Evaluation Gap, 23).",
+      "When it goes wrong (branch table): no baseline → stop; error too costly → narrow scope or add a human gate; margins thin → buy instead of build; verification overhead rising → the task is a poor fit, not a prompt problem (link Reference - The 2026 Navigation Cheatsheet)."
+    ],
+    "links": [
+      "Concept - The Capability-Reliability Gap",
+      "Concept - Support Deflection Economics",
+      "Concept - The Pilot-to-Production Gap",
+      "Decision - Build vs Buy vs Wrap",
+      "Reference - The 2026 Navigation Cheatsheet",
+      "Concept - METR Time Horizons",
+      "Concept - What Stays Valuable Through Any Scenario",
+      "Concept - Token Price Deflation",
+      "Deep Dive - AI and the Labor Market",
+      "Reference - AI Impact by Business Function",
+      "Concept - Moats in the AI Application Layer",
+      "Concept - The Evaluation Gap",
+      "Gotchas - Enterprise AI Adoption"
+    ]
+  },
+  {
+    "title": "Reference - The 2026 Navigation Cheatsheet",
+    "type": "reference",
+    "level": "core",
+    "scope": "IN: a compact, heavily date-stamped lookup of where the money and the safe bets are as of mid-2026 — profitable-today plays, overhyped/unproven plays, the cost curve, the reliability frontier, the forecast spread, and the no-regret moves that hold across bubble or boom, each row tiered E0-E3. OUT: the reasoning behind each row (link Playbook - Picking Profitable AI Use Cases, Deep Dive - Bubble or Boom, Concept - What Stays Valuable Through Any Scenario) and per-function deployment detail (link Reference - AI Impact by Business Function, 21).",
+    "key_points": [
+      "'Profitable today' table (as of 2026, tier per row): coding assistants (Copilot-class, mixed RCT evidence, link Reference - Developer Productivity Studies, 20); support deflection (Klarna-class but walked back, link Breakdown - Klarna's AI Customer Service Bet, 21); medical scribes (strong clinician-time evidence, link Breakdown - AI Medical Scribes, 21); content/marketing drafting (link Reference - AI Impact by Business Function, 21).",
+      "'Overhyped / unproven' table: fully-autonomous agents in high-stakes unattended work (link Concept - The Capability-Reliability Gap, 20), enterprise pilots with no KPI (~95% no P&L, link Concept - The Pilot-to-Production Gap, 23), and 'AI replaces headcount' claims (link Lore - Failed AI Predictions).",
+      "Cost-curve row: inference for GPT-4-class fell ~1000x from 2023 (~$30/M tokens) to 2026 (~$0.05-0.5/M) across providers — assume continued ~10x/yr deflation when sizing margins (E2, provider price histories; link Concept - Token Price Deflation, 22).",
+      "Reliability-frontier row: current 50%-horizon is multi-hour but the 80%-horizon is ~5x shorter, so design for supervised, checkable tasks (E2, METR; link Concept - METR Time Horizons).",
+      "Forecast-spread row: AGI/HLMI medians span ~2030 (short camp) to ~2047-2050 (surveys and bio-anchors) — plan for a range, not a date (E1/E2; link Concept - The AGI Timeline Debate, Reference - The AI Forecasting Track Record).",
+      "'No-regret moves' row: own proprietary data and workflow, stay model-agnostic against churn and deflation, instrument evals, and buy commodity capability — these hold in both bubble and boom (link Concept - What Stays Valuable Through Any Scenario, Deep Dive - Bubble or Boom, Decision - Build vs Buy vs Wrap, 22).",
+      "Footnotes: every $ and % is date-stamped mid-2026 and tier-marked, vendor-claimed figures are flagged, and this note is expected to age fast."
+    ],
+    "links": [
+      "Reference - AI Impact by Business Function",
+      "Concept - Token Price Deflation",
+      "Concept - METR Time Horizons",
+      "Concept - What Stays Valuable Through Any Scenario",
+      "Deep Dive - Bubble or Boom",
+      "Playbook - Picking Profitable AI Use Cases",
+      "Concept - The Pilot-to-Production Gap",
+      "Breakdown - Klarna's AI Customer Service Bet",
+      "Concept - The Capability-Reliability Gap",
+      "Breakdown - AI Medical Scribes",
+      "Reference - The AI Forecasting Track Record"
+    ]
+  },
+  {
+    "title": "Concept - What Stays Valuable Through Any Scenario",
+    "type": "concept",
+    "level": "surface",
+    "scope": "IN: reasoning about which skills, assets, and business positions hold value whether AI plateaus, keeps scaling, or bubbles — the invariants of proprietary data/distribution, verification and judgment, taste and problem-selection, integration, and trust/liability ownership, framed against the scenario spread. OUT: specific profitable plays (link Reference - The 2026 Navigation Cheatsheet, Playbook - Picking Profitable AI Use Cases), the theory of moats (link Concept - Moats in the AI Application Layer, 22), the labor-market data (link Deep Dive - AI and the Labor Market).",
+    "key_points": [
+      "Frame: durable value is value not proportional to raw model capability, because capability is deflating (~10x/yr on cost, link Concept - Token Price Deflation, 22) and commoditizing across labs (link Reference - Model Genealogy, 19) — owning the model matters less than owning what it plugs into.",
+      "Invariant 1 — proprietary data and distribution: the app-layer moat is data and workflow lock-in, not prompts (link Concept - Moats in the AI Application Layer, 22); thin wrappers with no data are most exposed to both deflation and frontier labs moving up-stack.",
+      "Invariant 2 — verification and judgment: because the 80%-reliability horizon lags the 50% horizon (link Concept - METR Time Horizons, Concept - The Capability-Reliability Gap, 20), whoever can cheaply verify and take liability for AI output captures value the model cannot (link Concept - The Evaluation Gap, 23).",
+      "Invariant 3 — taste and problem-selection: choosing the right task is the scarce skill once execution is cheap; MIT's 5%-that-worked bought focused solutions rather than building broadly (link Concept - The Pilot-to-Production Gap, 23).",
+      "Invariant 4 — integration and trust: the Anthropic Economic Index shows augmentation still leads automation (~52/45, 2026), so human-in-the-loop, systems-integration, and accountability roles persist even as tasks automate (E2; link Deep Dive - AI and the Labor Market).",
+      "Scenario robustness: these hold in a boom (capability is cheap, complements win) and in a bubble/plateau (capital dries up, only real-ROI positions survive) — link Deep Dive - Bubble or Boom.",
+      "Non-obvious: the least defensible position is a thin wrapper on a frontier model in a task the lab will absorb; durable value sits below the model (proprietary data/infra) or above it (workflow, trust, distribution), rarely at the model layer itself."
+    ],
+    "links": [
+      "Concept - Token Price Deflation",
+      "Concept - Moats in the AI Application Layer",
+      "Concept - The Capability-Reliability Gap",
+      "Concept - METR Time Horizons",
+      "Concept - The Evaluation Gap",
+      "Deep Dive - Bubble or Boom",
+      "Deep Dive - AI and the Labor Market",
+      "Reference - The 2026 Navigation Cheatsheet",
+      "Reference - Model Genealogy"
+    ]
+  }
+]

@@ -1,0 +1,404 @@
+{
+  "domain": "24 - Trajectory & Navigation",
+  "slug": "trajectory",
+  "notes": [
+    {
+      "title": "Concept - Benchmark Saturation",
+      "type": "concept",
+      "level": "surface",
+      "scope": "IN: the phenomenon of frontier models clustering near the ceiling on capability benchmarks and why that makes leaderboard scores useless as a differentiator or purchasing signal, the resulting treadmill of ever-harder benchmarks, and why a high score does not mean a task is solved. OUT: eval methodology and statistics (link Concept - Statistical Rigor in Model Evaluation, 13), contamination-detection mechanics (link Concept - Benchmark Contamination, 13), the benchmark-vs-real-work gap for coding (link Concept - The Capability-Reliability Gap, 20).",
+      "key_points": [
+        "MMLU (Hendrycks et al. 2020) launched at ~32% frontier accuracy; by 2026 frontier models cluster at 92%+ (E2/E3, Stanford AI Index 2025 + multiple 2026 leaderboards), so a 1-2 point gap is within noise and no longer separates models.",
+        "Saturation drives a benchmark treadmill: as MMLU/HumanEval/GSM8K topped out, the field moved to MMLU-Pro, GPQA-Diamond (Rein et al. 2023, 'Google-proof' grad science), ARC-AGI-2, and SWE-bench Verified (E2).",
+        "Benchmarks built explicitly to resist saturation still get climbed: Humanity's Last Exam (CAIS/Scale, 2025) and FrontierMath (Epoch, 2024) scored single digits at launch (HLE ~3-9%, FrontierMath ~2%) but rise fast (E2, single-leaderboard reads, as of 2026).",
+        "Saturation is not 'solved': 92% MMLU coexists with failures on tasks humans find trivial, and benchmark score is a weak proxy for deployed reliability (link Concept - The Capability-Reliability Gap, 20).",
+        "Contamination inflates saturated scores: OpenAI's 2025 SWE-bench audit found training-data overlap across frontier models and ~59% of 'hard' tasks had flawed tests (E2, OpenAI 2025), so a topped-out benchmark may be partly memorized.",
+        "Non-obvious: by 2026 'new SOTA on benchmark X' is nearly meaningless as a buy signal; the useful trajectory signal moved to human-time horizon metrics (link Concept - METR Time Horizons) and to your own task-specific eval (link Concept - The Evaluation Gap, 23)."
+      ],
+      "links": [
+        "Concept - METR Time Horizons",
+        "Concept - The Capability-Reliability Gap",
+        "Concept - The Evaluation Gap",
+        "Reference - The AI Forecasting Track Record",
+        "Deep Dive - Bubble or Boom",
+        "Concept - The AGI Timeline Debate",
+        "Reference - Developer Productivity Studies",
+        "Reference - AI Market Sizing Claims",
+        "Concept - Benchmark Contamination",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Concept - The Emergent Abilities Debate"
+      ]
+    },
+    {
+      "title": "Concept - METR Time Horizons",
+      "type": "concept",
+      "level": "core",
+      "scope": "IN: METR's task-completion time-horizon metric — the length in human-time of task a model completes at a given success rate — the 'Measuring AI Ability to Complete Long Tasks' paper (Kwa et al./METR, March 2025), the ~7-month doubling accelerating to ~4 months, the Time Horizon 1.1 update (Jan 2026), the 50% vs 80% reliability gap, and what the metric captures that static benchmarks miss. OUT: the developer slowdown RCT (link Breakdown - The METR Developer Slowdown RCT, 20), benchmark saturation generally (link Concept - Benchmark Saturation), scaling-law mechanics (link Concept - Scaling Laws, 04).",
+      "key_points": [
+        "The metric: fit success-rate vs human-task-duration and report the task length at which the model hits 50% success, converting capability into a human-time unit instead of a % on a fixed set (E3, Kwa et al./METR 2025 methods).",
+        "Headline trend: the 50%-horizon doubled roughly every 7 months over 2019-2025, from ~2s (GPT-2) to ~50 min (Claude 3.7 Sonnet) to ~1.5-2 hr (o3), on a 170-task software/cyber/reasoning/ML suite (E2, METR 2025).",
+        "Acceleration and update: over 2024-2025 the doubling time shortened to ~4 months; METR's Time Horizon 1.1 (Jan 2026) reports frontier 50%-horizons in the multi-hour-to-~16-hour range (E2, single-org, fast-moving — date-stamp).",
+        "The 50/80 gap: the 80%-reliability horizon is roughly 5x shorter than the 50% horizon — models do far shorter tasks reliably than they do sometimes; this is the quantitative face of the capability-reliability gap (link Concept - The Capability-Reliability Gap, 20).",
+        "Cross-domain check: METR analyzed ~9 other benchmarks (math, robotics, computer use, self-driving) and found broadly similar doubling rates, so the trend is not an artifact of one suite (E2, METR 2025).",
+        "Extrapolation is load-bearing and contested: naive extrapolation puts month-long tasks in the late 2020s, but the curve could bend from data/compute limits (link Concept - The Data Wall, Deep Dive - The AI Compute Buildout) or from messy real tasks lacking clean success signals (E1/E0, extrapolation).",
+        "Non-obvious: the metric only covers tasks with a checkable success criterion, so open-ended, context-heavy, judgment work is under-represented — horizon numbers overstate readiness for exactly the jobs people worry about (link Concept - The Evaluation Gap, 23)."
+      ],
+      "links": [
+        "Concept - Benchmark Saturation",
+        "Concept - The Capability-Reliability Gap",
+        "Breakdown - The METR Developer Slowdown RCT",
+        "Concept - The AGI Timeline Debate",
+        "Concept - Automated AI Research and Takeoff",
+        "Reference - The AI Forecasting Track Record",
+        "Deep Dive - Agentic Coding in Production",
+        "Concept - The Data Wall",
+        "Concept - Scaling Laws",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Gotchas - Agents in Production"
+      ]
+    },
+    {
+      "title": "Concept - The AGI Timeline Debate",
+      "type": "concept",
+      "level": "core",
+      "scope": "IN: the honest spread of AGI/HLMI/transformative-AI forecasts — definitional chaos, the expert-survey evidence, aggregator markets, model-based methods, and the named short vs long camps, with the spread presented rather than averaged. OUT: the recursive-self-improvement takeoff mechanism (link Concept - Automated AI Research and Takeoff), forecasting calibration and error direction (link Reference - The AI Forecasting Track Record), scaling-law mechanics (link Concept - Scaling Laws, 04).",
+      "key_points": [
+        "Definitional chaos first: 'AGI', 'HLMI', 'transformative AI', and 'superintelligence' name different targets; OpenAI's charter, Metaculus's operational definitions, and Morris et al. (DeepMind 2023, 'Levels of AGI') all differ, so much timeline disagreement is partly definitional (E2).",
+        "Expert surveys: Grace et al. (AI Impacts) surveyed thousands of published AI researchers; median 50%-HLMI moved from 2060 (2022) to 2047 (2023) — a 13-year jump in one year (E2, single survey series with response/selection bias).",
+        "Aggregator markets: Metaculus community 'weak AGI' median fell from ~2055 (Jan 2022) to ~2033 (2025), with ~25% by 2029 (E2, prediction market, as of early 2026).",
+        "Model-based: Cotra's biological-anchors report (Open Phil, 2020) put median transformative AI ~2050, updated to ~2040 in 2022, spanning 20+ orders of magnitude of compute and 'fragile to parameter choices' by its author (E1, model).",
+        "The camps, named and unaveraged: short — Amodei ('Machines of Loving Grace', 2024, powerful AI ~2026-27), Kokotajlo (AI-2027); long/skeptic — LeCun (LLMs are an off-ramp needing new architectures), Marcus (reliability wall). Present as a spread, never a mean (STANDARDS §8).",
+        "Why medians compressed: GPT-4, reasoning models, and the METR horizon trend (link) pulled estimates in, but survey medians still sit ~2 decades out, so 'AGI imminent' is a tail view, not consensus (E1).",
+        "Non-obvious: forecasters who engage most with AI (Samotsvety ~28% by 2030) run shorter than generic superforecasters, while the loudest short timelines come from inside labs with fundraising incentives and selection effects — provenance matters as much as the number (E1; link Reference - The AI Forecasting Track Record)."
+      ],
+      "links": [
+        "Concept - METR Time Horizons",
+        "Concept - Automated AI Research and Takeoff",
+        "Reference - The AI Forecasting Track Record",
+        "Concept - Benchmark Saturation",
+        "Deep Dive - Bubble or Boom",
+        "Concept - The Data Wall",
+        "Lore - Failed AI Predictions",
+        "Reference - The Open Questions Ledger",
+        "Concept - Scaling Laws",
+        "Concept - The Emergent Abilities Debate",
+        "Reference - Model Genealogy"
+      ]
+    },
+    {
+      "title": "Concept - The Data Wall",
+      "type": "concept",
+      "level": "core",
+      "scope": "IN: the projected exhaustion of high-quality human text for pretraining — Epoch's estimate and window, overtraining pulling it forward, why it is a quality wall not a byte wall, and the escape routes (synthetic data, multimodal, RL/RLVR) with their honest status as of 2026. OUT: scaling-law and compute-optimal mechanics (link Concept - Scaling Laws, 04), synthetic-data generation internals (link Concept - Synthetic Training Data, 05), the physical compute buildout (link Deep Dive - The AI Compute Buildout).",
+      "key_points": [
+        "Claim: the stock of publicly available human-generated text is ~300T tokens, and training runs are projected to consume it roughly 2026-2032, with Epoch's front-end estimate revised to ~2028 (E1/E2, Villalobos et al. 2022, updated 2024-2026 — a model, not a measurement).",
+        "Overtraining pulls it in: training smaller models on far more tokens for cheap inference (Llama-3-style) burns the stock faster than compute-optimal Chinchilla scaling would (E2, Epoch; ties to link Concept - Scaling Laws, 04).",
+        "It is a quality wall, not a byte wall: raw web bytes are enormous, but dedup plus quality filtering (link Concept - Deduplication at Scale, 05) leaves far less usable high-quality text, and the tapped high-quality fraction is what runs low (E1).",
+        "Escape routes and status: synthetic data (link Concept - Synthetic Training Data, 05) works in some domains but risks collapse; multimodal adds tokens of uncertain value; RLVR/reasoning (link Concept - GRPO and RL with Verifiable Rewards, 06) shifts the bottleneck from data to verifiable environments and compute — arguably why the wall matters less than feared by 2026 (E1).",
+        "Why it is contested: Villalobos says techniques shifted the timeline, not the underlying scarcity; skeptics note 2024-26 frontier gains came from post-training/RL, not more pretraining data — evidence the wall is being routed around (E1).",
+        "Non-obvious: the data wall's real bite is economic, not physical — it removes the cheapest scaling lever ('just add data') and forces spend toward compute, synthetic pipelines, and RL environments, reshaping lab economics and the buildout (link Deep Dive - The AI Compute Buildout, Breakdown - Frontier Lab Economics, 22)."
+      ],
+      "links": [
+        "Concept - METR Time Horizons",
+        "Deep Dive - The AI Compute Buildout",
+        "Deep Dive - Bubble or Boom",
+        "Concept - The AGI Timeline Debate",
+        "Breakdown - Frontier Lab Economics",
+        "Reference - The Open Questions Ledger",
+        "Concept - What Stays Valuable Through Any Scenario",
+        "Reference - The AI Forecasting Track Record",
+        "Concept - Scaling Laws",
+        "Concept - Synthetic Training Data",
+        "Concept - Deduplication at Scale",
+        "Concept - GRPO and RL with Verifiable Rewards"
+      ]
+    },
+    {
+      "title": "Playbook - Picking Profitable AI Use Cases",
+      "type": "playbook",
+      "level": "core",
+      "scope": "IN: an end-to-end procedure for selecting AI use cases that actually pay off — filtering by error tolerance, choosing augmentation before automation, scoring value against verification and integration cost, buy-vs-build under deflation, and setting a kill criterion. OUT: the unit-economics math (link Concept - Unit Economics of LLM Products, 22), the build-vs-buy tradeoff in detail (link Decision - Build vs Buy vs Wrap, 22), per-function benchmarks (link Reference - AI Impact by Business Function, 21), enterprise adoption pitfalls (link Gotchas - Enterprise AI Adoption, 23).",
+      "key_points": [
+        "Step 1 — filter by error tolerance: map the task onto the capability-reliability gap. Tasks where a wrong answer is cheap to catch and undo (draft-then-review) fit today; unattended high-stakes correctness mostly does not, per the METR 50/80 reliability gap (E2/E3; link Concept - METR Time Horizons, Concept - The Capability-Reliability Gap, 20).",
+        "Step 2 — augmentation before automation: the Anthropic Economic Index (2025-26) finds ~52% augmentation vs ~45% automation usage, and the Brynjolfsson-Li-Raymond call-center RCT (2023) shows +14% overall but +34% for novices and ~0 for experts — value concentrates where AI closes a skill gap (E3 RCT / E2 AEI).",
+        "Step 3 — score value = (value per task) x (volume) x (automatable fraction) − (verification + integration cost); high-volume, low-stakes, language-in/language-out tasks (support deflection, drafting, coding assist) dominate real wins (link Concept - Support Deflection Economics, 21; Reference - AI Impact by Business Function, 21).",
+        "Step 4 — verification cost is the hidden killer: if checking the output costs as much as doing the task the ROI evaporates, which is why MIT NANDA (2025) found ~95% of pilots showed no P&L impact — prefer tasks with cheap verification like tests, schemas, or human skim (E2; link Concept - The Pilot-to-Production Gap, 23).",
+        "Step 5 — buy vs build vs wrap: default to buy/wrap for commodity capability given ~10x/yr token-price deflation and model churn; build only where you own proprietary data or a durable workflow (link Concept - Token Price Deflation, 22; Decision - Build vs Buy vs Wrap, 22; Concept - Moats in the AI Application Layer, 22).",
+        "Step 6 — set a kill criterion up front: define the 6-month measurable-KPI bar MIT used to separate the 5% that worked; if a pilot cannot name its metric and baseline, do not start it (link Concept - The Evaluation Gap, 23).",
+        "When it goes wrong (branch table): no baseline → stop; error too costly → narrow scope or add a human gate; margins thin → buy instead of build; verification overhead rising → the task is a poor fit, not a prompt problem (link Reference - The 2026 Navigation Cheatsheet)."
+      ],
+      "links": [
+        "Concept - The Capability-Reliability Gap",
+        "Concept - Support Deflection Economics",
+        "Concept - The Pilot-to-Production Gap",
+        "Decision - Build vs Buy vs Wrap",
+        "Reference - The 2026 Navigation Cheatsheet",
+        "Concept - METR Time Horizons",
+        "Concept - What Stays Valuable Through Any Scenario",
+        "Concept - Token Price Deflation",
+        "Deep Dive - AI and the Labor Market",
+        "Reference - AI Impact by Business Function",
+        "Concept - Moats in the AI Application Layer",
+        "Concept - The Evaluation Gap",
+        "Gotchas - Enterprise AI Adoption"
+      ]
+    },
+    {
+      "title": "Reference - The 2026 Navigation Cheatsheet",
+      "type": "reference",
+      "level": "core",
+      "scope": "IN: a compact, heavily date-stamped lookup of where the money and the safe bets are as of mid-2026 — profitable-today plays, overhyped/unproven plays, the cost curve, the reliability frontier, the forecast spread, and the no-regret moves that hold across bubble or boom, each row tiered E0-E3. OUT: the reasoning behind each row (link Playbook - Picking Profitable AI Use Cases, Deep Dive - Bubble or Boom, Concept - What Stays Valuable Through Any Scenario) and per-function deployment detail (link Reference - AI Impact by Business Function, 21).",
+      "key_points": [
+        "'Profitable today' table (as of 2026, tier per row): coding assistants (Copilot-class, mixed RCT evidence, link Reference - Developer Productivity Studies, 20); support deflection (Klarna-class but walked back, link Breakdown - Klarna's AI Customer Service Bet, 21); medical scribes (strong clinician-time evidence, link Breakdown - AI Medical Scribes, 21); content/marketing drafting (link Reference - AI Impact by Business Function, 21).",
+        "'Overhyped / unproven' table: fully-autonomous agents in high-stakes unattended work (link Concept - The Capability-Reliability Gap, 20), enterprise pilots with no KPI (~95% no P&L, link Concept - The Pilot-to-Production Gap, 23), and 'AI replaces headcount' claims (link Lore - Failed AI Predictions).",
+        "Cost-curve row: inference for GPT-4-class fell ~1000x from 2023 (~$30/M tokens) to 2026 (~$0.05-0.5/M) across providers — assume continued ~10x/yr deflation when sizing margins (E2, provider price histories; link Concept - Token Price Deflation, 22).",
+        "Reliability-frontier row: current 50%-horizon is multi-hour but the 80%-horizon is ~5x shorter, so design for supervised, checkable tasks (E2, METR; link Concept - METR Time Horizons).",
+        "Forecast-spread row: AGI/HLMI medians span ~2030 (short camp) to ~2047-2050 (surveys and bio-anchors) — plan for a range, not a date (E1/E2; link Concept - The AGI Timeline Debate, Reference - The AI Forecasting Track Record).",
+        "'No-regret moves' row: own proprietary data and workflow, stay model-agnostic against churn and deflation, instrument evals, and buy commodity capability — these hold in both bubble and boom (link Concept - What Stays Valuable Through Any Scenario, Deep Dive - Bubble or Boom, Decision - Build vs Buy vs Wrap, 22).",
+        "Footnotes: every $ and % is date-stamped mid-2026 and tier-marked, vendor-claimed figures are flagged, and this note is expected to age fast."
+      ],
+      "links": [
+        "Reference - AI Impact by Business Function",
+        "Concept - Token Price Deflation",
+        "Concept - METR Time Horizons",
+        "Concept - What Stays Valuable Through Any Scenario",
+        "Deep Dive - Bubble or Boom",
+        "Playbook - Picking Profitable AI Use Cases",
+        "Concept - The Pilot-to-Production Gap",
+        "Breakdown - Klarna's AI Customer Service Bet",
+        "Concept - The Capability-Reliability Gap",
+        "Breakdown - AI Medical Scribes",
+        "Reference - The AI Forecasting Track Record"
+      ]
+    },
+    {
+      "title": "Concept - What Stays Valuable Through Any Scenario",
+      "type": "concept",
+      "level": "surface",
+      "scope": "IN: reasoning about which skills, assets, and business positions hold value whether AI plateaus, keeps scaling, or bubbles — the invariants of proprietary data/distribution, verification and judgment, taste and problem-selection, integration, and trust/liability ownership, framed against the scenario spread. OUT: specific profitable plays (link Reference - The 2026 Navigation Cheatsheet, Playbook - Picking Profitable AI Use Cases), the theory of moats (link Concept - Moats in the AI Application Layer, 22), the labor-market data (link Deep Dive - AI and the Labor Market).",
+      "key_points": [
+        "Frame: durable value is value not proportional to raw model capability, because capability is deflating (~10x/yr on cost, link Concept - Token Price Deflation, 22) and commoditizing across labs (link Reference - Model Genealogy, 19) — owning the model matters less than owning what it plugs into.",
+        "Invariant 1 — proprietary data and distribution: the app-layer moat is data and workflow lock-in, not prompts (link Concept - Moats in the AI Application Layer, 22); thin wrappers with no data are most exposed to both deflation and frontier labs moving up-stack.",
+        "Invariant 2 — verification and judgment: because the 80%-reliability horizon lags the 50% horizon (link Concept - METR Time Horizons, Concept - The Capability-Reliability Gap, 20), whoever can cheaply verify and take liability for AI output captures value the model cannot (link Concept - The Evaluation Gap, 23).",
+        "Invariant 3 — taste and problem-selection: choosing the right task is the scarce skill once execution is cheap; MIT's 5%-that-worked bought focused solutions rather than building broadly (link Concept - The Pilot-to-Production Gap, 23).",
+        "Invariant 4 — integration and trust: the Anthropic Economic Index shows augmentation still leads automation (~52/45, 2026), so human-in-the-loop, systems-integration, and accountability roles persist even as tasks automate (E2; link Deep Dive - AI and the Labor Market).",
+        "Scenario robustness: these hold in a boom (capability is cheap, complements win) and in a bubble/plateau (capital dries up, only real-ROI positions survive) — link Deep Dive - Bubble or Boom.",
+        "Non-obvious: the least defensible position is a thin wrapper on a frontier model in a task the lab will absorb; durable value sits below the model (proprietary data/infra) or above it (workflow, trust, distribution), rarely at the model layer itself."
+      ],
+      "links": [
+        "Concept - Token Price Deflation",
+        "Concept - Moats in the AI Application Layer",
+        "Concept - The Capability-Reliability Gap",
+        "Concept - METR Time Horizons",
+        "Concept - The Evaluation Gap",
+        "Deep Dive - Bubble or Boom",
+        "Deep Dive - AI and the Labor Market",
+        "Reference - The 2026 Navigation Cheatsheet",
+        "Reference - Model Genealogy"
+      ]
+    },
+    {
+      "title": "Deep Dive - Bubble or Boom",
+      "type": "deep-dive",
+      "level": "advanced",
+      "scope": "IN: market-level scenario analysis of AI investment ~2024-2026 — the capex-vs-revenue gap, circular financing, the dot-com/telecom-fiber parallel, the named bear and bull cases, and a structured 'which world are we in' framework that keeps 'bubble' and 'transformative' separate. OUT: per-product unit economics (link Concept - Unit Economics of LLM Products, 22), frontier-lab burn detail (link Breakdown - Frontier Lab Economics, 22), market-sizing methodology (link Reference - AI Market Sizing Claims, 22).",
+      "key_points": [
+        "The gap, quantified: Sequoia's David Cahn ('AI's $600B Question', June 2024) estimated ~$600B/yr of AI revenue is needed to justify the infra spend (Nvidia run-rate x2 for total TCO x2 for margin), and the gap widened through 2024 (E1, named analyst).",
+        "Goldman's Jim Covello (2024): ~$1T to be spent on data centers, chips, and grid 'with little to show for it so far', arguing AI is too expensive to solve the $1T-scale problems needed to pay back — a bank equity-research view, contested inside GS (E1, named analyst).",
+        "Circular financing (2026): Nvidia invests in OpenAI, OpenAI commits hundreds of billions to Oracle and other clouds, clouds buy Nvidia GPUs; 2026 estimates put such arrangements at $800B+, which makes demand look organic and can magnify losses if it unwinds (E1/E2, Bloomberg 2026 and others).",
+        "Historical parallel, named: late-1990s telecom vendor-financed fiber overbuild collapsed when demand lagged and bandwidth prices sank — the closest structural analog to today's GPU/data-center vendor financing (E2, historical).",
+        "Bear specifics: Michael Burry (2025-26) argues a 2-3yr GPU useful life vs longer book depreciation overstates hyperscaler profits, with top-4 tech capex ~$650-700B by 2026 against declining marginal AI returns — a disclosed short position, not neutral analysis (E1, named short-seller).",
+        "Bull specifics: inference cost fell ~1000x 2023-2026 (link Concept - Token Price Deflation, 22), expanding demand (Jevons); real revenue is growing fast even if behind capex; and MIT's 95%-fail is about pilot execution, not capability (link Concept - The Pilot-to-Production Gap, 23).",
+        "Synthesis framework: separate 'bubble in equities' from 'bubble in real capex' from 'the technology works' — all three can be true at once (as with the internet ~2000); track revenue/capex ratio, circular-financing share, GPU depreciation reality, and real usage (tokens, DAU) (E1).",
+        "Non-obvious: even a real bubble says nothing about whether AI is useful — dot-com was a genuine bubble and the internet still reshaped the economy; 'bubble' and 'transformative' are orthogonal, and conflating them is the most common analytical error (link Concept - What Stays Valuable Through Any Scenario, Concept - The AGI Timeline Debate)."
+      ],
+      "links": [
+        "Concept - Token Price Deflation",
+        "Breakdown - Frontier Lab Economics",
+        "Concept - Unit Economics of LLM Products",
+        "Reference - AI Market Sizing Claims",
+        "Concept - The Pilot-to-Production Gap",
+        "Concept - Moats in the AI Application Layer",
+        "Deep Dive - The AI Compute Buildout",
+        "Concept - The Data Wall",
+        "Concept - What Stays Valuable Through Any Scenario",
+        "Reference - The AI Forecasting Track Record",
+        "Concept - The AGI Timeline Debate",
+        "Reference - The 2026 Navigation Cheatsheet",
+        "Lore - Failed AI Predictions",
+        "Reference - AI Impact by Business Function",
+        "Concept - Cost Engineering for LLM Applications",
+        "Concept - Scaling Laws"
+      ]
+    },
+    {
+      "title": "Deep Dive - The AI Compute Buildout",
+      "type": "deep-dive",
+      "level": "advanced",
+      "scope": "IN: the physical scaling forward — Stargate, hyperscaler capex, the power bottleneck, Nvidia generation cadence, GPU depreciation economics, and whether the buildout can be absorbed. OUT: the finance/bubble framing (link Deep Dive - Bubble or Boom), lab P&L (link Breakdown - Frontier Lab Economics, 22), GPU microarchitecture (link Concept - GPU Memory Hierarchy, 08), data scarcity (link Concept - The Data Wall).",
+      "key_points": [
+        "Stargate: announced Jan 2025 (OpenAI/Oracle/SoftBank), $500B over 4 years, up to 10GW; by mid-2026 ~7GW planned and ~$400B committed, first Abilene TX site live in 2025, Vera Rubin-class compute from 2026 (E2, OpenAI + reporting, company-and-reported).",
+        "Scale of capex: top-4 US hyperscalers are projected at ~$650-700B combined capex by 2026, a majority AI-driven — the largest infrastructure buildout in the history of computing (E1/E2, analyst + reporting).",
+        "Power is the binding constraint, not chips: GW-scale campuses strain grids, pushing operators to on-site gas turbines, delayed coal retirements, and nuclear PPAs; a single frontier site now rivals a mid-size city's draw (E2, reporting).",
+        "GPU depreciation is the accounting fault line: a ~2-3yr useful life (Burry's argument) vs 5-6yr book schedules inflates reported margins and directly affects whether the buildout is profitable (E1, contested; link Deep Dive - Bubble or Boom).",
+        "What must be true to absorb it: tokens served must keep ~10x-ing, and deflation (link Concept - Token Price Deflation, 22) is both the demand driver and the pressure on per-unit revenue — the buildout is a bet that Jevons wins (E1).",
+        "Constraints that could bend the curve: multi-year power and permitting timelines, HBM/packaging supply, and the data wall shifting spend from pretraining to inference and RL compute (link Concept - The Data Wall) — all feed the capability-forecast extrapolations (link Concept - METR Time Horizons, Reference - The AI Forecasting Track Record).",
+        "Non-obvious: the buildout front-runs demand by years (foundations poured for compute landing 2026-27), so a 12-18 month demand air-pocket would not disprove the thesis but could trigger the financial unwind — timing risk, not thesis risk (link Deep Dive - Bubble or Boom)."
+      ],
+      "links": [
+        "Concept - Token Price Deflation",
+        "Breakdown - Frontier Lab Economics",
+        "Deep Dive - Bubble or Boom",
+        "Concept - The Data Wall",
+        "Concept - METR Time Horizons",
+        "Reference - The AI Forecasting Track Record",
+        "Concept - The AGI Timeline Debate",
+        "Concept - Automated AI Research and Takeoff",
+        "Reference - AI Market Sizing Claims",
+        "Concept - Unit Economics of LLM Products",
+        "Reference - The 2026 Navigation Cheatsheet",
+        "Reference - The Open Questions Ledger",
+        "Concept - GPU Memory Hierarchy",
+        "Reference - Memory Math for Transformers",
+        "Concept - Scaling Laws",
+        "Concept - Cost Engineering for LLM Applications"
+      ]
+    },
+    {
+      "title": "Deep Dive - AI and the Labor Market",
+      "type": "deep-dive",
+      "level": "advanced",
+      "scope": "IN: the measured labor-market evidence as of 2026 — the call-center RCT, the Stanford payroll panel, the Anthropic Economic Index telemetry, the augment-vs-automate pattern, and why projections are low-tier and historically wrong. OUT: forecasting calibration (link Reference - The AI Forecasting Track Record), per-function deployment detail (link Reference - AI Impact by Business Function, 21), the developer-specific productivity data (link Reference - Developer Productivity Studies, 20).",
+      "key_points": [
+        "Cleanest causal evidence — an RCT: Brynjolfsson, Li & Raymond (NBER 2023) at a Fortune-500 support firm found +14% issues resolved overall, +34% for novices, and ~0 for experts, so AI compresses the skill distribution by diffusing tacit expertise (E3, RCT).",
+        "Best population evidence: Stanford Digital Economy Lab 'Canaries in the Coal Mine' (Brynjolfsson et al., ADP payroll of ~25M workers, Aug 2025, updated) found a ~13% relative employment decline for 22-25yos in the most AI-exposed jobs while older cohorts held, with the effect growing ~0.5pp/month (E2/E3, large panel, single team).",
+        "Labs' own telemetry: the Anthropic Economic Index (2025-26) reports augmentation ~52% vs automation ~45% of usage, computer/math tasks ~one-third of Claude.ai and ~half of API traffic, and entry-level hiring into exposed roles slowed ~14% vs a counterfactual with no clear aggregate unemployment signal in exposed occupations as of early 2026 (E2, company data).",
+        "The pattern that matters: automation shows up first at the entry level — the tasks that are the training ground — threatening the talent pipeline more than incumbent employment (the 'canary' framing) (E2).",
+        "Augment-then-automate trajectory: augmentation still leads but the automation share rose over 2025-26, and API users automate more than consumers, so first-party telemetry lags where automation actually goes (E2, AEI).",
+        "Projections are E1 and historically bad: prior 'X% of jobs automatable' studies (Frey-Osborne 2013 at 47%; McKinsey/PwC waves) missed on timing and net effect — treat any headline labor forecast as low-tier (E1; link Reference - The AI Forecasting Track Record, Lore - Failed AI Predictions).",
+        "Non-obvious: aggregate unemployment is the wrong dashboard — the early signal is compositional (who gets hired, at what level, in which tasks), and by the time it shows in the unemployment rate the adjustment is well underway (E1/E2)."
+      ],
+      "links": [
+        "Concept - Support Deflection Economics",
+        "Reference - AI Impact by Business Function",
+        "Reference - Developer Productivity Studies",
+        "Concept - The Capability-Reliability Gap",
+        "Concept - METR Time Horizons",
+        "Reference - The AI Forecasting Track Record",
+        "Lore - Failed AI Predictions",
+        "Concept - What Stays Valuable Through Any Scenario",
+        "Deep Dive - Bubble or Boom",
+        "Concept - The Pilot-to-Production Gap",
+        "Reference - The Open Questions Ledger",
+        "Concept - The AGI Timeline Debate",
+        "Breakdown - The METR Developer Slowdown RCT"
+      ]
+    },
+    {
+      "title": "Reference - The AI Forecasting Track Record",
+      "type": "reference",
+      "level": "advanced",
+      "scope": "IN: a scorecard of how AI forecasting has actually done — aggregator calibration, the systematic direction of error, expert-survey volatility, model-based fragility, superforecasters-vs-insiders, and a usable rule for weighting any AI forecast. OUT: the timeline debate content itself (link Concept - The AGI Timeline Debate), the takeoff scenario (link Concept - Automated AI Research and Takeoff), the folklore of specific busted predictions (link Lore - Failed AI Predictions).",
+      "key_points": [
+        "Calibration baseline: Metaculus superforecasters remain the top-performing cohort (Brier ~0.09 on benchmark subsets), decisively beating the general crowd and current LLM forecasters, though calibration on AI-specific questions is noisier (E2).",
+        "Systematic error direction: the field has under-forecast raw scaling, compute growth, and benchmark progress (survey medians kept getting revised earlier) while over-forecasting reliable open-ended autonomy and, historically, self-driving ('next year' since ~2015) (E1/E2).",
+        "Expert surveys are volatile: the Grace/AI Impacts median HLMI swung 2060 to 2047 in a single year, evidence that survey point-estimates anchor to recent headlines rather than stable models (E2).",
+        "Model-based methods are fragile by construction: Cotra's bio-anchors spans 20+ orders of magnitude and its median moved 2050 to 2040 on modest input changes — useful as structure, weak as a point forecast (E1, author-acknowledged).",
+        "Who to weight more: forecasters who engage deeply with AI (Samotsvety) and track-record-bearing aggregators beat both generic superforecasters (who mis-forecast compute) and single-expert pronouncements; inside-lab forecasts carry selection and incentive bias (E1).",
+        "The usable output — how to weight a forecast: prefer distributions over dates, discount anything with a product or fundraising incentive, weight aggregators with track records, and treat sub-decade 'AGI' points as a tail not a center (E1; link Concept - The AGI Timeline Debate, Reference - The 2026 Navigation Cheatsheet).",
+        "Footnote: nearly every figure here is a moving target, date-stamped mid-2026; forecasting the forecasters is itself E1."
+      ],
+      "links": [
+        "Concept - The AGI Timeline Debate",
+        "Concept - METR Time Horizons",
+        "Lore - Failed AI Predictions",
+        "Concept - Automated AI Research and Takeoff",
+        "Reference - The Open Questions Ledger",
+        "Reference - AI Market Sizing Claims",
+        "Reference - The 2026 Navigation Cheatsheet",
+        "Concept - Benchmark Saturation",
+        "Concept - Statistical Rigor in Model Evaluation"
+      ]
+    },
+    {
+      "title": "Concept - Automated AI Research and Takeoff",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "IN: the mechanism the fast-timeline case rests on — AI accelerating AI R&D (recursive self-improvement), the AI-2027 scenario and its Dec-2025 walk-back, METR's RE-bench uplift measurements, the fast-vs-slow-takeoff distinction, and the empirical checks that would confirm or refute it. OUT: the broad timeline spread (link Concept - The AGI Timeline Debate), forecasting calibration (link Reference - The AI Forecasting Track Record), RL/GRPO training mechanics (link Concept - GRPO and RL with Verifiable Rewards, 06).",
+      "key_points": [
+        "Core claim: the fast-takeoff case is not 'scaling continues' but 'AI automates AI research', compressing the R&D loop — this is the load-bearing mechanism in AI-2027 (Kokotajlo, Lifland, Larsen, Dean, Alexander; AI Futures Project, April 2025) (E1, scenario).",
+        "AI-2027 specifics: superhuman-coder agents arrive ~early 2027 and automate AI R&D, driving a rapid capability ramp, with an explicit loss-of-control branch and a slowdown branch — the authors call it the scenario 'most likely to us', not a prediction (E1, self-labeled).",
+        "The walk-back, in the same breath: in Dec 2025 the AI Futures Project pushed the fully-autonomous-coding milestone from ~2027 to the early 2030s — the flagship short-timeline scenario moved its own dates within a year (E1/E2, the honesty check STANDARDS §8 requires).",
+        "Measurable proxies exist: METR's RE-bench and AI-R&D-uplift studies quantify how much current models actually speed up ML research tasks; as of 2026 the uplift is real but bounded, far from full automation (E2, METR; link Concept - METR Time Horizons).",
+        "Fast vs slow takeoff: 'fast' means R&D automation causes a sharp, discontinuous ramp; 'slow' means broad, diffuse, GDP-visible acceleration over years — the distinction drives wildly different navigation strategies (E1, Christiano/Hanson-lineage debate).",
+        "Refutation conditions: if the 80%-reliability horizon keeps lagging (link Concept - The Capability-Reliability Gap, 20), if RE-bench uplift plateaus, or if the data/compute walls bind (link Concept - The Data Wall, Deep Dive - The AI Compute Buildout), the fast loop stalls — name what you would watch (E1).",
+        "Non-obvious: the authors revising +3-5 years within a year is the strongest available evidence about takeoff forecasting — the mechanism is plausible but the timing is exactly the quantity forecasters are worst at (link Reference - The AI Forecasting Track Record, Lore - Failed AI Predictions)."
+      ],
+      "links": [
+        "Concept - METR Time Horizons",
+        "Concept - The AGI Timeline Debate",
+        "Reference - The AI Forecasting Track Record",
+        "Concept - The Capability-Reliability Gap",
+        "Concept - The Data Wall",
+        "Deep Dive - The AI Compute Buildout",
+        "Lore - Failed AI Predictions",
+        "Reference - The Open Questions Ledger",
+        "Deep Dive - Agentic Coding in Production",
+        "Concept - GRPO and RL with Verifiable Rewards",
+        "Gotchas - Agents in Production"
+      ]
+    },
+    {
+      "title": "Reference - The Open Questions Ledger",
+      "type": "reference",
+      "level": "frontier",
+      "scope": "IN: a maintained ledger of the genuinely unresolved questions that determine the trajectory, each stated as a crisp question with current evidence, the camps, and what would resolve it — data wall, reliability wall, bubble, takeoff, labor net effect, and AGI definition/timing. Marked E0/E1 by nature. OUT: the deep treatment of each question, which lives in the owning note it links to.",
+      "key_points": [
+        "Q: Does the data wall bind? State: pretraining data ~exhausting near 2028 (Epoch, E1) but RL/reasoning routes around it so far — resolves on whether frontier gains keep coming without more human text (link Concept - The Data Wall).",
+        "Q: Is there a reliability wall? The METR 50/80 horizon gap and the ~95% pilot-failure rate suggest reliability lags capability; open whether it is a fixable engineering gap or structural (E1; link Concept - The Capability-Reliability Gap, 20; Concept - The Pilot-to-Production Gap, 23).",
+        "Q: Bubble or boom? The capex-revenue gap and circular financing versus deflation-driven demand growth — resolves on the revenue/capex ratio and whether an unwind happens (E1; link Deep Dive - Bubble or Boom).",
+        "Q: Does AI automate AI research (takeoff)? RE-bench shows bounded uplift and AI-2027 walked its own dates back — open (E1; link Concept - Automated AI Research and Takeoff).",
+        "Q: What is the labor net effect? Early payroll signals at the entry level (Stanford ~13%) but no aggregate signal yet, and net job creation vs destruction is unresolved (E1/E2; link Deep Dive - AI and the Labor Market).",
+        "Q: When, if ever, AGI — and does the definition even cohere? Survey medians span 2033-2050 and definitions are incompatible, so the question is arguably ill-posed (E1; link Concept - The AGI Timeline Debate).",
+        "Meta: this ledger is explicitly E0/E1 — its value is stating questions crisply and tracking what evidence would move each; date-stamped mid-2026 and expected to churn (link Reference - The AI Forecasting Track Record)."
+      ],
+      "links": [
+        "Concept - The Data Wall",
+        "Concept - The Capability-Reliability Gap",
+        "Concept - The Pilot-to-Production Gap",
+        "Deep Dive - Bubble or Boom",
+        "Concept - Automated AI Research and Takeoff",
+        "Deep Dive - AI and the Labor Market",
+        "Concept - The AGI Timeline Debate",
+        "Reference - The AI Forecasting Track Record",
+        "Lore - Failed AI Predictions"
+      ]
+    },
+    {
+      "title": "Lore - Failed AI Predictions",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "IN: the war stories of confident AI predictions that busted — self-driving 'next year', 'radiologists obsolete', IBM Watson Health, the walked-back deployment wins, and the symmetric 'AI winter' bear calls — plus what the pattern teaches about weighting today's forecasts, with honest evidence status per story. OUT: the calibration scorecard (link Reference - The AI Forecasting Track Record), current live deployment outcomes (link Reference - AI Impact by Business Function, 21), the enterprise-adoption failure taxonomy (link Gotchas - Enterprise AI Adoption, 23).",
+      "key_points": [
+        "Self-driving 'solved next year': Musk promised full autonomy annually from ~2015 through the 2020s; narrow robotaxis arrived (Waymo) but general L5 did not on any promised date — the canonical over-optimistic capability forecast (well-documented, E2/E3).",
+        "'Radiologists will be obsolete': Hinton (2016) said stop training radiologists as they'd be replaced in 5-10 years; by 2026 radiologist demand grew and AI became a tool, not a replacement — the canonical task-vs-job confusion (well-documented, E2).",
+        "IBM Watson Health: marketed as a cancer-diagnosis revolution ~2013-2018 and sold off for parts ~2022 after clinical underperformance — the canonical enterprise-AI overpromise (well-documented, E2; sibling genre to link Lore - Hallucination Liability Incidents, 23).",
+        "Walked-back deployment wins: Klarna's 2024 'AI does the work of 700 agents' was softened in 2025 as it re-hired humans for quality — a live example of the claim-then-correction pattern (E2, company-claimed then walked back; link Breakdown - Klarna's AI Customer Service Bet, 21).",
+        "The bear side busts too: repeated 'AI winter is coming' and 'LLMs have plateaued' calls (post-GPT-3, post-GPT-4) were falsified by reasoning models and agentic gains — over-pessimism is a failure mode symmetric to over-hype (folklore, weakly sourced on specifics, E1).",
+        "The mechanism of the error: forecasters extrapolate a 50%-reliable demo (link Concept - METR Time Horizons) to deployment that needs ~99.9%, and confuse automating a task with eliminating a job (link Deep Dive - AI and the Labor Market, Concept - The Capability-Reliability Gap, 20).",
+        "Evidence status and the lesson: the durable directional lesson is that capability curves get under-forecast while reliability and adoption timelines get over-forecast; specific quotes range from well-documented (Hinton, Musk, Watson) to folklore, and are labeled as such (link Reference - The AI Forecasting Track Record)."
+      ],
+      "links": [
+        "Concept - METR Time Horizons",
+        "Concept - The Capability-Reliability Gap",
+        "Breakdown - Klarna's AI Customer Service Bet",
+        "Lore - Hallucination Liability Incidents",
+        "Reference - The AI Forecasting Track Record",
+        "Deep Dive - AI and the Labor Market",
+        "Concept - The AGI Timeline Debate",
+        "Deep Dive - Bubble or Boom",
+        "Gotchas - Enterprise AI Adoption"
+      ]
+    }
+  ]
+}

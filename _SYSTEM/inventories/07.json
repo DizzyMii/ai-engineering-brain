@@ -1,0 +1,561 @@
+{
+  "domain": "07 - Inference & Serving",
+  "slug": "inference-serving",
+  "notes": [
+    {
+      "title": "Concept - The Inference Request Lifecycle",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The end-to-end path of a single generation request through a serving stack: tokenize, prefill, autoregressive decode loop, sample, detokenize, stream. IN: what each stage does and where its cost lives. OUT: batching scheduler internals (link Concept - Continuous Batching), kernel internals (link 08), attention math (link 03).",
+      "key_points": [
+        "Path: HTTP request -> tokenizer encodes prompt to IDs -> prefill runs one forward pass over all prompt tokens and populates the KV cache -> decode loop runs one forward pass per generated token appending K,V each step -> sampler turns logits into a token ID -> incremental detokenizer converts IDs to text -> SSE/streaming chunks emitted until EOS/max_tokens/stop",
+        "Prefill is one parallel pass over N prompt tokens (compute-bound, saturates tensor cores); decode is N_gen sequential single-token passes (memory-bandwidth-bound, re-reads all weights each step) -- this asymmetry drives the entire field",
+        "Where latency lives: TTFT is dominated by prefill compute + queue wait (scales with prompt length); inter-token latency is dominated by decode step time (scales with model weight bytes / HBM bandwidth), roughly independent of prompt length once KV exists",
+        "Every decode step re-reads the full weight matrix from HBM regardless of how many tokens it produces; batching amortizes that read across concurrent requests, which is the mechanistic reason continuous batching exists",
+        "Stop conditions checked each step: EOS token id, max_tokens cap, and stop strings -- the last requires incremental detokenization because a stop string can straddle multiple tokens",
+        "The 'typewriter' streaming effect is literally the decode loop turning; a stalled stream means the request is queued or the batch is prefill-bound"
+      ],
+      "links": ["Concept - KV Cache", "Concept - Prefill and Decode Phases", "Concept - Continuous Batching", "Concept - Sampling and Decoding Parameters", "Concept - Streaming Detokenization", "Concept - Byte-Pair Encoding", "Deep Dive - The Transformer", "Concept - GPU Memory Hierarchy"]
+    },
+    {
+      "title": "Concept - Prefill and Decode Phases",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The two-phase structure of autoregressive inference: parallel compute-bound prefill vs sequential memory-bound decode, and why they have opposite hardware bottlenecks. IN: arithmetic intensity of each phase, why decode is bandwidth-bound, the implication for batching. OUT: full roofline derivation (link Concept - The Roofline Model), disaggregation and chunked prefill (own notes).",
+      "key_points": [
+        "Prefill: process all P prompt tokens in one forward pass; high arithmetic intensity, saturates tensor cores; latency roughly linear in P (attention adds an O(P^2) term at long context); MFU can reach 40-50%",
+        "Decode: one token per step for a batch of B sequences; must reload all model params from HBM every step (e.g. ~140 GB for a 70B model in fp16) so it is memory-bandwidth-bound; FLOPs are tiny relative to bytes moved",
+        "Arithmetic intensity of decode is roughly B FLOP/byte (one MAC per weight per sequence), so you need large batch to climb off the memory-bound region toward the compute roof -- the mechanistic reason batching matters for throughput but not single-stream latency",
+        "Decode step time at batch 1 is approximately weight_bytes / HBM_bandwidth: 140 GB / 3.35 TB/s on an H100 is ~42 ms/token before overhead; single-stream decode MFU is often under 5%",
+        "Consequence: prefill and decode want different batch sizes and even different hardware, motivating chunked prefill (interleave) and disaggregation (physically separate pools)",
+        "Rule of thumb practitioners internalize: prefill is priced in FLOPs, decode is priced in memory bandwidth; a GPU with 2x bandwidth roughly halves decode latency but barely moves prefill"
+      ],
+      "links": ["Concept - The Roofline Model", "Concept - Continuous Batching", "Concept - Chunked Prefill", "Concept - Prefill-Decode Disaggregation", "Concept - KV Cache", "Concept - GPU Memory Hierarchy", "Reference - Inference Performance Math", "Concept - Latency, Throughput, and Cost in LLM Serving"]
+    },
+    {
+      "title": "Concept - Sampling and Decoding Parameters",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The mechanics of turning a logit vector into a token each step: temperature, top-k, top-p/nucleus, and the repetition-control penalties, plus how their ordering changes the result. IN: the math of each transform and typical values. OUT: prompt-level strategy for choosing them (link 09), exotic community samplers (link Concept - Advanced Samplers (min-p, Mirostat, DRY)), grammar constraints (link Concept - Constrained Decoding).",
+      "key_points": [
+        "Pipeline: raw logits -> optional penalties -> temperature scaling (divide logits by T) -> softmax -> truncation (top-k keeps k highest, top-p/nucleus keeps the smallest set whose cumulative prob >= p, Holtzman et al. 2019) -> renormalize -> multinomial draw; greedy = argmax = T->0",
+        "Temperature scales logits before softmax: T<1 sharpens (more deterministic), T>1 flattens (more diverse); T is applied to logits not probabilities, so its effect is exponential in the softmax",
+        "Repetition control: presence_penalty (flat subtract once a token appeared), frequency_penalty (subtract proportional to count) as in the OpenAI API; repetition_penalty (divide logits, CTRL / Keskar et al. 2019); no_repeat_ngram_size hard-bans repeated n-grams",
+        "Order-of-operations is a real footgun: HuggingFace applies temperature then top-k/top-p, but some stacks apply top-k before temperature; penalty-before-vs-after-temperature also differs -- identical params give different distributions across vLLM / TGI / llama.cpp / the OpenAI API",
+        "Typical values: chat T 0.7-1.0 with top_p 0.9-0.95; extraction/coding T 0-0.3; presence/frequency penalties 0-0.5 (>1.0 starts avoiding common words and degrading grammar)",
+        "Failure modes: T too high + top_p 1.0 samples the garbage tail; penalties too high forces the model off the correct token and produces stilted or off-topic text; T=0 is NOT bitwise deterministic on a server (see Concept - Nondeterminism in LLM Inference)"
+      ],
+      "links": ["Concept - Softmax", "Concept - The Inference Request Lifecycle", "Concept - Advanced Samplers (min-p, Mirostat, DRY)", "Concept - Constrained Decoding", "Concept - Nondeterminism in LLM Inference", "Snippet - Sampling from Logits", "Concept - Chain-of-Thought and Why It Works", "Concept - Entropy and Cross-Entropy"]
+    },
+    {
+      "title": "Concept - KV Cache",
+      "type": "concept",
+      "level": "core",
+      "scope": "Why serving caches the key and value projections of past tokens and the exact memory math that makes it the binding constraint on batch size and context length. IN: the derivation, GQA/MQA/MLA reductions, growth behavior. OUT: paging the cache (link Concept - PagedAttention), quantizing it (link Concept - KV Cache Quantization), the general transformer memory reference (link 08).",
+      "key_points": [
+        "Mechanism: with a causal mask, token t's K and V never change, so cache them; each decode step computes Q only for the new token and attends over all cached K,V, turning per-step attention from O(N^2) recompute into O(N) read of the cache",
+        "Memory formula: bytes = 2 (K and V) * n_layers * n_kv_heads * head_dim * seq_len * batch * bytes_per_elem. Llama-3-70B (80 layers, 8 KV heads via GQA, head_dim 128) at fp16 = 2*80*8*128*2 = 327,680 bytes/token ~= 0.31 MB/token, so 128K context for one sequence ~= 40 GB",
+        "GQA/MQA are the dominant lever: sharing KV across query heads cuts the cache 8-64x (Llama-3-70B's 8 KV heads vs 64 query heads = 8x); MLA (DeepSeek-V2/V3) stores a compressed latent instead of full K,V for a further large reduction -- KV size is an architecture decision felt at serving time",
+        "Cache grows linearly with sequence length AND batch, so total KV = per-token-bytes * sum(seq_len over live requests); at scale the KV cache, not the weights, caps how many concurrent requests fit",
+        "In practice the free HBM after weights is the KV budget: on an 80 GB H100 serving a 70B fp16 model (~140 GB, needs 2 GPUs), the leftover ~20 GB of KV per GPU sets max concurrent tokens; this is the number every capacity plan is really about",
+        "Failure modes: OOM mid-generation when live sequences grow past budget (triggers preemption/recompute), and pre-paging fragmentation that wasted 60-80% of the KV region (see Concept - PagedAttention and Lore - The KV Cache Fragmentation Crisis)"
+      ],
+      "links": ["Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)", "Concept - PagedAttention", "Concept - KV Cache Quantization", "Reference - Memory Math for Transformers", "Concept - GPU Memory Hierarchy", "Concept - Attention Mechanism", "Concept - Automatic Prefix Caching", "Lore - The KV Cache Fragmentation Crisis"]
+    },
+    {
+      "title": "Concept - Continuous Batching",
+      "type": "concept",
+      "level": "core",
+      "scope": "Iteration-level scheduling that changes batch composition every decode step to keep the GPU full, replacing static request-level batching. IN: the Orca mechanism, why it multiplies throughput, its coupling to paged KV and prefill scheduling. OUT: the paging that enables it (link Concept - PagedAttention), chunked prefill (own note), disaggregation (own note).",
+      "key_points": [
+        "Problem it kills: static batching runs a fixed set of sequences until the LONGEST finishes; short sequences sit idle holding GPU slots, so effective utilization collapses when output lengths vary (which they always do)",
+        "Mechanism (Orca, Yu et al. OSDI 2022): schedule at the granularity of a single decode iteration -- after every step, evict finished sequences and admit waiting ones, so the batch is re-formed each iteration and the GPU never idles waiting for stragglers",
+        "Reported gains of ~2-23x throughput over static batching (Orca / vLLM), because decode is memory-bound and higher batch raises arithmetic intensity toward the compute roof at near-zero marginal latency until saturation",
+        "Requires dynamic, non-contiguous KV allocation (a new request needs KV NOW, mid-flight) which is exactly what PagedAttention provides; the two techniques ship together for a reason",
+        "Newly admitted requests must be prefilled, and a big prefill in the middle of a decode batch stalls everyone's inter-token latency -- the interference that chunked prefill and disaggregation exist to solve",
+        "Key knobs: max_num_seqs (concurrent sequences) and max_num_batched_tokens (per-iteration token budget); set too high and you thrash on preemption, too low and you leave throughput on the table"
+      ],
+      "links": ["Concept - PagedAttention", "Concept - Chunked Prefill", "Concept - Prefill and Decode Phases", "Concept - Prefill-Decode Disaggregation", "Breakdown - vLLM", "Reference - Inference Performance Math", "Concept - Latency, Throughput, and Cost in LLM Serving", "Concept - The Roofline Model"]
+    },
+    {
+      "title": "Concept - Automatic Prefix Caching",
+      "type": "concept",
+      "level": "core",
+      "scope": "Reusing already-computed KV blocks across requests that share a leading prefix (system prompt, few-shot block, chat history, agent scaffold), skipping their prefill entirely. IN: block hashing, radix-tree indexing, eviction, correctness and privacy constraints. OUT: the API/pricing view of prompt caching (link Concept - Prompt Caching), the raw KV cache mechanism (link Concept - KV Cache).",
+      "key_points": [
+        "Mechanism: KV is stored in fixed-size blocks; hash each block by its token content (and preceding blocks), and when a new request's prefix hashes to existing blocks, point at them instead of recomputing prefill -- TTFT for a cached 2K-token system prompt drops from tens of ms of prefill to near zero",
+        "vLLM automatic prefix caching hashes block-by-block; SGLang RadixAttention (Zheng et al. 2024) maintains a radix tree of all live KV with LRU eviction so arbitrary shared prefixes (not just a fixed system prompt) are reused across concurrent requests",
+        "Biggest wins: a shared system prompt across all users, few-shot exemplars, long multi-turn chat where each turn re-sends history, and agent loops that replay a growing transcript -- workloads where 70-95% of prompt tokens are cache hits",
+        "Correctness: matching is on exact token IDs, so a one-token difference (a timestamp, a user id) at the FRONT busts the whole downstream cache -- put variable content last; caching is prompt-only so it never affects sampled output",
+        "Privacy/isolation: a naive global cache can leak the existence of another user's prompt via timing, and cross-tenant prefix sharing must be scoped; production systems isolate caches per key or per tenant",
+        "Failure modes: cache thrash under many distinct prefixes (radix tree churns, hit rate collapses), and stale reuse if the system prompt/template silently changes without a cache-key bump"
+      ],
+      "links": ["Concept - KV Cache", "Concept - PagedAttention", "Concept - Prompt Caching", "Breakdown - vLLM", "Breakdown - SGLang and RadixAttention", "Deep Dive - The Agent Loop", "Concept - Latency, Throughput, and Cost in LLM Serving", "Concept - Continuous Batching"]
+    },
+    {
+      "title": "Concept - Post-Training Quantization Formats",
+      "type": "concept",
+      "level": "core",
+      "scope": "The landscape of formats used to compress a trained model's weights (and sometimes activations) for inference, and the algorithms behind the two dominant ones. IN: GPTQ, AWQ, GGUF k-quants, fp8, the group-size / symmetric-vs-asymmetric knobs, and where quality lives. OUT: quantizing the KV cache (link Concept - KV Cache Quantization), hardware fp8/fp4 formats (link Concept - FP8 and Low-Precision Inference), sub-2-bit research (link 18), training precision (link 04).",
+      "key_points": [
+        "Weight-only vs weight+activation: most LLM serving uses weight-only int4/int8 (dequantize to bf16 in the matmul, so it saves memory and bandwidth but not FLOPs), while W8A8/fp8 also quantizes activations to actually use faster tensor-core paths",
+        "GPTQ (Frantar et al. 2022): layer-wise, second-order error minimization via the OBQ/Hessian trick over a small calibration set; 3-4 bit weights with per-group scales; desc_act (act-order) reorders columns by activation importance and MUST match at runtime or output corrupts",
+        "AWQ (Lin et al. 2023): activation-aware -- protect the ~1% of salient weight channels (identified by activation magnitude) by per-channel scaling, no backprop; typically better than GPTQ for instruction-tuned models and faster to produce",
+        "GGUF k-quants (llama.cpp): block-wise (e.g. 32 weights) with per-block scale and min, mixed precision per tensor (Q4_K_M puts more bits on attention/embed layers); i-quants (IQ2/IQ3) plus an importance matrix (imatrix) push below 4 bits with far less damage",
+        "Group size (128 is standard) trades metadata overhead against fidelity; symmetric (zero-point 0) vs asymmetric (learned zero-point) matters for weight distributions with skew; outlier activation features (Dettmers LLM.int8()) are why naive int8 activation quant explodes without SmoothQuant",
+        "Quality reality: WikiText perplexity delta is often <1% at 4-bit, but downstream coding/math/tool-calling can degrade sharply and silently -- perplexity is a weak proxy (see Gotchas - Quantization Quality Loss)"
+      ],
+      "links": ["Concept - KV Cache Quantization", "Concept - FP8 and Low-Precision Inference", "Decision - Choosing a Quantization Method", "Gotchas - Quantization Quality Loss", "Concept - Floating Point for Deep Learning", "Reference - Memory Math for Transformers", "Breakdown - llama.cpp and GGUF Is Missing", "Concept - Mixed Precision Training"]
+    },
+    {
+      "title": "Concept - Latency, Throughput, and Cost in LLM Serving",
+      "type": "concept",
+      "level": "core",
+      "scope": "The serving-hardware economics of inference: how TTFT/TPOT/throughput trade off and how you derive cost per million tokens from GPU price and throughput. IN: the cost derivation, input/output price asymmetry, and the levers that move it. OUT: application-level cost tooling and routing (link 16), business/product unit economics (link 22), the metrics glossary and formulas (link Reference - Inference Performance Math).",
+      "key_points": [
+        "Cost per million output tokens = (GPU_$/hr / 3600) / aggregate_decode_tokens_per_sec * 1e6; e.g. an H100 at ~$2.50/hr sustaining ~2500 output tok/s across a full batch => ~$0.28 per 1M output tokens at the hardware level, before margin/overhead",
+        "Input tokens are cheap because prefill is parallel and compute-rich; output tokens are expensive because decode is serialized and memory-bound -- this is why API pricing runs ~3-5x higher for output than input tokens",
+        "The core tension: raising batch size lifts throughput (amortizes the HBM weight read) but raises each user's TPOT; there is a latency-throughput Pareto frontier and your SLO picks a point on it, not a single 'best' setting",
+        "Levers and their sign: quantization (bigger batch/longer context per GPU, throughput up), prefix caching (skip prefill, TTFT and cost down), speculative decoding (latency down at low batch but can cut throughput at high batch), disaggregation (hit tight TTFT and TPOT simultaneously)",
+        "Utilization is where money leaks: a decode-bound service at batch 4 might run <10% MFU; the entire discipline is about pushing effective batch up without blowing the TPOT SLO",
+        "Goodput (requests that meet SLO per second), not raw throughput, is the metric that actually maps to cost-effectiveness under a latency contract -- optimizing raw throughput can lower goodput"
+      ],
+      "links": ["Concept - Continuous Batching", "Reference - Inference Performance Math", "Concept - Cost Engineering for LLM Applications", "Concept - Unit Economics of LLM Products", "Concept - Token Price Deflation", "Concept - Speculative Decoding", "Concept - The Roofline Model", "Concept - Prefill-Decode Disaggregation"]
+    },
+    {
+      "title": "Concept - Streaming Detokenization",
+      "type": "concept",
+      "level": "core",
+      "scope": "The overlooked mechanics of turning a stream of token IDs back into correct text incrementally, where multi-byte characters and stop strings straddle token boundaries. IN: byte-level BPE decoding, partial UTF-8 buffering, stop-string handling, and how these produce visible serving bugs. OUT: tokenizer training and merges (link Concept - Byte-Pair Encoding), the sampling step (link Concept - Sampling and Decoding Parameters).",
+      "key_points": [
+        "Byte-level BPE (GPT-2 lineage) tokens are byte sequences, not characters, so a single emoji or CJK glyph can span 2-4 tokens; naively decoding each token id independently yields replacement characters or mojibake mid-stream",
+        "Correct streaming keeps a byte buffer, appends each new token's bytes, and only flushes complete UTF-8 code points, holding back a partial trailing multi-byte sequence until the next token completes it",
+        "SentencePiece adds the meta-space marker (U+2581) for leading spaces, so incremental decoders must reconcile whether a leading space belongs to this token or was already emitted -- a frequent source of missing or doubled spaces in streamed output",
+        "Stop strings are applied on the DETOKENIZED text, so a stop like '\\n\\n' or '</tool>' can span multiple tokens; the server must buffer enough tail text to detect a straddling stop, then trim the emitted stream back -- get this wrong and stop sequences leak or truncate a character early",
+        "Special/added tokens (BOS, EOS, tool tags, thinking delimiters) must be filtered from user-visible output but preserved for the parser; skip_special_tokens handling differs across frameworks and leaks control tokens into UIs when misconfigured",
+        "Symptoms in production: flickering replacement glyphs, a stop sequence that appears in output, off-by-one spaces after streaming, and tool-call delimiters shown to end users -- all detokenization, not model, bugs"
+      ],
+      "links": ["Concept - Byte-Pair Encoding", "Concept - Sampling and Decoding Parameters", "Concept - The Inference Request Lifecycle", "Gotchas - LLM Serving in Production", "Concept - Token Healing", "Concept - Constrained Decoding", "Concept - Tool Use and Function Calling", "Playbook - Reliable Structured Output"]
+    },
+    {
+      "title": "Decision - Choosing an Inference Serving Framework",
+      "type": "decision",
+      "level": "core",
+      "scope": "How to pick among vLLM, SGLang, TensorRT-LLM, llama.cpp/Ollama, TGI, LMDeploy, and MLC for a given workload and hardware. IN: the decision flow and a strengths matrix with real tradeoffs. OUT: deep internals of each engine (link the Breakdown notes), tuning a chosen engine (link Playbook - Tuning an LLM Serving Deployment).",
+      "key_points": [
+        "Default: vLLM -- broad model/hardware support, fastest day-0 support for new open models, OpenAI-compatible server, mature ecosystem (quant, LoRA, spec decode, P/D disaggregation); the safe choice for most GPU serving",
+        "SGLang when the workload is shared-prefix heavy (agents, few-shot, RAG with a fixed preamble) or needs fast structured output -- RadixAttention and compressed-FSM jump-forward decoding make it lead on those; also strong for DeepSeek MLA/MoE serving",
+        "TensorRT-LLM when you need maximum NVIDIA throughput/latency at a fixed model and will pay the build/engine-compilation and ergonomics cost; best fp8/fp4 tensor-core utilization and custom attention kernels, worst iteration speed",
+        "llama.cpp / Ollama / LM Studio for local, edge, CPU, or Apple-silicon unified-memory serving and for the widest quant zoo (GGUF k-quants/i-quants); MLC-LLM for WebGPU/mobile; TGI when you're in the HuggingFace stack",
+        "Criteria that decide it: hardware (NVIDIA vs AMD ROCm vs Apple vs CPU), latency-vs-throughput SLO, model freshness needs, quantization format required, structured-output demands, multi-LoRA multiplexing, and ops maturity/observability",
+        "Edge cases that flip the default: single-user local box -> llama.cpp; strict p99 SLO at fleet scale with a frozen model -> TensorRT-LLM; brand-new model on release day -> vLLM/SGLang; thousands of fine-tuned adapters on one base -> an engine with strong multi-LoRA (see Concept - Multi-LoRA Serving)"
+      ],
+      "links": ["Breakdown - vLLM", "Breakdown - SGLang and RadixAttention", "Breakdown - TensorRT-LLM", "Concept - Multi-LoRA Serving", "Concept - Continuous Batching", "Reference - Inference Performance Math", "Playbook - Tuning an LLM Serving Deployment", "Concept - LLM Observability and Tracing"]
+    },
+    {
+      "title": "Reference - Inference Performance Math",
+      "type": "reference",
+      "level": "core",
+      "scope": "The formula and metric sheet you open mid-task: KV cache bytes, decode step time, max batch given VRAM, TTFT/TPOT/throughput/goodput definitions, and typical target values. IN: the equations and constants. OUT: full memory math for training params/optimizer/activations (link Reference - Memory Math for Transformers), roofline derivation (link Concept - The Roofline Model).",
+      "key_points": [
+        "KV bytes/token = 2 * n_layers * n_kv_heads * head_dim * dtype_bytes; total KV = that * sum of live sequence lengths; provide a worked table for Llama-3-8B/70B, Mistral, and a DeepSeek MLA model at fp16 and fp8",
+        "Decode step time (batch 1) ~= model_weight_bytes / HBM_bandwidth; tabulate for common GPUs (A100 40/80, H100 80, H200 141, B200) using their real HBM bandwidths (e.g. H100 SXM ~3.35 TB/s, H200 ~4.8 TB/s)",
+        "Max concurrent tokens ~= (VRAM - weight_bytes - activation/overhead) / KV_bytes_per_token; show the 70B-on-2xH100 example where ~20 GB/GPU of KV headroom sets the concurrency ceiling",
+        "Metric definitions: TTFT = queue + prefill; TPOT/ITL = mean decode step latency; end-to-end = TTFT + TPOT*output_len; throughput = tokens/s or req/s; goodput = req/s meeting the (TTFT, TPOT) SLO; report p50/p90/p99 because batching makes the tail fat",
+        "Typical human-facing targets (as of 2026): chat TTFT < 300-500 ms, TPOT < 50 ms (~20 tok/s, above reading speed); voice/agent pipelines want TTFT < 200 ms; footnote that these are UX thresholds, not hardware limits",
+        "Cost identity: $/1M output tok = (GPU_$/hr / 3600) / decode_tok_per_sec * 1e6; benchmarking tools that produce these numbers -- vllm bench serve, NVIDIA genai-perf, llmperf -- with the caveat to use realistic input/output length distributions"
+      ],
+      "links": ["Reference - Memory Math for Transformers", "Concept - KV Cache", "Concept - Prefill and Decode Phases", "Concept - The Roofline Model", "Concept - Latency, Throughput, and Cost in LLM Serving", "Concept - GPU Memory Hierarchy", "Playbook - Tuning an LLM Serving Deployment", "Concept - Continuous Batching"]
+    },
+    {
+      "title": "Checklist - Pre-Production Inference Readiness",
+      "type": "checklist",
+      "level": "core",
+      "scope": "The pre-flight verification list before an LLM serving deployment takes real traffic, grouped by correctness, capacity, reliability, and observability. IN: objectively checkable items. OUT: the tuning procedure that produces the config (link Playbook - Tuning an LLM Serving Deployment), the pitfalls behind each item (link Gotchas - LLM Serving in Production).",
+      "key_points": [
+        "Correctness: chat template matches the model's training template exactly; BOS is added once (not doubled by tokenizer + template); EOS and any stop tokens fire; special/thinking/tool tokens are filtered from user output; sampling defaults are pinned and documented",
+        "Capacity: measured max concurrency at the SLO (not a guess); KV headroom leaves margin for the longest allowed context; behavior verified when every live request hits max_model_len simultaneously; backpressure/queueing and a 429 policy exist instead of silent OOM",
+        "Reliability: liveness/readiness probes wired; per-request timeout and a hard max_tokens cap; generation cancels when the client disconnects (or you pay for tokens nobody reads); preemption/recompute path exercised under load",
+        "Quantization validated on downstream task metrics (coding/tool-calling/math), not just perplexity, if the served model is quantized",
+        "Observability: TTFT, TPOT, throughput, queue depth, KV utilization, and preemption count are emitted; per-request tracing with prompt/output logging plus PII redaction; alert thresholds set on tail latency",
+        "Versioning/determinism: model weights + engine version + quant recipe + template are all pinned to an immutable tag; seed and determinism policy documented so evals and caches key correctly"
+      ],
+      "links": ["Playbook - Tuning an LLM Serving Deployment", "Gotchas - LLM Serving in Production", "Reference - Inference Performance Math", "Concept - Sampling and Decoding Parameters", "Concept - LLM Observability and Tracing", "Concept - Nondeterminism in LLM Inference", "Concept - Automatic Prefix Caching", "Concept - Streaming Detokenization"]
+    },
+    {
+      "title": "Snippet - Sampling from Logits",
+      "type": "snippet",
+      "level": "core",
+      "scope": "A complete, runnable implementation of the sampling pipeline (temperature, top-k, top-p, min-p, repetition penalty) over a logit vector, making the order-of-operations and numerical-stability decisions explicit. IN: the reference implementation and why each step is where it is. OUT: the conceptual treatment (link Concept - Sampling and Decoding Parameters), exotic samplers' theory (link Concept - Advanced Samplers (min-p, Mirostat, DRY)).",
+      "key_points": [
+        "PyTorch/numpy function taking logits, temperature, top_k, top_p, min_p, and a token-history list; applies repetition penalty, then temperature, then top-k, then top-p/min-p truncation, then softmax + multinomial; ~40 lines, imports included, deterministic with a passed generator",
+        "Show the numerical-stability move: subtract logits.max() before exp so softmax never overflows; mask truncated tokens by setting their logits to -inf (not zero) so they vanish after softmax",
+        "Implement top-p via sort + cumulative sum + a shift so the first token above the threshold is kept (off-by-one here silently changes behavior); implement min-p as keep tokens with prob >= min_p * max_prob computed on the post-temperature distribution",
+        "Demonstrate the ordering footgun: run the same logits with temperature-before-top-k vs after and print the differing surviving token sets, tying back to why identical API params disagree across frameworks",
+        "Why-it's-written-this-way: -inf masking vs probability zeroing (renormalization correctness), why min-p is computed after temperature (it must track the sharpened distribution), and why repetition penalty divides positive logits but multiplies negative ones to avoid sign flips",
+        "Expected output: printed token distributions for greedy, T=0.8+top_p0.95, and min_p=0.05 over a toy vocab, showing the tail getting truncated"
+      ],
+      "links": ["Concept - Sampling and Decoding Parameters", "Concept - Softmax", "Concept - Advanced Samplers (min-p, Mirostat, DRY)", "Concept - The Inference Request Lifecycle"]
+    },
+    {
+      "title": "Concept - PagedAttention",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The virtual-memory-style KV cache manager that eliminated fragmentation and made high-concurrency serving practical. IN: block tables, non-contiguous physical layout, copy-on-write sharing, the gather-in-kernel cost. OUT: the KV cache concept itself (link Concept - KV Cache), the vLLM system that introduced it (link Breakdown - vLLM), the origin story (link Lore - The KV Cache Fragmentation Crisis).",
+      "key_points": [
+        "Problem: reserving one contiguous KV buffer of max_seq_len per request wastes memory to internal fragmentation (request generates far fewer tokens than reserved) and external fragmentation (variable-size holes) -- the vLLM paper (Kwon et al. SOSP 2023) measured 60-80% of the KV region wasted",
+        "Solution: partition each request's KV into fixed-size blocks (16 tokens is the common default), place blocks anywhere in physical GPU memory, and keep a per-request block table mapping logical block index -> physical block address -- a direct analogy to OS pages and page tables",
+        "Result: near-zero waste (<4% internal, no external), because blocks are allocated on demand as a sequence grows and freed immediately on completion; this is what lets continuous batching admit many concurrent sequences",
+        "Copy-on-write and sharing: multiple sequences (beam candidates, or requests with a common prefix) point their block tables at the same physical blocks and only copy on divergence -- the foundation for automatic prefix caching",
+        "Cost: the attention kernel can no longer assume contiguous K,V; it must gather from scattered blocks via the block table, so PagedAttention ships a custom CUDA/Triton kernel, and block-table lookups add per-step overhead (small block size lowers waste but raises this overhead)",
+        "Failure modes: block-table management bugs cause cross-request KV corruption; too-small blocks add kernel overhead; the paged kernel historically trailed a fused contiguous kernel in raw speed, a tradeoff for the memory win"
+      ],
+      "links": ["Concept - KV Cache", "Breakdown - vLLM", "Concept - Continuous Batching", "Concept - Automatic Prefix Caching", "Concept - GPU Memory Hierarchy", "Lore - The KV Cache Fragmentation Crisis", "Deep Dive - FlashAttention", "Reference - Memory Math for Transformers"]
+    },
+    {
+      "title": "Concept - Chunked Prefill",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Splitting a long prefill into fixed token-budget chunks and piggybacking decode tokens into the same batch to stop prefills from stalling everyone's inter-token latency. IN: the SARATHI stall-free batching mechanism, the token budget knob, the throughput cost. OUT: continuous batching basics (link Concept - Continuous Batching), the alternative of physical separation (link Concept - Prefill-Decode Disaggregation).",
+      "key_points": [
+        "Problem: in continuous batching, admitting a request with a 4K-token prompt runs a big prefill forward pass that monopolizes the GPU for that iteration, spiking the TPOT/ITL of every decoding request in flight -- visible as periodic latency jitter for all users",
+        "Mechanism (SARATHI, Agrawal et al. 2023; SARATHI-Serve 2024): cap tokens processed per iteration at a budget (max_num_batched_tokens), slice long prefills into chunks of that budget, and fill the remaining budget with decode tokens from in-flight requests ('stall-free batching')",
+        "Effect: smooths the TTFT/TPOT tradeoff -- decodes no longer stall behind whole prefills, tail latency flattens, and the GPU stays busy mixing compute-heavy prefill chunks with bandwidth-heavy decode; now the default scheduling mode in vLLM V1",
+        "The token budget is the central knob: larger budget = better prefill throughput but chunkier decode stalls; smaller = smoother decode but more scheduling overhead and slower prefill; tuned per SLO",
+        "Interacts with prefix caching (a cached prefix skips its chunks entirely) and with disaggregation (an alternative that separates prefill and decode onto different hardware instead of interleaving them)",
+        "Failure mode: setting max_num_batched_tokens too low starves prefill and inflates TTFT; too high reintroduces the decode stalls it was meant to fix"
+      ],
+      "links": ["Concept - Continuous Batching", "Concept - Prefill and Decode Phases", "Concept - Prefill-Decode Disaggregation", "Concept - Automatic Prefix Caching", "Breakdown - vLLM", "Reference - Inference Performance Math", "Concept - Latency, Throughput, and Cost in LLM Serving", "Playbook - Tuning an LLM Serving Deployment"]
+    },
+    {
+      "title": "Concept - Speculative Decoding",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Using a cheap draft to propose several tokens that the target model verifies in one parallel pass, cutting decode latency without changing the output distribution. IN: the draft-verify loop, the modified-rejection-sampling acceptance rule, the speedup math, and the batch-size caveat. OUT: draft-model-free variants (link Concept - Self-Drafting Speculative Decoding (Medusa, EAGLE, Lookahead)), the verification code (link Snippet - Speculative Decoding Verification).",
+      "key_points": [
+        "Mechanism (Leviathan et al. 2023; Chen et al. 2023): a small draft model autoregressively proposes k tokens; the target model scores all k+1 positions in a SINGLE forward pass (decode is memory-bound, so verifying k tokens costs almost the same as generating one); accept the longest matching prefix",
+        "Losslessness: accept draft token x with probability min(1, p_target(x)/p_draft(x)); on rejection, resample from the normalized positive residual max(0, p_target - p_draft); this makes the output distribution provably identical to sampling from the target alone",
+        "Speedup ~= expected accepted tokens per target pass, set by acceptance rate alpha and the draft/target cost ratio; typical 2-3x wall-clock latency reduction when the draft is well-matched and cheap (e.g. a 1B draft for a 70B target)",
+        "The critical caveat practitioners learn: this is a LOW-BATCH, latency-regime win. Decode has spare compute only when the GPU is memory-bound; at high batch the GPU is already compute-saturated, so verifying rejected tokens burns FLOPs and can REDUCE throughput -- labs use it for low-QPS latency-critical paths, not bulk serving",
+        "Draft choices: a separately trained small model, a distilled same-family model, or n-gram/prompt-lookahead drafts; acceptance collapses when the draft's distribution diverges from the target (out-of-domain text, different sampling temperature)",
+        "Failure modes: low acceptance from a mismatched draft wastes the draft's own compute; extra HBM for two models; and a subtle bug where the draft and target use different tokenizers or templates silently tanks acceptance"
+      ],
+      "links": ["Concept - Self-Drafting Speculative Decoding (Medusa, EAGLE, Lookahead)", "Snippet - Speculative Decoding Verification", "Concept - Prefill and Decode Phases", "Concept - Sampling and Decoding Parameters", "Concept - Knowledge Distillation", "Concept - Latency, Throughput, and Cost in LLM Serving", "Concept - The Roofline Model", "Concept - KL Divergence"]
+    },
+    {
+      "title": "Concept - Constrained Decoding",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Forcing generation to conform to a formal grammar, regex, or JSON schema by masking invalid tokens' logits each step. IN: the FSM/pushdown-automaton compilation, per-state token masks, the token-alignment problem, and the quality cost. OUT: the practitioner playbook for reliable structured output (link Playbook - Reliable Structured Output, owned by 09), the tokenizer-boundary fix (link Concept - Token Healing).",
+      "key_points": [
+        "Mechanism: at each step, compute the set of tokens that keep the output valid under the grammar and set every other token's logit to -inf before sampling, so the model can only emit conformant tokens; the model still chooses among the allowed set by its own probabilities",
+        "FSM approach (Outlines, Willard & Louf 2023): compile a regex/JSON schema into a finite-state machine over the vocabulary and precompute, per FSM state, the allowed-token mask; runtime cost becomes an O(1) mask lookup per step instead of re-parsing",
+        "Nested/recursive structures (balanced braces, arbitrary JSON depth) exceed regular languages, so grammars use a pushdown automaton / CFG; XGrammar and llama.cpp GBNF implement this, with 'jump-forward' decoding that emits forced tokens (e.g. the mandatory '\": ' between a JSON key and value) for free without a model call",
+        "The token-alignment problem: grammars are defined over characters but the model emits tokens, and a single token can cross a grammar boundary; the compiler must map character-level transitions onto the token vocabulary, and misalignment at the prompt boundary needs token healing",
+        "Quality cost: over-constraining can degrade reasoning -- forcing JSON structure before the model has 'thought' truncates its computation; the practitioner remedy is to let it reason in free text, then constrain only the final answer (the SGLang/structured-output literature documents measurable accuracy drops)",
+        "Integration: vLLM guided decoding exposes outlines / lm-format-enforcer / xgrammar backends; failure modes include grammars that admit no valid next token (dead state -> generation stalls) and schemas so tight the model loops on whitespace"
+      ],
+      "links": ["Concept - Token Healing", "Playbook - Reliable Structured Output", "Snippet - Sampling from Logits", "Breakdown - SGLang and RadixAttention", "Concept - Byte-Pair Encoding", "Concept - Sampling and Decoding Parameters", "Concept - Tool Use and Function Calling", "Concept - Streaming Detokenization"]
+    },
+    {
+      "title": "Concept - Multi-LoRA Serving",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Serving hundreds to thousands of LoRA adapters over one shared base model without loading a separate full model per adapter. IN: batched heterogeneous-adapter kernels, adapter paging/swapping, S-LoRA/Punica techniques, and the throughput cost of adapter diversity. OUT: how LoRA is trained and its rank/alpha internals (link Deep Dive - LoRA), the base-model KV mechanics (link Concept - KV Cache).",
+      "key_points": [
+        "Why it matters: a LoRA adapter is ~0.1-1% of base-model size, so one base + N adapters is dramatically cheaper than N full fine-tunes; multi-LoRA serving is what makes per-customer or per-task fine-tunes economically viable at scale",
+        "Core challenge: a continuous batch contains requests targeting DIFFERENT adapters, so the base matmul is shared but each request needs its own A and B low-rank matrices applied -- naive per-request looping destroys GPU utilization",
+        "S-LoRA (Sheng et al. 2023) and Punica: batched/segmented gather-matmul kernels (SGMV) that apply many different adapters within one fused kernel call, plus unified paging of adapter weights between GPU and host memory so thousands of adapters share limited VRAM",
+        "Adapter paging: keep hot adapters in HBM, swap cold ones to CPU/host, prefetch on request arrival; the working-set of active adapters, not the total count, drives memory pressure",
+        "Throughput reality: performance degrades as the number of DISTINCT adapters in a batch rises (less base-matmul amortization and more adapter I/O), so routing requests to cluster same-adapter traffic helps; merged adapters (folded into base weights) are faster but lose the multiplexing benefit",
+        "Failure modes: rank mismatch between adapter and runtime config, adapters trained on a different base revision, and VRAM thrash when the active-adapter set exceeds the paging budget"
+      ],
+      "links": ["Deep Dive - LoRA", "Concept - QLoRA", "Concept - KV Cache", "Concept - Continuous Batching", "Breakdown - vLLM", "Decision - Fine-Tuning vs RAG vs Prompting", "Concept - Latency, Throughput, and Cost in LLM Serving", "Concept - GPU Memory Hierarchy"]
+    },
+    {
+      "title": "Concept - MoE Inference and Expert Parallelism",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The serving-time behavior of Mixture-of-Experts models: expert parallelism, all-to-all routing traffic, decode-time load imbalance, and the memory-vs-compute profile that makes MoE cheap to run but hard to serve. IN: EP sharding, token dispatch/combine, imbalance at low batch, DeepSeek-scale techniques. OUT: MoE architecture and routing math (link Concept - Mixture of Experts Architecture), MoE training load balancing (link 04).",
+      "key_points": [
+        "MoE inference profile: only the top-k experts (e.g. 8 of 256 in DeepSeek-V3) fire per token, so active FLOPs are small, but ALL expert weights must be resident in memory -- MoE is compute-cheap and memory-expensive, the opposite balance from a dense model of equal quality",
+        "Expert parallelism (EP): shard experts across GPUs so each holds a subset; every token must be routed (all-to-all dispatch) to the GPUs holding its chosen experts and the results gathered back (all-to-all combine), adding two collective communications per MoE layer per step",
+        "Decode-time load imbalance is the serving pain: at small decode batch the few tokens per step may all route to a handful of experts, leaving most expert GPUs idle while a hot expert bottlenecks -- utilization is far worse than the training-time average suggests",
+        "Mitigations: large batch to average out routing, expert-parallel + data-parallel hybrids, redundant/replicated hot experts, and DeepSeek's EPLB-style dynamic expert placement; the all-to-all latency makes fast interconnect (NVLink/NVSwitch) critical for MoE decode",
+        "Memory math shifts: KV cache is often modest (MLA in DeepSeek) but expert weights dominate VRAM, so MoE serving is frequently weight-capacity-bound and spread across many GPUs purely to fit the experts",
+        "Failure modes: all-to-all becomes the bottleneck on slow interconnect, a mis-tuned capacity factor drops tokens, and expert imbalance causes head-of-line stalls that inflate TPOT unpredictably"
+      ],
+      "links": ["Concept - Mixture of Experts Architecture", "Concept - All-Reduce and Collective Operations", "Concept - KV Cache", "Concept - Tensor and Pipeline Parallelism", "Breakdown - SGLang and RadixAttention", "Concept - GPU Memory Hierarchy", "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)", "Concept - Prefill-Decode Disaggregation"]
+    },
+    {
+      "title": "Decision - Choosing a Quantization Method",
+      "type": "decision",
+      "level": "advanced",
+      "scope": "Selecting a weight (and KV) quantization scheme given hardware, accuracy budget, and memory/throughput targets. IN: the decision flow and a tradeoff matrix across bf16/fp16, fp8, int4 (AWQ/GPTQ), GGUF k-quants, and fp4, plus KV-quant as a separate axis. OUT: the algorithm internals (link Concept - Post-Training Quantization Formats), the hardware formats (link Concept - FP8 and Low-Precision Inference), the pitfalls (link Gotchas - Quantization Quality Loss).",
+      "key_points": [
+        "Two independent axes: weight precision (bf16 baseline -> fp8 -> int4 -> fp4) and KV-cache precision (fp16 -> fp8 -> int4); decide them separately because long-context serving is often KV-bound while short-context is weight-bound",
+        "Flow by hardware: Hopper/Blackwell + quality-critical -> fp8 (near-lossless, real tensor-core speedup); memory-bound on any GPU -> int4 weight-only via AWQ (best for instruct models) or GPTQ; Apple/CPU/local -> GGUF Q4_K_M or Q5_K_M; Blackwell + extreme throughput -> fp4 (NVFP4/MXFP4, still frontier)",
+        "Tradeoff matrix columns: bits, memory factor vs bf16 (fp8 ~2x, int4 ~4x), throughput gain (weight-only saves bandwidth not FLOPs; fp8/fp4 save both), quality risk, calibration-data need (GPTQ/AWQ require it; fp8 dynamic does not), and engine support",
+        "Details that flip the choice: activation outliers demand SmoothQuant/fp8 rather than naive int8; MoE experts and lm_head/embeddings are precision-sensitive and often kept higher; long-context retrieval quality is dominated by KV-quant precision, especially the first (sink) tokens",
+        "Reasoning/coding/tool-use degrade before perplexity does, so the accuracy budget must be measured on the ACTUAL downstream task, not WikiText -- a 4-bit model that reads fine may fail JSON tool calls",
+        "Default for a typical 2026 NVIDIA deployment: fp8 weights + fp8 KV if on Hopper+ and quality matters; drop to AWQ int4 weights only when you must fit a bigger model or longer context on the same GPU"
+      ],
+      "links": ["Concept - Post-Training Quantization Formats", "Concept - FP8 and Low-Precision Inference", "Concept - KV Cache Quantization", "Gotchas - Quantization Quality Loss", "Reference - Memory Math for Transformers", "Concept - Floating Point for Deep Learning", "Decision - Choosing an Inference Serving Framework", "Concept - Latency, Throughput, and Cost in LLM Serving"]
+    },
+    {
+      "title": "Gotchas - LLM Serving in Production",
+      "type": "gotchas",
+      "level": "core",
+      "scope": "The aggregated pitfalls that bite real LLM serving deployments, ordered by pain. IN: throughput collapse, template/tokenizer bugs, stop-handling, streaming corruption, prefix-cache correctness, and latency jitter. OUT: quantization-specific quality traps (link Gotchas - Quantization Quality Loss), determinism deep-dive (link Concept - Nondeterminism in LLM Inference).",
+      "key_points": [
+        "Throughput collapse under memory pressure: max_num_seqs set too high fills the KV cache, forcing constant preemption/recompute or swap; symptom is throughput cratering and TPOT spiking as load rises -- fix by lowering concurrency or raising gpu-memory-utilization/KV budget",
+        "Chat-template / tokenizer mismatch: serving with the wrong template or a double-added BOS produces subtly wrong, lower-quality output that passes smoke tests; detection is diffing rendered prompts against the model card's reference template",
+        "Stop-sequence and EOS handling: stop strings applied on detokenized text can leak into output or truncate a character early when they straddle tokens; a missing/miscofigured EOS id causes runaway generation to max_tokens on every request (a cost and latency disaster)",
+        "Streaming corruption: emitting per-token text without buffering partial multi-byte UTF-8 produces flickering replacement glyphs and broken CJK/emoji (see Concept - Streaming Detokenization)",
+        "Prefix-cache correctness and leakage: a variable token near the prompt front silently busts the cache (hit rate tanks), and unscoped cross-tenant caches can leak prompt existence via timing",
+        "Latency jitter from prefill stalls (enable chunked prefill), TTFT blowup at long context (prefill is O(N^2)), and silent nondeterminism breaking eval reproducibility and cache keys -- each has a specific detection metric to alert on"
+      ],
+      "links": ["Concept - KV Cache", "Concept - Continuous Batching", "Concept - Chunked Prefill", "Concept - Automatic Prefix Caching", "Concept - Streaming Detokenization", "Concept - Nondeterminism in LLM Inference", "Concept - Sampling and Decoding Parameters", "Concept - LLM Observability and Tracing"]
+    },
+    {
+      "title": "Gotchas - Quantization Quality Loss",
+      "type": "gotchas",
+      "level": "advanced",
+      "scope": "The failure modes specific to deploying quantized models, where memory drops but capability degrades in ways perplexity hides. IN: proxy-metric traps, calibration mistakes, outliers, format/runtime mismatches, and hardware gating. OUT: choosing a method (link Decision - Choosing a Quantization Method), the format algorithms (link Concept - Post-Training Quantization Formats).",
+      "key_points": [
+        "Perplexity is a weak proxy: a 4-bit model can show <1% WikiText perplexity delta yet lose 10-20 points on HumanEval or fail structured tool-calling -- always evaluate quantization on the downstream task, and prefer generative/agentic evals over next-token perplexity",
+        "Calibration-set mismatch: GPTQ/AWQ scales are fit on a calibration corpus; using a domain-mismatched or too-small set (or over-fitting to it) skews the scales and degrades exactly the capabilities you serve; use in-domain calibration data",
+        "Activation outliers: a handful of large-magnitude activation channels (Dettmers LLM.int8()) blow up naive int8 activation quant; you need SmoothQuant (migrate outliers into weights) or keep those channels/layers in higher precision",
+        "Format/runtime mismatch: GPTQ desc_act (act-order) or group-size settings must match between the quantizer and the serving engine or output is garbage; GGUF quant-level naming (Q4_K_M vs Q4_0) and presence of an imatrix materially change quality for the 'same' bit-width",
+        "Sensitive components: MoE experts, the lm_head, embeddings, and final norm often need higher precision; quantizing them uniformly with the transformer blocks causes disproportionate damage",
+        "Hardware gating: fp8 kernels need Hopper+ and fp4 needs Blackwell -- running them on Ampere/Ada silently falls back to slow emulation or errors; verify the tensor-core path actually engages, or you pay the quality cost with no speedup"
+      ],
+      "links": ["Decision - Choosing a Quantization Method", "Concept - Post-Training Quantization Formats", "Concept - KV Cache Quantization", "Concept - FP8 and Low-Precision Inference", "Concept - Statistical Rigor in Model Evaluation", "Concept - Floating Point for Deep Learning", "Concept - Tensor Cores", "Concept - Benchmark Contamination"]
+    },
+    {
+      "title": "Playbook - Tuning an LLM Serving Deployment",
+      "type": "playbook",
+      "level": "advanced",
+      "scope": "The end-to-end procedure to take a model + GPU + SLO and produce a tuned serving config, including benchmarking to find the knee and diagnosing the common failure signatures. IN: the ordered tuning steps and the knob->symptom map. OUT: the metric definitions (link Reference - Inference Performance Math), the underlying mechanisms (link the Concept notes).",
+      "key_points": [
+        "Step 1 baseline: pin model + engine + quant version, then benchmark with a REALISTIC input/output length distribution (a ShareGPT-style trace, not fixed 128/128) sweeping request rate/concurrency; measure TTFT, TPOT, throughput, goodput at p50/p90/p99 with vllm bench serve or genai-perf",
+        "Step 2 find the knee: raise concurrency until TPOT or TTFT crosses the SLO; the throughput just before that is your usable ceiling -- observe KV utilization and preemption count at the knee to know whether you're KV-bound or compute-bound",
+        "Step 3 the knobs and their targets: --gpu-memory-utilization (raise carefully toward 0.92-0.95 for more KV), --max-num-seqs (concurrency), --max-num-batched-tokens (chunked-prefill budget: raise for prefill throughput, lower for smoother decode), --kv-cache-dtype fp8 (2x KV capacity), --enable-prefix-caching, --tensor-parallel-size, --max-model-len",
+        "Step 4 symptom -> fix map: preemption/throughput collapse -> lower max_num_seqs or raise mem-util or fp8 KV; TPOT jitter -> enable/lower chunked-prefill budget; high TTFT -> raise prefill budget or add TP; OOM at long context -> cut max_model_len or quantize KV; low throughput at low latency -> consider speculative decoding or disaggregation",
+        "Step 5 throughput vs latency recipes are opposite: throughput mode maxes batch/mem-util and tolerates TPOT; latency mode caps batch, enables chunked prefill and spec decode, and may disaggregate -- never expect one config to win both",
+        "Step 6 sharding decision: if weights don't fit, prefer tensor parallelism within a node (NVLink) and pipeline parallelism across nodes; verify the all-reduce isn't the bottleneck before adding more GPUs; re-benchmark after every change and watch the tail, not the mean"
+      ],
+      "links": ["Reference - Inference Performance Math", "Concept - Continuous Batching", "Concept - Chunked Prefill", "Concept - KV Cache Quantization", "Concept - Automatic Prefix Caching", "Concept - Tensor and Pipeline Parallelism", "Breakdown - vLLM", "Gotchas - LLM Serving in Production"]
+    },
+    {
+      "title": "Breakdown - vLLM",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "How the de-facto open-source serving engine actually works, from PagedAttention to the V1 scheduler rewrite. IN: the architecture, the clever design decisions, the ecosystem, and where it's weaker than alternatives. OUT: the PagedAttention mechanism in depth (link Concept - PagedAttention), continuous batching theory (link Concept - Continuous Batching).",
+      "key_points": [
+        "Identity: born at UC Berkeley Sky Lab (Kwon et al., PagedAttention, SOSP 2023); now the most widely deployed open serving engine, OpenAI-compatible server, backing a large share of open-model API providers as of 2026",
+        "Headline: PagedAttention (near-zero KV waste) + continuous batching delivered ~2-4x throughput over HuggingFace/FasterTransformer at launch; the combination reset the field's baseline",
+        "Architecture: a scheduler managing waiting/running/swapped queues, a block manager for paged KV, a model runner executing batched forward passes, and paged-attention kernels; the V1 engine rewrite (2024-25) cleaned up the scheduler, made chunked prefill the default, and reduced Python/host overhead with async scheduling",
+        "Clever parts: OS-paging analogy for KV; copy-on-write prefix sharing feeding automatic prefix caching; wide model coverage with fast day-0 support; pluggable quantization (AWQ/GPTQ/fp8), speculative decoding, guided decoding backends, and multi-LoRA multiplexing",
+        "What to steal: the separation of logical (block table) from physical KV, iteration-level scheduling as the unit of work, and treating prefix reuse as a memory-sharing problem rather than an application cache",
+        "What's dated/weaker: peak single-config throughput/latency still trails a compiled TensorRT-LLM engine; Python scheduler overhead matters at very high request rates; historically the paged kernel traded some raw speed for the memory win"
+      ],
+      "links": ["Concept - PagedAttention", "Concept - Continuous Batching", "Concept - Chunked Prefill", "Concept - Automatic Prefix Caching", "Breakdown - SGLang and RadixAttention", "Breakdown - TensorRT-LLM", "Playbook - Tuning an LLM Serving Deployment", "Concept - Multi-LoRA Serving", "Concept - Speculative Decoding", "Lore - The KV Cache Fragmentation Crisis"]
+    },
+    {
+      "title": "Breakdown - SGLang and RadixAttention",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "How SGLang's runtime and RadixAttention win on shared-prefix and structured-output workloads. IN: the radix-tree KV cache, compressed-FSM jump-forward decoding, the zero-overhead scheduler, and its DeepSeek serving strength. OUT: the prefix-caching concept generally (link Concept - Automatic Prefix Caching), constrained-decoding theory (link Concept - Constrained Decoding).",
+      "key_points": [
+        "Identity: from LMSYS/Berkeley (Zheng et al. 2024); a frontend DSL plus a high-performance runtime; widely used to serve DeepSeek and by xAI and others for high-throughput shared-prefix workloads as of 2026",
+        "RadixAttention: index all live KV in a radix (prefix) tree with LRU eviction, so ANY shared prefix across concurrent requests is reused automatically -- not just a fixed system prompt; a large win for agents, few-shot, RAG, and tree-search/branching workloads",
+        "Structured output: compressed FSM with 'jump-forward' decoding emits deterministic grammar tokens (the mandatory JSON punctuation) without model calls, making constrained generation both faster and more reliable than naive per-token masking",
+        "Scheduler: overlap/zero-overhead scheduling that hides CPU scheduling behind GPU compute; strong continuous batching; fast support for DeepSeek MLA and large MoE with expert parallelism",
+        "What to steal: modeling KV reuse as a radix tree rather than a flat block hash, and folding grammar-forced tokens into the scheduler to skip model calls",
+        "Positioning vs vLLM: often faster on structured and shared-prefix workloads and on cutting-edge MoE models; the two engines have largely convergent feature sets, and the choice is workload-shaped rather than absolute"
+      ],
+      "links": ["Concept - Automatic Prefix Caching", "Concept - Constrained Decoding", "Breakdown - vLLM", "Concept - KV Cache", "Concept - Continuous Batching", "Concept - MoE Inference and Expert Parallelism", "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)", "Decision - Choosing an Inference Serving Framework"]
+    },
+    {
+      "title": "Breakdown - TensorRT-LLM",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "How NVIDIA's compiled inference stack extracts peak Hopper/Blackwell performance and what you pay in flexibility. IN: the ahead-of-time engine build, in-flight batching, fp8/fp4 and custom attention kernels, and Dynamo disaggregation. OUT: the FlashAttention kernel algorithm (link Deep Dive - FlashAttention), tensor-core hardware (link Concept - Tensor Cores).",
+      "key_points": [
+        "Identity: NVIDIA's inference library that COMPILES a model + GPU + precision + batch profile into an optimized engine ahead of time (kernel fusion, plugin kernels), rather than interpreting at runtime like vLLM",
+        "Performance: typically the highest peak throughput and lowest latency on NVIDIA hardware because it fuses kernels, uses XQA/custom attention, and fully exploits fp8 (Hopper) and fp4 (Blackwell) tensor-core paths plus fp8 KV cache",
+        "Features: in-flight batching (its continuous batching), paged KV, tensor/pipeline parallelism with custom all-reduce, speculative decoding and Medusa, and NVIDIA Dynamo for prefill-decode disaggregated serving at fleet scale",
+        "The cost: an engine must be built per model/GPU/precision/batch-shape, so iteration is slow and configs are rigid; the C++/Python runtime and Triton-backend integration are heavier to operate than vLLM; new models are supported later than in the vLLM/SGLang world",
+        "What to steal: ahead-of-time compilation and kernel fusion for a frozen model under a strict SLO, and first-class fp8/fp4 KV to squeeze memory and bandwidth",
+        "When it wins: a stable, high-value model served at fleet scale where a tight p99 justifies the build/ops overhead; when it loses: rapid model churn, research iteration, or heterogeneous non-NVIDIA hardware"
+      ],
+      "links": ["Concept - Tensor Cores", "Concept - FP8 and Low-Precision Inference", "Concept - Continuous Batching", "Concept - Prefill-Decode Disaggregation", "Breakdown - vLLM", "Concept - All-Reduce and Collective Operations", "Deep Dive - FlashAttention", "Decision - Choosing an Inference Serving Framework"]
+    },
+    {
+      "title": "Concept - KV Cache Quantization",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Quantizing the KV cache (as opposed to the weights) to fit more concurrency or longer context, and why keys and values need different treatment. IN: fp8/int4 KV, per-channel vs per-token asymmetry, sink-token sensitivity, in-kernel dequant. OUT: weight quantization (link Concept - Post-Training Quantization Formats), KV eviction/sparsity (link Concept - KV Cache Offloading and Compression).",
+      "key_points": [
+        "Motivation: at long context and high batch the KV cache, not the weights, is the memory ceiling, so halving KV precision (fp16 -> fp8) roughly doubles context length or concurrency at fixed VRAM -- often a bigger practical win than weight quant",
+        "Key vs value asymmetry: keys have large per-channel outliers (they feed the attention dot-product) while values are better behaved; KIVI (Liu et al. 2024) quantizes keys per-channel and values per-token, reaching 2-bit KV with modest loss by respecting this structure",
+        "Sink sensitivity: the first few tokens act as attention sinks (see Concept - Attention Sinks) and carry disproportionate weight; quantizing them coarsely hurts far more than quantizing mid-sequence tokens, so good schemes keep sinks in higher precision",
+        "Deployment: vLLM and TensorRT-LLM expose fp8 KV cache (kv-cache-dtype fp8) for ~2x KV capacity at near-lossless quality on Hopper+; int4 KV is more aggressive and best reserved for extreme-context or memory-desperate cases",
+        "Kernel cost: the attention kernel must dequantize K,V on the fly, so KV quant trades a little compute and kernel complexity for large memory savings; the win is bandwidth too, since less KV is read per step",
+        "Failure modes: quality cliffs on long-context retrieval (needle-in-haystack) appear before perplexity moves; quantizing sink tokens or using symmetric quant on outlier-heavy keys causes disproportionate degradation"
+      ],
+      "links": ["Concept - KV Cache", "Concept - Post-Training Quantization Formats", "Concept - Attention Sinks", "Concept - KV Cache Offloading and Compression", "Concept - FP8 and Low-Precision Inference", "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)", "Gotchas - Quantization Quality Loss", "Reference - Memory Math for Transformers"]
+    },
+    {
+      "title": "Concept - FP8 and Low-Precision Inference",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The hardware-native narrow floating-point formats used for inference below bf16: fp8 (E4M3/E5M2) and the fp4 microscaling formats (MXFP4, NVFP4), including scaling recipes and hardware gating. IN: format layouts, per-tensor/per-token/block scaling, DeepSeek/Blackwell practice, and quality recovery. OUT: integer PTQ formats (link Concept - Post-Training Quantization Formats), floating-point fundamentals (link Concept - Floating Point for Deep Learning).",
+      "key_points": [
+        "FP8 formats: E4M3 (4 exponent, 3 mantissa) for weights/activations and E5M2 (more range, less precision) mostly for gradients; Hopper/Ada tensor cores run fp8 natively for a ~2x throughput and memory win over bf16, and it is near-lossless with proper scaling",
+        "Scaling granularity is what preserves quality: per-tensor is cheapest but fragile to outliers; per-token (activations) and per-channel (weights) are more robust; DeepSeek-V3 used fine-grained tile/block-wise fp8 scaling to train AND serve in fp8 with negligible loss",
+        "FP4 (2025-26 frontier): MXFP4 (OCP microscaling -- E2M1 values sharing one 8-bit scale per 32-element block) and NVFP4 (Blackwell, an fp8 scale per 16-element block for finer granularity); Blackwell tensor cores run fp4 natively for another ~2x over fp8",
+        "Quality recovery at fp4 needs help: mixed precision (keep sensitive layers/experts higher), quantization-aware tuning, or rotation/Hadamard transforms to tame outliers; fp4 is approaching fp8-class quality on many tasks but is not yet a free drop-in",
+        "Hardware gating is a hard constraint: fp8 requires Hopper+ (H100/H200) and fp4 requires Blackwell (B200/GB200); on older silicon these formats emulate slowly or fail, so precision choice is coupled to your fleet's GPUs",
+        "Practical stance (as of 2026): fp8 weights + fp8 KV is the near-lossless default on Hopper+; fp4 is where high-throughput serving is heading on Blackwell but still demands per-model quality validation"
+      ],
+      "links": ["Concept - Post-Training Quantization Formats", "Concept - Floating Point for Deep Learning", "Concept - Tensor Cores", "Concept - Mixed Precision Training", "Concept - KV Cache Quantization", "Decision - Choosing a Quantization Method", "Concept - GPU Memory Hierarchy", "Gotchas - Quantization Quality Loss"]
+    },
+    {
+      "title": "Concept - Prefill-Decode Disaggregation",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Running prefill and decode on physically separate GPU pools so each meets its own latency target without interfering, at the cost of moving the KV cache between them. IN: the DistServe/Splitwise/Mooncake designs, KV transfer over NVLink/RDMA, and independent scaling. OUT: the interleaving alternative (link Concept - Chunked Prefill), KV tiering across storage (link Concept - KV Cache Offloading and Compression).",
+      "key_points": [
+        "Motivation: prefill is compute-bound and decode is memory-bound, and co-scheduling them (even with chunked prefill) forces a compromise on both TTFT and TPOT; disaggregation lets prefill nodes and decode nodes each be sized, batched, and even use different GPUs to hit their own SLO",
+        "Systems: DistServe (Zhong et al. 2024), Splitwise (Patel et al. 2024, Microsoft), and Mooncake (Moonshot/Kimi 2024, a KVCache-centric disaggregated architecture); NVIDIA Dynamo and vLLM now ship production P/D disaggregation",
+        "The catch is KV transfer: after prefill, the whole KV cache for the request must move from the prefill GPU to the decode GPU over NVLink or RDMA/InfiniBand before decode starts; the transfer bandwidth and latency directly add to TTFT",
+        "Wins: meet a tight TTFT and a tight TPOT simultaneously (impossible on shared hardware), higher goodput under mixed load, and cost efficiency by putting prefill on cheaper high-FLOP GPUs and decode on high-bandwidth GPUs",
+        "Mooncake's insight: treat the KV cache as a first-class, globally addressable store so cached prefixes are reused ACROSS the disaggregated fleet, not just within one node -- coupling disaggregation with distributed prefix caching",
+        "Failure modes: KV transfer becomes the bottleneck on slow interconnect (negating the win), orchestration complexity grows, and load imbalance between prefill and decode pools wastes one side"
+      ],
+      "links": ["Concept - Prefill and Decode Phases", "Concept - Chunked Prefill", "Concept - KV Cache Offloading and Compression", "Concept - All-Reduce and Collective Operations", "Reference - Inference Performance Math", "Concept - Latency, Throughput, and Cost in LLM Serving", "Breakdown - TensorRT-LLM", "Concept - GPU Memory Hierarchy"]
+    },
+    {
+      "title": "Concept - Self-Drafting Speculative Decoding (Medusa, EAGLE, Lookahead)",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The family of speculative decoding methods that avoid a separate draft model by predicting multiple tokens from the target model itself. IN: Medusa heads, EAGLE feature-level drafting, Lookahead Jacobi decoding, tree verification, and acceptance-length numbers. OUT: the base draft-verify mechanism and losslessness proof (link Concept - Speculative Decoding).",
+      "key_points": [
+        "Motivation: a separate draft model needs training, memory, and tokenizer alignment; self-drafting reuses the target's own computation to propose tokens, removing the second-model overhead while keeping the lossless verification of speculative decoding",
+        "Medusa (Cai et al. 2024): add several lightweight decoding heads that predict tokens at positions t+1, t+2, ... from the SAME hidden state; a tree-attention verification checks many candidate continuations in one pass; simple to bolt on but heads are less accurate deeper out",
+        "EAGLE (Li et al. 2024): autoregress at the FEATURE (hidden-state) level rather than the token level, which is far more predictable, giving higher acceptance; EAGLE-2/EAGLE-3 add dynamic, context-aware draft trees for ~3-4x speedups and mean accepted lengths around 4-5 tokens",
+        "Lookahead decoding (Fu et al. 2024): no draft or extra heads -- run a Jacobi-iteration that generates n-gram candidates in parallel and verifies them, breaking the strict sequential dependency using only the target model",
+        "Tree verification: instead of a single draft sequence, verify a TREE of candidate continuations in one forward pass and accept the best root-to-node path, which raises expected accepted tokens per target call",
+        "Same regime caveat as base speculation: these help low-batch latency; at high batch the extra verification compute can erode throughput, so they're deployed on latency-critical paths and increasingly integrated into vLLM/SGLang/TensorRT-LLM"
+      ],
+      "links": ["Concept - Speculative Decoding", "Concept - KV Cache", "Concept - Attention Mechanism", "Concept - Knowledge Distillation", "Breakdown - SGLang and RadixAttention", "Snippet - Speculative Decoding Verification", "Concept - Latency, Throughput, and Cost in LLM Serving", "Concept - The Roofline Model"]
+    },
+    {
+      "title": "Concept - KV Cache Offloading and Compression",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Managing a KV cache that exceeds HBM by tiering it across memory/storage and by algorithmically dropping or compressing tokens. IN: HBM->CPU->NVMe tiering, prefetch overlap, and the eviction/sparsity methods (StreamingLLM, H2O, SnapKV, sliding window). OUT: reducing KV precision (link Concept - KV Cache Quantization), cross-node KV stores under disaggregation (link Concept - Prefill-Decode Disaggregation).",
+      "key_points": [
+        "Two distinct strategies for a too-big KV: lossless tiering (move tokens to slower memory and fetch on demand) and lossy compression (drop or summarize tokens you predict won't be attended to); they compose with KV quantization",
+        "Tiering: HBM -> CPU RAM -> local NVMe -> remote store, with prefetch to overlap PCIe/network transfer against compute; systems include LMCache, Mooncake's KV store, and vLLM CPU offload; FlexGen (Sheng et al. 2023) pioneered offloading for throughput-oriented single-GPU serving",
+        "The bandwidth math gates tiering: PCIe 4.0 is ~32 GB/s vs HBM ~3 TB/s (~100x slower), so offload only pays when the tokens are reused enough to amortize transfer or when the workload is latency-tolerant/throughput-oriented; naive offload stalls decode",
+        "Sink + window eviction: StreamingLLM (Xiao et al. 2023) keeps the first few attention-sink tokens plus a sliding window, enabling effectively infinite streaming without recompute; the softmax attention-sink phenomenon is why dropping the first tokens breaks the model",
+        "Importance eviction: H2O (Zhang et al. 2023) keeps 'heavy hitter' tokens by accumulated attention score; SnapKV (2024) compresses the prompt KV using the attention pattern observed over a trailing window before generation; sliding-window attention (Mistral) is the architectural version",
+        "Failure modes: eviction is lossy and degrades long-range retrieval / needle-in-haystack; PCIe becomes the decode bottleneck under offload; per-head vs global token budgets change which method preserves quality"
+      ],
+      "links": ["Concept - KV Cache", "Concept - KV Cache Quantization", "Concept - Attention Sinks", "Concept - Prefill-Decode Disaggregation", "Concept - Automatic Prefix Caching", "Concept - GPU Memory Hierarchy", "Concept - Rotary Position Embeddings (RoPE)", "Concept - Attention Mechanism"]
+    },
+    {
+      "title": "Snippet - Speculative Decoding Verification",
+      "type": "snippet",
+      "level": "advanced",
+      "scope": "A runnable implementation of the modified-rejection-sampling verification step that makes speculative decoding lossless, with a check that its output distribution matches the target. IN: the accept/reject rule, the residual resample, the bonus token, and an empirical distribution-match test. OUT: the conceptual framing (link Concept - Speculative Decoding), self-drafting variants (link Concept - Self-Drafting Speculative Decoding (Medusa, EAGLE, Lookahead)).",
+      "key_points": [
+        "A ~50-line numpy/torch function: given draft probs q, target probs p (from one verification pass over k proposed tokens), and the k drafted token ids, return the accepted tokens plus one bonus token, using a passed RNG for reproducibility",
+        "Accept rule per position: draw u ~ Uniform(0,1); accept draft token x if u <= min(1, p[x]/q[x]); stop at the first rejection",
+        "On rejection at position i, resample the replacement from the normalized positive residual distribution norm(max(0, p - q)); after accepting all k (no rejection), append a bonus token sampled directly from p at position k+1 -- this is why you can gain up to k+1 tokens per target pass",
+        "Include an empirical proof: run the routine over many trials on a toy 8-token vocab and assert the sampled-token histogram matches sampling directly from p within tolerance, demonstrating the losslessness theorem",
+        "Why-it's-written-this-way: the residual max(0, p - q) plus the min(1, p/q) acceptance is exactly what algebraically reconstitutes p regardless of q; using q's own draws (not fresh ones) preserves the coupling; the bonus token is free because the target already computed position k+1",
+        "Expected output: printed acceptance counts across trials, the mean accepted length (rising as q approaches p), and a passing distribution-match assertion"
+      ],
+      "links": ["Concept - Speculative Decoding", "Concept - Self-Drafting Speculative Decoding (Medusa, EAGLE, Lookahead)", "Concept - Sampling and Decoding Parameters", "Concept - KL Divergence"]
+    },
+    {
+      "title": "Concept - Advanced Samplers (min-p, Mirostat, DRY)",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "The sampler zoo beyond temperature/top-p that emerged largely from the local-LLM community, with the mechanism and the folklore of when each helps. IN: min-p, Mirostat, DRY, typical/tail-free/XTC, and the sampler-ordering debate. OUT: the core sampling parameters (link Concept - Sampling and Decoding Parameters), the reference implementation (link Snippet - Sampling from Logits).",
+      "key_points": [
+        "min-p (Nguyen et al. 2024): keep tokens whose probability >= min_p * p_max, so the truncation threshold ADAPTS to how confident the model is -- when the top token dominates it keeps few, when the distribution is flat it keeps more; more robust than top-p at high temperature where nucleus admits the garbage tail",
+        "Mirostat (Basu et al. 2020): a feedback controller that targets a set surprise/perplexity (tau) by dynamically adjusting the effective k each step, aiming to avoid both repetitive 'boredom' traps and incoherent 'confusion' -- perplexity control as a control-theory loop",
+        "DRY (Don't Repeat Yourself): a sequence-level repetition penalty over repeated n-grams/suffixes, which suppresses looping far better than token-level repetition_penalty because it targets the actual repeated span rather than penalizing individual tokens (which harms legitimate reuse of common words)",
+        "Others: locally typical sampling (Meister et al. -- keep tokens near the expected information content, not just the highest probability), tail-free sampling, top-a, and XTC (eXclude Top Choices -- deliberately drop the most probable tokens to boost creativity in roleplay)",
+        "The sampler-ordering wars: llama.cpp exposes an explicit --samplers order because applying penalties/temperature/min-p in different sequences changes results; the community has strong, partly-folklore opinions on the 'correct' order, and defaults differ across backends",
+        "When each is used (as of 2026, much of this is well-sourced folklore): min-p is now a mainstream default in many local stacks; Mirostat and XTC live in creative/roleplay setups; DRY is the go-to for loop suppression -- factual/tool workloads still lean on low temperature + top-p"
+      ],
+      "links": ["Concept - Sampling and Decoding Parameters", "Snippet - Sampling from Logits", "Concept - Softmax", "Concept - Entropy and Cross-Entropy", "Breakdown - llama.cpp and GGUF Is Missing", "Lore - The llama.cpp Insurgency", "Gotchas - LLM Serving in Production", "Concept - Nondeterminism in LLM Inference"]
+    },
+    {
+      "title": "Concept - Token Healing",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "The rarely-documented fix for prompts or constraints that end mid-token, where the tokenizer boundary biases generation into an unnatural continuation. IN: the trailing-partial-token problem, why it corrupts URLs/code, and the backtrack-and-reconstrain remedy. OUT: BPE training and merges (link Concept - Byte-Pair Encoding), constrained decoding masking (link Concept - Constrained Decoding).",
+      "key_points": [
+        "The problem: a prompt ending in 'http' forces the model to continue from the token 'http', but in training the natural token is 'https' or 'http://' as a single merge -- so the model is pushed onto a low-probability path it never saw, degrading output right at the boundary",
+        "It bites hardest on URLs, file paths, code identifiers, and numbers, where BPE greedily merges characters and the 'obvious' next text is actually part of the same token the prompt truncated; constrained decoding makes it worse because the grammar forces tokens onto the misaligned boundary",
+        "Root cause: the model's distribution is over whole tokens produced by GREEDY tokenization of training text, but a user-supplied prompt is tokenized independently and may split at a boundary the training tokenizer would never have chosen -- inference-time tokenization != training-time tokenization",
+        "The fix (token healing): back up over the last one or few tokens of the prompt, then constrain generation so its first token(s) must start with the removed prefix string, letting the model re-choose the NATURAL merge (e.g. regenerate 'https://' as one token instead of continuing 'http' + '://')",
+        "Implementations: Microsoft's guidance library popularized it, HuggingFace exposes token_healing in generation, and llama.cpp/grammar stacks handle boundary alignment; it composes with constrained decoding, which must align its FSM to token (not character) boundaries",
+        "Why it's unicorn knowledge: it's a silent quality bug -- outputs look plausible, evals rarely target it, and almost nobody documents it -- yet it measurably improves completion quality on structured/technical text and is essential for correct prefix-constrained generation"
+      ],
+      "links": ["Concept - Byte-Pair Encoding", "Concept - Constrained Decoding", "Concept - Sampling and Decoding Parameters", "Concept - Streaming Detokenization", "Lore - Glitch Tokens", "Concept - The Inference Request Lifecycle", "Playbook - Reliable Structured Output", "Concept - Tool Use and Function Calling"]
+    },
+    {
+      "title": "Concept - Nondeterminism in LLM Inference",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "Why the same prompt at temperature 0 can produce different outputs on a server, and what it takes to make inference reproducible. IN: floating-point non-associativity, batch-variance in kernels, the specific culprits, and batch-invariant kernels. OUT: the sampling parameters themselves (link Concept - Sampling and Decoding Parameters), floating-point fundamentals (link Concept - Floating Point for Deep Learning).",
+      "key_points": [
+        "The myth: 'temperature 0 = greedy = deterministic.' True for the math, false for a real server -- identical requests can yield different tokens across runs, and the same request behaves differently depending on what ELSE is in its batch",
+        "Root cause: floating-point addition is non-associative (a+b)+c != a+(b+c) under rounding, and GPU reductions in matmul/attention/norm sum in a nondeterministic ORDER, so tiny rounding differences occasionally flip an argmax at a near-tie logit",
+        "The 2025 clarification ('Defeating Nondeterminism in LLM Inference', Thinking Machines / Horace He): the dominant cause is BATCH-VARIANCE -- kernels change their reduction strategy with batch size/shape, so a request's numerics depend on concurrent load; the fix is batch-invariant kernels that reduce identically regardless of batch",
+        "Other contributors: atomicAdd-based reductions, cuBLAS/cuDNN algorithm autoselection per shape, FlashAttention split-K variants, chunked-prefill chunk boundaries, and MoE routing that shifts under batching",
+        "Consequences that matter: flaky evals and unreproducible leaderboard scores, RL training instability when the inference engine used for rollouts disagrees with the trainer (a real GRPO/RLVR footgun), and cache-key mismatches when 'identical' generations differ",
+        "Fixes and their cost: batch-invariant kernels, fixed reduction order, and deterministic library flags give reproducibility but sacrifice some throughput; most production serving accepts nondeterminism and instead controls it where it bites (evals, caching, RL)"
+      ],
+      "links": ["Concept - Floating Point for Deep Learning", "Concept - Sampling and Decoding Parameters", "Concept - Continuous Batching", "Concept - Chunked Prefill", "Concept - GRPO and RL with Verifiable Rewards", "Concept - Statistical Rigor in Model Evaluation", "Deep Dive - FlashAttention", "Gotchas - LLM Serving in Production"]
+    },
+    {
+      "title": "Lore - The KV Cache Fragmentation Crisis",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The war story of how LLM serving wasted most of its GPU memory to KV fragmentation until PagedAttention reframed it as a virtual-memory problem. IN: what the pre-2023 stacks did wrong, the Berkeley insight, and the field-wide re-standardization. OUT: the PagedAttention mechanism itself (link Concept - PagedAttention), the vLLM system (link Breakdown - vLLM).",
+      "key_points": [
+        "What happened: through 2022-early-2023, every serving stack (HuggingFace generate, NVIDIA FasterTransformer, early TGI) pre-allocated a CONTIGUOUS KV buffer of max_seq_len for each request, because the attention kernels assumed contiguous K,V",
+        "The waste: real requests are far shorter and wildly variable in length, so reservations sat mostly empty (internal fragmentation) and freed regions left unusable holes (external fragmentation) -- the vLLM paper measured 60-80% of the KV memory wasted, which capped batch sizes tiny and left expensive GPUs idle",
+        "The insight: the Berkeley Sky Lab team (Woosuk Kwon, Zhuohan Li, Ying Sheng, Lianmin Zheng, Cody Yu, Joseph Gonzalez, Ion Stoica and collaborators) recognized this as EXACTLY the problem operating systems solved decades earlier with virtual memory and paging -- so page the KV cache into fixed blocks with a per-request block table",
+        "The result: PagedAttention + vLLM (SOSP 2023) cut waste to under 4%, roughly 2-4x'd throughput overnight, and the entire field re-standardized on paged KV within about a year; contiguous-KV serving became legacy almost immediately",
+        "The lesson (mechanical): the binding constraint on LLM serving was memory MANAGEMENT, not compute or kernel micro-optimization -- a classic systems idea (paging) beat years of attempted kernel speedups, because the bottleneck was in the wrong layer",
+        "Evidence status: well-documented and verified -- the SOSP paper, public talks, and the open-source vLLM codebase all corroborate the numbers and the OS-paging framing"
+      ],
+      "links": ["Concept - PagedAttention", "Breakdown - vLLM", "Concept - KV Cache", "Concept - GPU Memory Hierarchy", "Concept - Continuous Batching", "Reference - Memory Math for Transformers"]
+    },
+    {
+      "title": "Lore - The llama.cpp Insurgency",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "How a dependency-free C/C++ project put frontier-class models on laptops and phones and built the quantization culture the whole field now uses. IN: the ggml/GGUF story, k-quants and imatrix, the local-LLM community, and its influence upward. OUT: the quantization format mechanics (link Concept - Post-Training Quantization Formats), the community samplers it spread (link Concept - Advanced Samplers (min-p, Mirostat, DRY)).",
+      "key_points": [
+        "What happened: in early 2023 Georgi Gerganov released llama.cpp -- a pure C/C++ inference engine with no Python or CUDA dependency, running LLaMA on a MacBook via 4-bit quantization the week the weights leaked; it turned 'you need a datacenter' into 'you need a laptop'",
+        "The ggml/GGUF lineage: a single-file, memory-mappable model format with metadata, evolving from ggml to GGUF; k-quants (Q2_K..Q6_K) put more bits on the layers that matter (mixed per-tensor precision), and later i-quants + importance matrices (imatrix) pushed usable quality below 4 bits",
+        "imatrix folklore made real: calibrating quantization error against an importance matrix (which weights actually drive activations) recovered large quality at 2-3 bits, and the community empirically mapped which quant levels (Q4_K_M as the famous sweet spot) preserve capability -- knowledge that lived in Reddit/Discord before papers",
+        "The ecosystem it spawned: Ollama, LM Studio, Jan, and countless local apps wrap llama.cpp; it drove Metal/unified-memory inference on Macs, partial-GPU-offload (n_gpu_layers), GBNF grammars, and popularized community samplers (min-p, Mirostat, DRY) that later influenced server engines",
+        "The lesson: a huge fraction of practical inference knowledge -- quantization tradeoffs, sampler behavior, running big models on tiny hardware -- was discovered OUTSIDE the labs by a distributed hobbyist community, and flowed UPWARD into vLLM/SGLang and vendor stacks",
+        "Evidence status: verified project history and formats; the specific quality rankings of quant levels are well-sourced community folklore (extensive but informal benchmarking) rather than peer-reviewed results, which is exactly what makes it tribal knowledge"
+      ],
+      "links": ["Concept - Post-Training Quantization Formats", "Concept - Advanced Samplers (min-p, Mirostat, DRY)", "Concept - Constrained Decoding", "Decision - Choosing an Inference Serving Framework", "Concept - GPU Memory Hierarchy", "Reference - Model Genealogy", "Concept - Nondeterminism in LLM Inference", "Concept - KV Cache Quantization"]
+    }
+  ]
+}

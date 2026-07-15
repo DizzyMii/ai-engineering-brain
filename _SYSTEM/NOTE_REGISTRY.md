@@ -1,0 +1,714 @@
+# NOTE REGISTRY — The Link Contract
+
+Every `[[wikilink]]` in the vault must exactly match a title in this file (Linking Law 5.1).
+Frozen from the 24 domain inventories on 2026-07-14. Domains 20-24 are written; 01-19 arrive with the engineering build. Two collisions resolved: `Breakdown - SWE-bench` (owned by 20), `Concept - Chat Templates and Special Tokens` (owned by 09).
+
+## 01 - Foundations
+- Concept - Vector Norms and Distances — concept/surface
+- Concept - Matrix Multiplication as the Atom of Deep Learning — concept/core
+- Concept - Entropy and Cross-Entropy — concept/core
+- Concept - KL Divergence — concept/core
+- Concept - Floating Point for Deep Learning — concept/core
+- Concept - Maximum Likelihood Estimation — concept/core
+- Concept - Hypothesis Testing and p-values — concept/core
+- Reference - Floating Point Formats — reference/core
+- Snippet - The Log-Sum-Exp Trick — snippet/core
+- Concept - Singular Value Decomposition — concept/advanced
+- Concept - The Condition Number — concept/advanced
+- Concept - Convexity and the Loss Landscape — concept/advanced
+- Gotchas - Numerical Stability — gotchas/advanced
+- Breakdown - bfloat16 — breakdown/advanced
+- Decision - Choosing a Matrix Factorization — decision/advanced
+- Playbook - Running a Statistically Valid Experiment — playbook/advanced
+- Concept - The Geometry of High-Dimensional Spaces — concept/frontier
+- Concept - The Hessian Spectrum in Deep Learning — concept/frontier
+- Lore - The Nondeterminism of Floating-Point Reductions — lore/unicorn
+- Concept - Subnormal Numbers and Gradual Underflow — concept/unicorn
+- Lore - Loss Scaling and the fp16 Underflow Crisis — lore/unicorn
+
+## 02 - Neural Networks
+- Concept - The Multilayer Perceptron — concept/surface
+- Concept - Loss Functions for Neural Networks — concept/surface
+- Concept - Backpropagation — concept/core
+- Concept - The Training Loop — concept/core
+- Concept - Softmax — concept/core
+- Concept - Activation Functions — concept/core
+- Concept - Stochastic Gradient Descent and Momentum — concept/core
+- Concept - Dropout — concept/core
+- Concept - Embeddings as Learned Representations — concept/core
+- Snippet - A Minimal Training Loop in PyTorch — snippet/core
+- Concept - Adam and AdamW — concept/advanced
+- Concept - RMSNorm and LayerNorm — concept/advanced
+- Concept - Weight Initialization — concept/advanced
+- Concept - Vanishing and Exploding Gradients — concept/advanced
+- Concept - Residual Connections — concept/advanced
+- Concept - Generalization in Deep Learning — concept/advanced
+- Breakdown - Batch Normalization — breakdown/advanced
+- Reference - Optimizer Update Rules — reference/advanced
+- Decision - Choosing a Normalization Layer — decision/advanced
+- Playbook - Debugging a Neural Network That Won't Train — playbook/advanced
+- Concept - The Edge of Stability — concept/frontier
+- Concept - Sharpness-Aware Minimization — concept/frontier
+- Concept - Normalization-Free Networks — concept/frontier
+- Gotchas - Training Neural Networks — gotchas/unicorn
+- Lore - The Adam vs SGD Generalization Wars — lore/unicorn
+- Concept - Adam's Epsilon and Bias Correction — concept/unicorn
+
+## 03 - Architectures
+- Deep Dive - The Transformer — deep-dive/core
+- Concept - Attention Mechanism — concept/core
+- Concept - Multi-Head Attention Variants (MHA MQA GQA MLA) — concept/advanced
+- Concept - Rotary Position Embeddings (RoPE) — concept/advanced
+- Concept - Mixture of Experts Architecture — concept/advanced
+- Concept - State Space Models and Mamba — concept/advanced
+- Concept - Positional Encoding — concept/core
+- Concept - Feed-Forward Networks and GLU Variants — concept/core
+- Concept - Normalization Placement (Pre-Norm, Post-Norm, DeepNorm) — concept/advanced
+- Concept - The Residual Stream — concept/advanced
+- Concept - Encoder-Decoder and Decoder-Only Architectures — concept/surface
+- Concept - Context Length Extension — concept/frontier
+- Concept - Sparse and Sliding-Window Attention — concept/advanced
+- Concept - Convolutional Neural Networks — concept/surface
+- Concept - Recurrent Networks and the LSTM — concept/surface
+- Concept - Linear Attention — concept/frontier
+- Concept - Hybrid SSM-Attention Architectures — concept/frontier
+- Concept - Multi-Token Prediction — concept/frontier
+- Breakdown - Mixtral 8x7B — breakdown/advanced
+- Breakdown - DeepSeek-V3 Architecture — breakdown/unicorn
+- Reference - Transformer Architecture Cheat Sheet — reference/core
+- Decision - Dense vs Mixture-of-Experts — decision/advanced
+- Decision - Choosing a Sequence Mixer — decision/frontier
+- Gotchas - Implementing Attention — gotchas/advanced
+- Gotchas - Mixture of Experts — gotchas/advanced
+- Snippet - Scaled Dot-Product Attention from Scratch — snippet/core
+- Snippet - RoPE Implementation — snippet/advanced
+- Snippet - Top-2 MoE Routing Layer — snippet/advanced
+- Checklist - New Architecture Bring-Up — checklist/advanced
+- Playbook - Numerically Matching a Reference Implementation — playbook/unicorn
+- Lore - The Standardization of the Transformer Block — lore/unicorn
+- Pattern - Interleaving Global and Local Attention — pattern/frontier
+- Concept - Attention Logit Stabilization (QK-Norm and Soft-Capping) — concept/unicorn
+
+## 04 - Training at Scale
+- Concept - Why Models Don't Fit on One GPU — concept/surface
+- Concept - Byte-Pair Encoding — concept/surface
+- Concept - Gradient Accumulation and Microbatching — concept/surface
+- Concept - Scaling Laws — concept/core
+- Concept - Data Parallelism and ZeRO — concept/core
+- Concept - Tensor and Pipeline Parallelism — concept/core
+- Concept - Mixed Precision Training — concept/core
+- Concept - Learning Rate Schedules for Pretraining — concept/core
+- Concept - AdamW at Scale — concept/core
+- Concept - Pretraining Objectives — concept/core
+- Concept - Tokenizer Training — concept/core
+- Concept - MoE Training and Load Balancing — concept/core
+- Reference - Parallelism Strategies — reference/core
+- Snippet - Training a BPE Tokenizer — snippet/core
+- Deep Dive - Anatomy of a Pretraining Run — deep-dive/advanced
+- Concept - Fully Sharded Data Parallel (FSDP) — concept/advanced
+- Concept - Sequence and Context Parallelism — concept/advanced
+- Concept - Expert Parallelism — concept/advanced
+- Pattern - 3D Parallelism Composition — pattern/advanced
+- Concept - Critical Batch Size — concept/advanced
+- Concept - Training Stability and Loss Spikes — concept/advanced
+- Concept - Distributed Checkpointing — concept/advanced
+- Concept - FP8 Training — concept/advanced
+- Decision - Choosing a Parallelism Strategy — decision/advanced
+- Breakdown - Megatron-LM — breakdown/advanced
+- Snippet - FSDP Minimal Setup — snippet/advanced
+- Checklist - Pre-Launch for a Large Training Run — checklist/advanced
+- Gotchas - Distributed Training — gotchas/advanced
+- Concept - muP and Hyperparameter Transfer — concept/frontier
+- Concept - Data-Constrained Scaling Laws — concept/frontier
+- Concept - Muon Optimizer — concept/frontier
+- Concept - Second-Order Optimizers at Scale — concept/frontier
+- Breakdown - DeepSeek-V3 Training — breakdown/frontier
+- Snippet - muP Coordinate Check — snippet/frontier
+- Gotchas - Tokenizers — gotchas/unicorn
+- Lore - The Loss Spike Chronicles — lore/unicorn
+- Playbook - Debugging a Diverging Training Run — playbook/unicorn
+- Reference - LLM Pretraining Hyperparameters — reference/unicorn
+- Concept - z-loss and Logit Soft-Capping — concept/unicorn
+
+## 05 - Data Engineering
+- Concept - Common Crawl and Web Data at Scale — concept/surface
+- Concept - The Data-Centric View of Model Quality — concept/surface
+- Concept - Synthetic Training Data — concept/core
+- Concept - Data Mixtures — concept/core
+- Concept - Quality Filtering for Pretraining Data — concept/core
+- Concept - Text Extraction from Web Pages — concept/core
+- Concept - Training Set Decontamination — concept/core
+- Concept - Copyright and Licensing of Training Data — concept/core
+- Deep Dive - The Pretraining Data Pipeline — deep-dive/advanced
+- Concept - Deduplication at Scale — concept/advanced
+- Concept - PII and Toxicity Filtering — concept/advanced
+- Reference - Data Filtering Heuristics — reference/advanced
+- Breakdown - FineWeb and FineWeb-Edu — breakdown/advanced
+- Breakdown - The Phi Models and Textbook-Quality Data — breakdown/advanced
+- Snippet - MinHash LSH Deduplication — snippet/advanced
+- Decision - Choosing a Quality Filtering Strategy — decision/advanced
+- Playbook - Building a Pretraining Corpus from Common Crawl — playbook/advanced
+- Concept - Data Curriculum and Ordering — concept/frontier
+- Concept - Learned Data Mixing (DoReMi and Mixing Laws) — concept/frontier
+- Concept - Semantic Deduplication — concept/frontier
+- Concept - Model Collapse from Synthetic Data — concept/frontier
+- Gotchas - Pretraining Data Pipelines — gotchas/unicorn
+- Lore - The C4 Blocklist Incident — lore/unicorn
+- Lore - Books3 and the Shadow Library Reckoning — lore/unicorn
+
+## 06 - Post-Training
+- Concept - The Post-Training Pipeline — concept/surface
+- Concept - Supervised Fine-Tuning (SFT) — concept/surface
+- Concept - Loss Masking and Sequence Packing — concept/core
+- Concept - Reward Models — concept/core
+- Concept - Direct Preference Optimization (DPO) — concept/core
+- Concept - Knowledge Distillation — concept/core
+- Concept - Reward Hacking — concept/core
+- Concept - Rejection Sampling and Expert Iteration — concept/core
+- Reference - Post-Training Methods Comparison — reference/core
+- Checklist - Preference Data Quality — checklist/core
+- Snippet - Loss Masking a Chat Dataset — snippet/core
+- Decision - Choosing a Preference Optimization Algorithm — decision/core
+- Deep Dive - RLHF End to End — deep-dive/advanced
+- Concept - PPO for Language Models — concept/advanced
+- Concept - KL Control in RLHF — concept/advanced
+- Concept - The DPO Variant Family (IPO KTO ORPO SimPO) — concept/advanced
+- Concept - GRPO and RL with Verifiable Rewards — concept/advanced
+- Concept - Model Merging — concept/advanced
+- Concept - Constitutional AI and RLAIF — concept/advanced
+- Gotchas - RLHF Training Instabilities — gotchas/advanced
+- Playbook - Debugging an RLHF Run — playbook/advanced
+- Snippet - DPO Loss Implementation — snippet/advanced
+- Snippet - GRPO Advantage Computation — snippet/advanced
+- Breakdown - Tulu 3 — breakdown/advanced
+- Concept - Process and Outcome Reward Models — concept/frontier
+- Concept - Reasoning Training and Long Chain-of-Thought — concept/frontier
+- Concept - Persona and Character Training — concept/frontier
+- Breakdown - DeepSeek-R1 — breakdown/frontier
+- Concept - Spurious Rewards and RLVR Failure Modes — concept/frontier
+- Concept - Entropy Collapse and Exploration in RL Fine-Tuning — concept/frontier
+- Concept - Length Bias in Preference Optimization — concept/unicorn
+- Gotchas - Chat Template Bugs — gotchas/unicorn
+- Lore - The Sycophancy Problem — lore/unicorn
+- Lore - Reward Hacking Hall of Fame — lore/unicorn
+
+## 07 - Inference & Serving
+- Concept - The Inference Request Lifecycle — concept/surface
+- Concept - Prefill and Decode Phases — concept/surface
+- Concept - Sampling and Decoding Parameters — concept/surface
+- Concept - KV Cache — concept/core
+- Concept - Continuous Batching — concept/core
+- Concept - Automatic Prefix Caching — concept/core
+- Concept - Post-Training Quantization Formats — concept/core
+- Concept - Latency, Throughput, and Cost in LLM Serving — concept/core
+- Concept - Streaming Detokenization — concept/core
+- Decision - Choosing an Inference Serving Framework — decision/core
+- Reference - Inference Performance Math — reference/core
+- Checklist - Pre-Production Inference Readiness — checklist/core
+- Snippet - Sampling from Logits — snippet/core
+- Concept - PagedAttention — concept/advanced
+- Concept - Chunked Prefill — concept/advanced
+- Concept - Speculative Decoding — concept/advanced
+- Concept - Constrained Decoding — concept/advanced
+- Concept - Multi-LoRA Serving — concept/advanced
+- Concept - MoE Inference and Expert Parallelism — concept/advanced
+- Decision - Choosing a Quantization Method — decision/advanced
+- Gotchas - LLM Serving in Production — gotchas/core
+- Gotchas - Quantization Quality Loss — gotchas/advanced
+- Playbook - Tuning an LLM Serving Deployment — playbook/advanced
+- Breakdown - vLLM — breakdown/advanced
+- Breakdown - SGLang and RadixAttention — breakdown/advanced
+- Breakdown - TensorRT-LLM — breakdown/advanced
+- Concept - KV Cache Quantization — concept/frontier
+- Concept - FP8 and Low-Precision Inference — concept/frontier
+- Concept - Prefill-Decode Disaggregation — concept/frontier
+- Concept - Self-Drafting Speculative Decoding (Medusa, EAGLE, Lookahead) — concept/frontier
+- Concept - KV Cache Offloading and Compression — concept/frontier
+- Snippet - Speculative Decoding Verification — snippet/advanced
+- Concept - Advanced Samplers (min-p, Mirostat, DRY) — concept/unicorn
+- Concept - Token Healing — concept/unicorn
+- Concept - Nondeterminism in LLM Inference — concept/unicorn
+- Lore - The KV Cache Fragmentation Crisis — lore/unicorn
+- Lore - The llama.cpp Insurgency — lore/unicorn
+
+## 08 - Hardware & Systems
+- Concept - Why GPUs for Deep Learning — concept/surface
+- Concept - The Memory Wall — concept/surface
+- Concept - Anatomy of an AI Training Cluster — concept/surface
+- Concept - GPU Memory Hierarchy — concept/core
+- Concept - The CUDA Programming Model — concept/core
+- Concept - Tensor Cores — concept/core
+- Concept - The Roofline Model — concept/core
+- Concept - Model FLOPs Utilization (MFU) — concept/core
+- Concept - GPU Interconnects (NVLink, InfiniBand, RoCE) — concept/core
+- Concept - All-Reduce and Collective Operations — concept/core
+- Reference - Memory Math for Transformers — reference/core
+- Concept - Triton — concept/core
+- Reference - AI Accelerator Landscape — reference/core
+- Deep Dive - FlashAttention — deep-dive/advanced
+- Concept - Matmul Tiling on GPUs — concept/advanced
+- Concept - Kernel Fusion — concept/advanced
+- Concept - Occupancy and Latency Hiding — concept/advanced
+- Concept - Systolic Arrays — concept/advanced
+- Concept - Network Topology for AI Clusters — concept/advanced
+- Playbook - Profiling and Optimizing a GPU Kernel — playbook/advanced
+- Gotchas - GPU Kernel Performance — gotchas/advanced
+- Playbook - Debugging a Hung Distributed Training Job — playbook/advanced
+- Breakdown - The Google TPU — breakdown/advanced
+- Decision - Selecting GPUs for Training and Inference — decision/advanced
+- Snippet - Fused Softmax Kernel in Triton — snippet/advanced
+- Breakdown - The NVIDIA Datacenter GPU (Hopper and Blackwell) — breakdown/frontier
+- Breakdown - NCCL — breakdown/frontier
+- Concept - FP8 and Low-Precision Hardware Formats — concept/frontier
+- Concept - Rack-Scale Systems and NVLink Domains — concept/frontier
+- Snippet - A Minimal FlashAttention Kernel in Triton — snippet/frontier
+- Concept - Warp Specialization and Async Pipelines on Hopper — concept/unicorn
+- Concept - Memory Coalescing and Shared Memory Bank Conflicts — concept/unicorn
+- Gotchas - Hardware Failures at Scale — gotchas/unicorn
+- Lore - Silent Data Corruption at Scale — lore/unicorn
+- Concept - GPU Clocks, Power, and Thermal Throttling — concept/unicorn
+
+## 09 - Prompting & Context
+- Concept - Prompt Engineering — concept/surface
+- Concept - System Prompts — concept/core
+- Concept - Chain-of-Thought and Why It Works — concept/core
+- Concept - In-Context Learning — concept/core
+- Concept - Few-Shot Example Selection and Ordering — concept/advanced
+- Concept - Prompt Caching — concept/core
+- Reference - Prompt Caching Across Providers — reference/core
+- Concept - Context Engineering — concept/core
+- Concept - Context Rot — concept/advanced
+- Concept - Context Compaction — concept/frontier
+- Concept - Chat Templates and Special Tokens — concept/core
+- Concept - Prompt Formatting and Sensitivity — concept/frontier
+- Playbook - Reliable Structured Output — playbook/core
+- Snippet - Prefilling the Assistant Turn — snippet/advanced
+- Reference - Prompting Techniques Catalog — reference/advanced
+- Decision - When to Use Chain-of-Thought — decision/advanced
+- Gotchas - Prompt Formatting and Tokenization — gotchas/advanced
+- Gotchas - Long-Context and Context Windows — gotchas/advanced
+- Concept - Prompt Evaluation and Versioning — concept/advanced
+- Concept - Prompting Reasoning Models — concept/frontier
+- Breakdown - Claude's Published System Prompt — breakdown/unicorn
+- Lore - Let's Think Step by Step — lore/unicorn
+- Lore - The Sydney Incident — lore/unicorn
+
+## 10 - Agents
+- Concept - What Is an LLM Agent — concept/surface
+- Reference - Agent Framework Landscape — reference/surface
+- Deep Dive - The Agent Loop — deep-dive/core
+- Concept - Tool Use and Function Calling — concept/core
+- Concept - Model Context Protocol (MCP) — concept/core
+- Concept - The ReAct Pattern — concept/core
+- Concept - Task Decomposition and Planning — concept/core
+- Pattern - Agentic Workflow Building Blocks — pattern/core
+- Playbook - Building a Tool-Use Agent from Scratch — playbook/core
+- Snippet - A Minimal ReAct Loop — snippet/core
+- Checklist - Agent Tool Definition Review — checklist/core
+- Decision - Choosing an Agent Framework — decision/core
+- Concept - Agent Memory Systems — concept/advanced
+- Concept - Multi-Agent Orchestration — concept/advanced
+- Gotchas - Agents in Production — gotchas/advanced
+- Gotchas - Tool Use and Function Calling — gotchas/advanced
+- Concept - Reflection and Self-Correction — concept/advanced
+- Concept - Context Engineering for Agents — concept/advanced
+- Concept - Computer Use and GUI Grounding — concept/advanced
+- Pattern - Orchestrator-Worker Agents — pattern/advanced
+- Decision - Single-Agent vs Multi-Agent — decision/advanced
+- Checklist - Sandboxing an Agent — checklist/advanced
+- Reference - Agent Benchmarks — reference/advanced
+- Snippet - Building an MCP Server — snippet/advanced
+- Breakdown - SWE-bench and SWE-agent — breakdown/advanced
+- Concept - Agent Evaluation Challenges — concept/frontier
+- Concept - Long-Horizon Agency and Error Compounding — concept/frontier
+- Concept - Search and Backtracking in Agents — concept/frontier
+- Concept - Trained vs Prompted Agents — concept/frontier
+- Breakdown - Anthropic's Multi-Agent Research System — breakdown/frontier
+- Breakdown - Claude Code — breakdown/unicorn
+- Lore - The AutoGPT Explosion — lore/unicorn
+- Lore - The Devin Demo and the SWE-bench Reality Gap — lore/unicorn
+- Lore - Agent Prompt-Engineering Folklore — lore/unicorn
+- Concept - The Lethal Trifecta for Agents — concept/unicorn
+
+## 11 - Retrieval & RAG
+- Concept - Retrieval-Augmented Generation — concept/surface
+- Concept - Semantic Search — concept/surface
+- Concept - Embedding Models — concept/core
+- Concept - Chunking Strategies — concept/core
+- Concept - BM25 and Lexical Retrieval — concept/core
+- Concept - Hybrid Search and Reciprocal Rank Fusion — concept/core
+- Concept - Rerankers — concept/core
+- Reference - Vector Database Landscape — reference/core
+- Concept - RAG Evaluation — concept/core
+- Snippet - Reciprocal Rank Fusion — snippet/core
+- Decision - RAG vs Long-Context Windows — decision/core
+- Deep Dive - RAG Architectures — deep-dive/advanced
+- Concept - HNSW — concept/advanced
+- Concept - IVF and Product Quantization — concept/advanced
+- Concept - Contrastive Learning for Text Embeddings — concept/advanced
+- Concept - Hard Negative Mining — concept/advanced
+- Concept - Late Interaction and ColBERT — concept/advanced
+- Concept - Query Transformation for Retrieval — concept/advanced
+- Concept - Contextual Retrieval — concept/advanced
+- Playbook - Building a Production RAG System — playbook/advanced
+- Gotchas - RAG Pipelines — gotchas/advanced
+- Concept - Matryoshka Representation Learning — concept/frontier
+- Concept - Learned Sparse Retrieval — concept/frontier
+- Breakdown - Microsoft GraphRAG — breakdown/frontier
+- Concept - Agentic Retrieval — concept/frontier
+- Breakdown - DiskANN — breakdown/unicorn
+- Concept - Embedding Space Geometry — concept/unicorn
+- Concept - Embedding Quantization — concept/unicorn
+- Gotchas - Vector Index Tuning — gotchas/unicorn
+- Lore - The RAG Is Dead Debate — lore/unicorn
+
+## 12 - Fine-Tuning
+- Concept - Parameter-Efficient Fine-Tuning (PEFT) — concept/surface
+- Concept - What Fine-Tuning Can and Cannot Teach — concept/surface
+- Decision - Fine-Tuning vs RAG vs Prompting — decision/core
+- Decision - Full Fine-Tuning vs PEFT — decision/core
+- Deep Dive - LoRA — deep-dive/advanced
+- Concept - QLoRA — concept/advanced
+- Concept - Adapter Layers — concept/advanced
+- Concept - Prompt Tuning and Prefix Tuning — concept/advanced
+- Concept - DoRA — concept/frontier
+- Concept - LoRA Initialization (PiSSA, LoftQ, OLoRA) — concept/frontier
+- Concept - Representation Fine-Tuning (ReFT) — concept/frontier
+- Concept - Catastrophic Forgetting — concept/advanced
+- Concept - Why LoRA Underperforms Full Fine-Tuning — concept/unicorn
+- Concept - rsLoRA and the Rank-Alpha Scaling Trap — concept/unicorn
+- Reference - PEFT Method Comparison — reference/core
+- Reference - Fine-Tuning Hyperparameters — reference/core
+- Playbook - Preparing a Fine-Tuning Dataset — playbook/core
+- Playbook - Evaluating a Fine-Tune — playbook/advanced
+- Gotchas - LoRA Fine-Tuning — gotchas/advanced
+- Gotchas - Fine-Tuning Data and Chat Templates — gotchas/core
+- Snippet - LoRA Linear Layer from Scratch — snippet/advanced
+- Snippet - QLoRA Fine-Tune Configuration — snippet/core
+- Breakdown - Unsloth — breakdown/advanced
+- Lore - LoRA Folklore and Hard-Won Defaults — lore/unicorn
+
+## 13 - Evaluation
+- Concept - Benchmark Taxonomy — concept/surface
+- Concept - Goodhart's Law in Model Evaluation — concept/surface
+- Concept - LLM-as-Judge — concept/core
+- Concept - Benchmark Contamination — concept/core
+- Concept - Capability versus Propensity — concept/core
+- Concept - Human Evaluation Methodology — concept/advanced
+- Concept - Statistical Rigor in Model Evaluation — concept/advanced
+- Breakdown - MMLU — breakdown/core
+- Reference - LLM Benchmark Landscape — reference/core
+- Playbook - Building a Production Eval Suite — playbook/core
+- Decision - Choosing an Evaluation Method — decision/core
+- Checklist - Trusting a Benchmark Number — checklist/core
+- Deep Dive - Designing an Eval Harness — deep-dive/advanced
+- Breakdown - Chatbot Arena — breakdown/advanced
+- Concept - Pass@k and Sampling-Based Evaluation — concept/advanced
+- Gotchas - LLM-as-Judge Evaluations — gotchas/advanced
+- Gotchas - Benchmark Harness Pitfalls — gotchas/advanced
+- Snippet - Paired Bootstrap for Model Comparison — snippet/advanced
+- Concept - Membership Inference for Contamination Detection — concept/frontier
+- Concept - Meta-Evaluation of LLM Judges — concept/frontier
+- Concept - Private and Dynamic Benchmarks — concept/frontier
+- Concept - Prompt Format Sensitivity in Evaluation — concept/unicorn
+- Concept - Answer Scoring and Normalization — concept/unicorn
+- Concept - Multiple-Choice Symbol Binding and Position Bias — concept/unicorn
+- Lore - Benchmark Scandals — lore/unicorn
+
+## 14 - Safety & Interpretability
+- Concept - The Alignment Problem — concept/surface
+- Concept - Why Neural Networks Are Hard to Interpret — concept/surface
+- Concept - LLM Threat Modeling — concept/surface
+- Concept - Prompt Injection — concept/core
+- Concept - Jailbreak Taxonomy — concept/core
+- Pattern - Guardrail Architecture — pattern/core
+- Reference - Jailbreak and Prompt Injection Attack Catalog — reference/core
+- Concept - Sycophancy — concept/core
+- Concept - Adversarial Suffixes — concept/advanced
+- Concept - Refusal Mechanics — concept/advanced
+- Gotchas - Guardrails and Safety Filters — gotchas/advanced
+- Concept - Data Poisoning and Backdoors — concept/advanced
+- Concept - LLM Watermarking and Detection — concept/advanced
+- Playbook - Red-Teaming a Language Model — playbook/advanced
+- Decision - Defending Against Prompt Injection — decision/advanced
+- Concept - Superposition — concept/advanced
+- Concept - Sparse Autoencoders — concept/advanced
+- Concept - Induction Heads — concept/advanced
+- Deep Dive - Mechanistic Interpretability — deep-dive/advanced
+- Concept - The Logit Lens — concept/advanced
+- Concept - Activation Patching — concept/advanced
+- Snippet - Activation Patching with Hooks — snippet/advanced
+- Concept - Many-Shot Jailbreaking — concept/frontier
+- Concept - Activation Steering — concept/frontier
+- Concept - Attribution Graphs — concept/frontier
+- Breakdown - Golden Gate Claude — breakdown/frontier
+- Concept - Deceptive Alignment — concept/frontier
+- Breakdown - Alignment Faking — breakdown/frontier
+- Concept - Model Organisms of Misalignment — concept/frontier
+- Breakdown - Sleeper Agents — breakdown/frontier
+- Concept - Emergent Misalignment — concept/unicorn
+- Snippet - Ablating the Refusal Direction — snippet/unicorn
+- Gotchas - Interpreting Model Internals — gotchas/unicorn
+- Lore - The DAN Era and Jailbreak Folklore — lore/unicorn
+
+## 15 - Multimodal
+- Concept - Cross-Modal Representation Alignment — concept/surface
+- Concept - Vision Transformers — concept/core
+- Concept - CLIP and Contrastive Vision-Language Training — concept/core
+- Concept - SigLIP and the Sigmoid Contrastive Loss — concept/advanced
+- Concept - The Modality Gap in Contrastive Models — concept/unicorn
+- Concept - Register Tokens and ViT Attention Artifacts — concept/unicorn
+- Concept - VLM Architectures — concept/core
+- Concept - Vision-Language Connectors — concept/advanced
+- Concept - Any-Resolution Vision Encoding — concept/advanced
+- Breakdown - LLaVA — breakdown/core
+- Breakdown - Flamingo — breakdown/advanced
+- Concept - Native and Any-to-Any Multimodal Models — concept/frontier
+- Gotchas - Vision-Language Models — gotchas/advanced
+- Decision - Choosing a Vision Encoder for a VLM — decision/core
+- Playbook - Training a VLM from a Vision Encoder and an LLM — playbook/advanced
+- Reference - Vision Encoders and Multimodal Models — reference/core
+- Deep Dive - Diffusion Models — deep-dive/advanced
+- Concept - Latent Diffusion — concept/core
+- Concept - Classifier-Free Guidance — concept/core
+- Concept - Flow Matching — concept/frontier
+- Concept - Diffusion Samplers and Schedulers — concept/core
+- Concept - Diffusion Transformers (DiT) — concept/frontier
+- Concept - ControlNet and Spatial Conditioning for Diffusion — concept/advanced
+- Breakdown - Stable Diffusion — breakdown/advanced
+- Gotchas - Diffusion Training and Sampling — gotchas/unicorn
+- Snippet - DDPM Training and Sampling Loop — snippet/advanced
+- Lore - The Stable Diffusion Release and Its Aftermath — lore/unicorn
+- Concept - VQ-VAE and Discrete Visual Tokenization — concept/advanced
+- Concept - Audio Spectrograms and Mel Features — concept/surface
+- Concept - Neural Audio Codecs and Residual Vector Quantization — concept/advanced
+- Breakdown - Whisper — breakdown/core
+- Concept - Neural Text-to-Speech and Audio Language Models — concept/advanced
+- Concept - Video Generation — concept/frontier
+
+## 16 - Production & Ops
+- Concept - LLMOps — concept/surface
+- Concept - Model Lifecycle and Versioning — concept/surface
+- Concept - LLM Observability and Tracing — concept/core
+- Concept - Cost Engineering for LLM Applications — concept/core
+- Concept - Semantic Caching — concept/core
+- Concept - LLM Gateways and Routing — concept/core
+- Concept - Rate Limiting and Quota Design — concept/core
+- Concept - Model Deployment Patterns for LLMs — concept/core
+- Playbook - Incident Response for LLM Systems — playbook/core
+- Pattern - Resilient LLM Request Handling — pattern/core
+- Reference - OpenTelemetry GenAI Semantic Conventions — reference/advanced
+- Breakdown - LiteLLM — breakdown/advanced
+- Breakdown - Langfuse — breakdown/advanced
+- Concept - GPU Orchestration on Kubernetes — concept/advanced
+- Concept - Autoscaling LLM Inference — concept/advanced
+- Concept - PII Redaction and Data Retention — concept/advanced
+- Snippet - Token Cost Attribution and Budget Enforcement — snippet/advanced
+- Checklist - Production LLM Launch Readiness — checklist/advanced
+- Decision - Self-Hosting vs Managed LLM API — decision/frontier
+- Concept - Model Routing and Cascades — concept/frontier
+- Concept - LLM Load Testing and Capacity Planning — concept/frontier
+- Reference - LLM Production SLOs and Latency Budgets — reference/unicorn
+- Gotchas - LLM Production Operations — gotchas/unicorn
+- Concept - Production Monitoring and Drift Detection — concept/frontier
+- Lore - When the Model Changed Under You — lore/unicorn
+- Concept - Nondeterminism in Production LLM Serving — concept/unicorn
+
+## 17 - Classical ML
+- Concept - Decision Trees — concept/surface
+- Concept - TF-IDF and the Bag of Words — concept/surface
+- Concept - Gradient Boosting — concept/core
+- Concept - Bagging and Random Forests — concept/core
+- Decision - Deep Learning vs Gradient Boosting for Tabular Data — decision/core
+- Concept - Probability Calibration — concept/core
+- Concept - Learning from Imbalanced Data — concept/core
+- Concept - Classical Time Series Forecasting — concept/core
+- Reference - Gradient Boosting Hyperparameters — reference/advanced
+- Concept - Clustering and Dimensionality Reduction — concept/advanced
+- Concept - Causal Inference Basics — concept/advanced
+- Concept - Word2Vec and the Embedding Lineage — concept/advanced
+- Breakdown - XGBoost — breakdown/advanced
+- Breakdown - LightGBM — breakdown/advanced
+- Gotchas - Gradient Boosting in Practice — gotchas/advanced
+- Playbook - Tuning Gradient Boosted Trees — playbook/advanced
+- Snippet - Leakage-Free Target Encoding — snippet/advanced
+- Breakdown - TabPFN — breakdown/frontier
+- Concept - Conformal Prediction — concept/frontier
+- Concept - Time Series Cross-Validation and Leakage — concept/unicorn
+- Lore - Kaggle and the Reign of Gradient Boosting — lore/unicorn
+
+## 18 - Frontier & Esoterica
+- Concept - The Emergent Abilities Debate — concept/surface
+- Lore - Machine Learning Is Alchemy — lore/surface
+- Concept - Grokking — concept/advanced
+- Concept - Double Descent — concept/core
+- Concept - The Lottery Ticket Hypothesis — concept/core
+- Concept - Attention Sinks — concept/advanced
+- Concept - Massive Activations and Outlier Features — concept/advanced
+- Concept - The Softmax Bottleneck — concept/advanced
+- Concept - Neural Text Degeneration and Repetition Loops — concept/core
+- Concept - Mode Collapse in RLHF — concept/frontier
+- Concept - Inverse Scaling and U-Shaped Scaling — concept/frontier
+- Concept - Numeracy and Digit Tokenization — concept/unicorn
+- Concept - RoPE Extrapolation and Context Extension — concept/advanced
+- Concept - Ring Attention and Extreme Context — concept/frontier
+- Concept - Mode Connectivity and Flat Minima — concept/frontier
+- Concept - The Reversal Curse — concept/advanced
+- Concept - Attention Entropy Collapse — concept/frontier
+- Breakdown - BitNet b1.58 — breakdown/frontier
+- Breakdown - YaRN — breakdown/advanced
+- Reference - Architecture Numerology — reference/unicorn
+- Reference - Open Problems in LLM Engineering — reference/frontier
+- Lore - Hyperparameter Folklore — lore/unicorn
+- Lore - Glitch Tokens — lore/advanced
+- Gotchas - Tokenizer Pathologies — gotchas/core
+- Gotchas - Long-Context Failure Modes — gotchas/advanced
+- Checklist - Auditing a Tokenizer for Glitch Tokens — checklist/advanced
+- Playbook - Extending a Model's Context Window — playbook/advanced
+- Snippet - Reproducing Grokking on Modular Addition — snippet/advanced
+- Snippet - Finding Under-Trained Tokens — snippet/unicorn
+- Snippet - Softmax-Off-By-One (Quiet Attention) — snippet/unicorn
+- Decision - Choosing a Context Extension Method — decision/advanced
+
+## 19 - Ecosystem & History
+- Deep Dive - From Perceptron to ChatGPT — deep-dive/surface
+- Reference - Where Real AI Knowledge Lives — reference/surface
+- Reference - Model Genealogy — reference/core
+- Reference - The AI Lab Landscape — reference/core
+- Reference - Open Weights Licensing — reference/core
+- Reference - The AI Hardware Market — reference/advanced
+- Concept - The Open vs Closed Model Divide — concept/advanced
+- Concept - The CUDA Moat — concept/advanced
+- Concept - The Preprint and Social-Media Research Culture — concept/frontier
+- Breakdown - Hugging Face — breakdown/core
+- Breakdown - DeepSeek — breakdown/frontier
+- Gotchas - Reading Model Announcements — gotchas/core
+- Decision - Which Model Ecosystem to Bet On — decision/advanced
+- Snippet - Tracing Model Lineage via Hugging Face Metadata — snippet/advanced
+- Checklist - Vetting an Open-Weights Model for Production — checklist/core
+- Lore - The OPT-175B Logbook — lore/unicorn
+- Lore - The LLaMA Leak — lore/advanced
+- Lore - The Attention Is All You Need Origin Story — lore/unicorn
+- Lore - The BLOOM Training Run — lore/unicorn
+
+## 20 - AI in Software Engineering
+- Concept - AI Coding Assistants — concept/surface
+- Concept - The Capability-Reliability Gap — concept/surface
+- Breakdown - GitHub Copilot's Measured Productivity Impact — breakdown/core
+- Breakdown - Cursor — breakdown/core
+- Concept - AI Code Review — concept/core
+- Concept - AI in Software Testing — concept/core
+- Decision - Choosing an AI Coding Workflow — decision/core
+- Reference - AI Dev Tool Landscape — reference/core
+- Breakdown - The METR Developer Slowdown RCT — breakdown/advanced
+- Reference - Developer Productivity Studies — reference/advanced
+- Breakdown - SWE-bench — breakdown/advanced
+- Concept - AI's Effect on Code Quality and Security — concept/advanced
+- Breakdown - AI-Driven Code Migrations — breakdown/advanced
+- Deep Dive - Agentic Coding in Production — deep-dive/frontier
+- Concept - Team Workflow Restructuring with AI — concept/frontier
+- Lore - AI Coding War Stories — lore/unicorn
+
+## 21 - AI Across Business Functions
+- Concept - The Front-Office Back-Office Adoption Split — concept/surface
+- Concept - Copilot vs Autopilot Deployment Modes — concept/surface
+- Concept - Support Deflection Economics — concept/core
+- Breakdown - AI Medical Scribes — breakdown/core
+- Breakdown - Khanmigo and AI Tutoring — breakdown/core
+- Concept - AI in Marketing and Content — concept/core
+- Concept - Machine Translation and the Localization Industry — concept/core
+- Concept - AI in Finance Operations — concept/core
+- Decision - Which Business Function to Automate First — decision/core
+- Breakdown - Klarna's AI Customer Service Bet — breakdown/advanced
+- Breakdown - Harvey and AI in Legal Work — breakdown/advanced
+- Breakdown - AI in Recruiting and HR Screening — breakdown/advanced
+- Reference - AI Impact by Business Function — reference/advanced
+- Pattern - Human-in-the-Loop Review Workflow — pattern/advanced
+- Concept - AI SDRs and Sales Automation — concept/frontier
+- Concept - Vertical AI Agents by Function — concept/frontier
+- Lore - The Klarna Reversal and Support Bot Walk-Backs — lore/unicorn
+- Lore - What Vendors Don't Say About Deflection Rates — lore/unicorn
+
+## 22 - AI Economics
+- Concept - Value Capture Across the AI Stack — concept/surface
+- Concept - Token Price Deflation — concept/surface
+- Concept - Unit Economics of LLM Products — concept/core
+- Decision - Build vs Buy vs Wrap — decision/core
+- Concept - Moats in the AI Application Layer — concept/core
+- Reference - AI Market Sizing Claims — reference/core
+- Decision - Pricing Models for AI Products — decision/core
+- Playbook - Measuring AI ROI — playbook/core
+- Breakdown - Frontier Lab Economics — breakdown/advanced
+- Breakdown - The Cursor Ramp — breakdown/advanced
+- Reference - AI Venture Funding Patterns — reference/advanced
+- Concept - GPU Depreciation and Compute Capex Accounting — concept/advanced
+- Deep Dive - Circular Financing in the AI Buildout — deep-dive/frontier
+- Concept - Outcome-Based Pricing — concept/frontier
+- Lore - AI Wrapper Graveyard — lore/unicorn
+
+## 23 - Adoption & Blockers
+- Concept - The Pilot-to-Production Gap — concept/surface
+- Concept - Shadow AI — concept/surface
+- Concept - The Evaluation Gap — concept/core
+- Concept - Data and Integration Readiness — concept/core
+- Concept - Organizational Resistance and Change Management — concept/core
+- Concept - Vendor and Model Churn Risk — concept/core
+- Reference - The EU AI Act for Operators — reference/core
+- Playbook - Crossing the Pilot-to-Production Gap — playbook/core
+- Gotchas - Enterprise AI Adoption — gotchas/advanced
+- Concept - Enterprise AI Security Exposure — concept/advanced
+- Reference - AI Copyright Litigation Tracker — reference/advanced
+- Lore - Hallucination Liability Incidents — lore/advanced
+- Concept - Agentic Deployment Risk — concept/frontier
+- Concept - The Verification Tax — concept/frontier
+- Lore - Failed Enterprise AI Deployments — lore/unicorn
+
+## 24 - Trajectory & Navigation
+- Concept - Benchmark Saturation — concept/surface
+- Concept - METR Time Horizons — concept/core
+- Concept - The AGI Timeline Debate — concept/core
+- Concept - The Data Wall — concept/core
+- Playbook - Picking Profitable AI Use Cases — playbook/core
+- Reference - The 2026 Navigation Cheatsheet — reference/core
+- Concept - What Stays Valuable Through Any Scenario — concept/surface
+- Deep Dive - Bubble or Boom — deep-dive/advanced
+- Deep Dive - The AI Compute Buildout — deep-dive/advanced
+- Deep Dive - AI and the Labor Market — deep-dive/advanced
+- Reference - The AI Forecasting Track Record — reference/advanced
+- Concept - Automated AI Research and Takeoff — concept/frontier
+- Reference - The Open Questions Ledger — reference/frontier
+- Lore - Failed AI Predictions — lore/unicorn
+
+## Navigation
+- Ladder - Navigating the AI Economy — ladder/surface
+- Ladder - Zero to Inference Engineer — ladder/surface
+- Ladder - Zero to Pretraining Engineer — ladder/surface
+- Ladder - Zero to Post-Training Engineer — ladder/surface
+- Ladder - Zero to AI Application Engineer — ladder/surface
+- Ladder - Zero to Interpretability Engineer — ladder/surface
+- Ladder - Zero to Multimodal Engineer — ladder/surface
+- MOC - AI Across Business Functions — moc/surface
+- MOC - AI Economics — moc/surface
+- MOC - AI in Software Engineering — moc/surface
+- MOC - Adoption & Blockers — moc/surface
+- MOC - Trajectory & Navigation — moc/surface
+- MOC - Foundations — moc/surface
+- MOC - Neural Networks — moc/surface
+- MOC - Architectures — moc/surface
+- MOC - Training at Scale — moc/surface
+- MOC - Data Engineering — moc/surface
+- MOC - Post-Training — moc/surface
+- MOC - Inference & Serving — moc/surface
+- MOC - Hardware & Systems — moc/surface
+- MOC - Prompting & Context — moc/surface
+- MOC - Agents — moc/surface
+- MOC - Retrieval & RAG — moc/surface
+- MOC - Fine-Tuning — moc/surface
+- MOC - Evaluation — moc/surface
+- MOC - Safety & Interpretability — moc/surface
+- MOC - Multimodal — moc/surface
+- MOC - Production & Ops — moc/surface
+- MOC - Classical ML — moc/surface
+- MOC - Frontier & Esoterica — moc/surface
+- MOC - Ecosystem & History — moc/surface
+- Home — home/surface

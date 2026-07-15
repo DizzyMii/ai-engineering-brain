@@ -1,0 +1,809 @@
+{
+  "domain": "03 - Architectures",
+  "slug": "architectures",
+  "notes": [
+    {
+      "title": "Deep Dive - The Transformer",
+      "type": "deep-dive",
+      "level": "core",
+      "scope": "The complete decoder-only transformer as the canonical modern LLM architecture, tracing one token from embedding through N blocks (attention + FFN with residuals and norms) to unembedding logits. IN: the full data path, tensor shapes, parameter budget, where compute goes. OUT: attention math internals (link Concept - Attention Mechanism), positional-encoding details (own notes), kernel-level execution (link Deep Dive - FlashAttention).",
+      "key_points": [
+        "Full forward path: token IDs -> embedding lookup (d_model) + positional info -> N identical blocks -> final norm -> unembedding (often weight-tied to embedding) -> logits over vocab; softmax + cross-entropy target",
+        "Modern block is pre-norm residual form: x = x + Attn(Norm(x)); x = x + FFN(Norm(x)); contrast with Vaswani 2017 post-norm ordering and why the swap happened",
+        "Tensor shapes through the stack: [batch, seq, d_model]; attention reshapes to [batch, heads, seq, d_head] with d_head = d_model/n_heads (commonly 64-128); merge and out-project back to d_model",
+        "Parameter budget per block ~12*d_model^2 (4*d^2 for QKVO attention + 8*d^2 for a 4x FFN) plus norms; embedding = vocab*d_model; worked example for GPT-3 175B (n_layers 96, d_model 12288)",
+        "Causal masking makes it autoregressive; training uses teacher forcing with next-token cross-entropy computed in parallel across all positions (the key efficiency over RNNs)",
+        "Weight tying of input embedding and output unembedding (Press and Wolf 2017); the logit = hidden @ unembedding computation and its vocab-scaled FLOP cost",
+        "Where compute goes: attention is O(N^2 * d) and FFN is O(N * d^2); FFN dominates FLOPs at typical sequence lengths, attention dominates memory at long context",
+        "Mermaid diagram of one block and the full stack required; call out that everything reads and writes the shared residual stream"
+      ],
+      "links": [
+        "Concept - Attention Mechanism",
+        "Concept - Feed-Forward Networks and GLU Variants",
+        "Concept - Positional Encoding",
+        "Concept - The Residual Stream",
+        "Concept - Backpropagation",
+        "Concept - Byte-Pair Encoding",
+        "Deep Dive - FlashAttention",
+        "Concept - Scaling Laws",
+        "Reference - Memory Math for Transformers"
+      ]
+    },
+    {
+      "title": "Concept - Attention Mechanism",
+      "type": "concept",
+      "level": "core",
+      "scope": "Scaled dot-product attention as the sequence-mixing operation at the heart of the transformer. IN: Q/K/V projections, softmax(QK^T/sqrt(d))V, causal masking, and why the scaling factor exists. OUT: multi-head splitting and head-sharing variants (link Concept - Multi-Head Attention Variants), positional encoding (own note), the fused kernel (link Deep Dive - FlashAttention).",
+      "key_points": [
+        "Q=xW_Q, K=xW_K, V=xW_V; scores S=QK^T; weights A=softmax(S/sqrt(d_k)); output=AV; attention is content-based soft dictionary lookup (queries retrieve values by key similarity)",
+        "The 1/sqrt(d_k) scaling: without it dot products have variance proportional to d_k, pushing softmax into a saturated low-entropy regime with vanishing gradients (Vaswani et al. 2017 section 3.2.1)",
+        "Causal mask: set S_ij = -inf for j>i before softmax so position i attends only to <=i; this is what enables parallel training against shifted next-token targets",
+        "Softmax must be computed in fp32 even in bf16 models; max-subtraction for numerical stability; this is the exact structure FlashAttention fuses to avoid materializing the N-by-N score matrix in HBM",
+        "Complexity: O(N^2 * d) time and O(N^2) score memory, the motivation for sparse attention, sliding windows, and linear-attention alternatives",
+        "Attention is permutation-equivariant without positional information (dog bites man == man bites dog), which is exactly why positional encoding is mandatory",
+        "Failure modes: attention entropy collapse (all mass on one token), rank collapse in deep stacks, and the massive-activation / attention-sink phenomenon on the first token"
+      ],
+      "links": [
+        "Concept - Softmax",
+        "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)",
+        "Concept - Positional Encoding",
+        "Deep Dive - FlashAttention",
+        "Concept - KV Cache",
+        "Concept - Attention Sinks",
+        "Concept - Induction Heads",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning"
+      ]
+    },
+    {
+      "title": "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The family of attention head-sharing schemes and the KV-cache-vs-quality tradeoff that drives them. IN: MHA, MQA, GQA, MLA mechanisms and their per-token cache sizes. OUT: attention math basics (link Concept - Attention Mechanism), KV-cache serving and paging (link Concept - KV Cache), the fused kernel (link Deep Dive - FlashAttention).",
+      "key_points": [
+        "MHA: h independent (Q,K,V) heads of width d_head; KV cache = 2 * n_layers * h * d_head * seq_len elements per sequence, the dominant long-context memory term",
+        "MQA (Shazeer 2019, one-author paper): a single shared K,V head across all Q heads; cache shrinks by factor h; small quality hit, much faster memory-bound decode",
+        "GQA (Ainslie et al. 2023): g KV groups with 1<g<h interpolating MHA<->MQA; LLaMA-2 70B uses 8 KV heads for 64 query heads; the standard modern default",
+        "MLA (DeepSeek-V2 2024): low-rank joint compression of K and V into a shared latent (e.g. 512-d) cached instead of full K,V, up-projected per head at compute time; ~1/4 of GQA cache while matching or beating MHA quality",
+        "The decoupled-RoPE subtlety in MLA: RoPE cannot be absorbed into the low-rank projection because it is position-dependent, so a small set of RoPE-carrying dims (e.g. 64) is kept separate, the crux practitioners miss",
+        "KV cache comparison table across variants; why this matters: decode is memory-bandwidth-bound and KV cache dominates memory at long context and high batch (link Roofline)",
+        "Failure modes: MQA training instability requiring uptraining from an MHA checkpoint; GQA group-count as a tuning knob; porting bugs from repeat vs repeat_interleave of KV heads"
+      ],
+      "links": [
+        "Concept - Attention Mechanism",
+        "Concept - KV Cache",
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Concept - Speculative Decoding",
+        "Reference - Memory Math for Transformers",
+        "Concept - The Roofline Model",
+        "Breakdown - DeepSeek-V3 Architecture"
+      ]
+    },
+    {
+      "title": "Concept - Rotary Position Embeddings (RoPE)",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "RoPE as the dominant relative positional scheme in modern LLMs. IN: the rotation mechanism, frequency bands, why it encodes relative position, the base theta knob. OUT: context-length-extension methods (link Concept - Context Length Extension), extrapolation folklore and YaRN edge behavior (link 18 esoterica), the broader positional taxonomy (link Concept - Positional Encoding).",
+      "key_points": [
+        "Applies a position-dependent rotation to Q and K in 2D subspaces: token at position m is rotated by m*theta_i in subspace i, with theta_i = base^(-2i/d) and base=10000 by default (Su et al. 2021, RoFormer)",
+        "Relative property: <R_m q, R_n k> depends only on (m-n), so the attention dot product becomes a function of relative position with no learned relative-bias table and no added parameters",
+        "rotate_half implementation trick; RoPE is applied to Q and K only (never V), after the head reshape, on the d_head dimension",
+        "Frequency spectrum: low-index dims rotate fast (local, high-frequency), high-index dims rotate slowly (long-range); the wavelength of the slowest dim versus context length governs extrapolation behavior",
+        "The base theta is a folklore-laden knob: LLaMA-3 raised base to 500000 to support longer context; higher base = longer wavelengths = better long-range (link 18 for the extrapolation folklore)",
+        "Why RoPE beat learned and sinusoidal absolute encodings: relative, parameter-free, composes with linear attention, and its attention weights decay with distance",
+        "Failure modes: naive extrapolation beyond trained length collapses (perplexity explodes) motivating PI/NTK/YaRN; interleaved-vs-half-split ordering mismatch silently breaks weight porting (link Gotchas)"
+      ],
+      "links": [
+        "Concept - Positional Encoding",
+        "Concept - Context Length Extension",
+        "Concept - Attention Mechanism",
+        "Snippet - RoPE Implementation",
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Attention Sinks",
+        "Concept - Context Rot",
+        "Gotchas - Implementing Attention"
+      ]
+    },
+    {
+      "title": "Concept - Mixture of Experts Architecture",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The sparse MoE layer that replaces a dense FFN with many experts plus a router, activating only a few experts per token. IN: routing/gating, top-k, experts, shared experts, capacity, and the parameter-vs-compute decoupling. OUT: load-balancing training dynamics and aux-loss engineering (link 04), expert-parallel comms (link 04/08), MoE serving (link 07).",
+      "key_points": [
+        "Replace the FFN sublayer with N expert FFNs + a router; router = linear layer -> logits -> softmax -> top-k gate; output = sum over selected experts of gate_i * Expert_i(x)",
+        "Decouples total parameters from active parameters/FLOPs: Mixtral 8x7B is 47B total but ~13B active (top-2 of 8); DeepSeek-V3 is 671B total / 37B active",
+        "Top-1 routing (Switch Transformer, Fedus et al. 2021) vs top-2 (GShard, Mixtral); fine-grained many-small-experts plus always-on shared experts (DeepSeekMoE 2024) for better specialization",
+        "Expert capacity and capacity factor: each expert processes at most capacity tokens per batch; overflow tokens are dropped (pass through the residual), the token-dropping failure mode",
+        "The load-balancing problem: without balancing, routing collapses to a few experts; fixed either by an auxiliary load-balance loss (link 04) or an aux-loss-free routing bias (DeepSeek-V3)",
+        "Why MoE: more capacity at fixed active FLOPs; but memory-heavy (all experts resident), comms-heavy (all-to-all dispatch), and batch-dependent at inference",
+        "Failure modes: routing collapse, expert under-training, capacity overflow, and train/inference batch mismatch changing which tokens co-occur and thus which get dropped"
+      ],
+      "links": [
+        "Concept - Feed-Forward Networks and GLU Variants",
+        "Decision - Dense vs Mixture-of-Experts",
+        "Breakdown - Mixtral 8x7B",
+        "Breakdown - DeepSeek-V3 Architecture",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Concept - Cost Engineering for LLM Applications",
+        "Gotchas - Mixture of Experts",
+        "Snippet - Top-2 MoE Routing Layer"
+      ]
+    },
+    {
+      "title": "Concept - State Space Models and Mamba",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Structured SSMs as a sub-quadratic sequence-mixing alternative to attention, culminating in Mamba's selective SSM. IN: the linear recurrence, S4/HiPPO, Mamba's input-dependent selection, hardware-aware parallel scan, Mamba-2/SSD. OUT: hybrid designs (link Concept - Hybrid SSM-Attention Architectures), the linear-attention connection (link Concept - Linear Attention), ring/context-parallel extreme context (link 18).",
+      "key_points": [
+        "Continuous SSM h'(t)=Ah+Bu, y=Ch discretized to a linear recurrence h_t = A_bar h_{t-1} + B_bar u_t, y_t = C h_t; runs as an O(N) recurrence or an O(N log N) long convolution",
+        "S4 (Gu et al. 2021): HiPPO-initialized structured A gives principled long-range memory; diagonal-plus-low-rank parameterization makes it tractable",
+        "Mamba (Gu and Dao 2023): selective SSM where B, C, and the step Delta are input-dependent, breaking the LTI convolution but enabling content-based reasoning; hardware-aware parallel scan keeps state in SRAM",
+        "Complexity win: O(N) time and O(1) state per step at inference (constant, KV-free memory) versus attention's linearly growing KV cache, a decisive long-context advantage",
+        "Mamba-2 (Dao and Gu 2024): State Space Duality (SSD) shows SSMs are a form of linear attention, giving a matmul-friendly formulation and much larger states",
+        "Core weakness: a fixed-size state cannot do exact recall/copying like attention; Mamba underperforms on associative-recall and in-context retrieval, the reason hybrids exist",
+        "Real systems: Mamba, Jamba (52B MoE hybrid), Codestral Mamba, Falcon-Mamba, the Griffin/RecurrentGemma lineage"
+      ],
+      "links": [
+        "Concept - Linear Attention",
+        "Concept - Hybrid SSM-Attention Architectures",
+        "Concept - Recurrent Networks and the LSTM",
+        "Concept - Attention Mechanism",
+        "Decision - Choosing a Sequence Mixer",
+        "Deep Dive - FlashAttention",
+        "Concept - The Roofline Model",
+        "Concept - Induction Heads"
+      ]
+    },
+    {
+      "title": "Concept - Positional Encoding",
+      "type": "concept",
+      "level": "core",
+      "scope": "The general problem of injecting order into a permutation-equivariant attention stack and the family of solutions. IN: why position is needed, absolute (sinusoidal/learned), relative (Shaw/T5 bias), ALiBi, NoPE, and pointers to RoPE. OUT: RoPE internals (link Concept - Rotary Position Embeddings), context extension (link Concept - Context Length Extension), extrapolation folklore (link 18).",
+      "key_points": [
+        "Self-attention is permutation-equivariant, so without position info word order is invisible; position must be injected somewhere in the stack",
+        "Absolute sinusoidal (Vaswani 2017): fixed sin/cos of position at geometric frequencies added to embeddings; learned absolute (BERT, GPT-2): a learned table hard-capped at max training length",
+        "Relative position (Shaw et al. 2018; T5 relative-bias buckets; Transformer-XL): bias attention scores by (i-j), giving better length generalization than absolute",
+        "ALiBi (Press et al. 2021): add a linear head-specific slope -m*(i-j) to scores; no embeddings, strong length extrapolation, used in BLOOM and MPT",
+        "NoPE: decoder-only causal models can learn position implicitly from the causal mask alone and do surprisingly well at small scale (Kazemnejad et al. 2023)",
+        "RoPE (own note) is the dominant modern choice; this note is the map, RoPE is the deep dive",
+        "Tradeoff axes: extrapolation past trained length, parameter cost, compute cost, and compatibility with KV cache and linear attention"
+      ],
+      "links": [
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Concept - Attention Mechanism",
+        "Concept - Context Length Extension",
+        "Deep Dive - The Transformer",
+        "Concept - Attention Sinks",
+        "Concept - Context Rot",
+        "Concept - Vision Transformers"
+      ]
+    },
+    {
+      "title": "Concept - Feed-Forward Networks and GLU Variants",
+      "type": "concept",
+      "level": "core",
+      "scope": "The position-wise FFN sublayer and the gated-linear-unit variants that replaced the vanilla two-layer MLP. IN: FFN structure, expansion ratio, GELU/SwiGLU/GEGLU, the 8/3 parameter-matching rescale, FFN-as-memory view. OUT: activation-function fundamentals (link 02), MoE sparsification (link Concept - Mixture of Experts Architecture), why-4x folklore (link 18).",
+      "key_points": [
+        "Vanilla FFN: y = W_2 * act(W_1 * x); acts position-wise; hidden dim d_ff = 4*d_model conventionally; holds roughly two-thirds of a block's parameters",
+        "Activation lineage: ReLU (original) -> GELU (BERT/GPT, smooth) -> SiLU/Swish, chosen for smoother gradients",
+        "GLU variants (Shazeer 2020, 'GLU Variants Improve Transformer'): FFN gains a gate, SwiGLU = (Swish(xW) elementwise-mul xV) W_2; GEGLU and ReGLU analogous; consistent perplexity wins",
+        "Parameter matching: GLU adds a third matrix, so d_ff is scaled by ~2/3 (LLaMA uses d_ff ~= (8/3)*d_model rounded to a hardware-friendly multiple) to hold params/FLOPs comparable to a vanilla 4x FFN",
+        "Real usage: SwiGLU in LLaMA, PaLM, Mistral; GeGLU in Gemma; bias terms are usually dropped in modern FFNs",
+        "FFN as key-value memory (Geva et al. 2021): the first matrix acts as keys detecting input patterns, the second as values writing to the residual stream, a bridge to interpretability",
+        "Design notes: FFN dominates FLOPs and params so it is exactly what MoE sparsifies; activation choice interacts with fp8 dynamic range and outlier features"
+      ],
+      "links": [
+        "Concept - The Residual Stream",
+        "Concept - Mixture of Experts Architecture",
+        "Deep Dive - The Transformer",
+        "Concept - RMSNorm and LayerNorm",
+        "Concept - Superposition",
+        "Concept - Mixed Precision Training",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning"
+      ]
+    },
+    {
+      "title": "Concept - Normalization Placement (Pre-Norm, Post-Norm, DeepNorm)",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Where normalization goes relative to the residual connection and why that decides training stability at depth. IN: post-norm vs pre-norm, DeepNorm, sandwich norm, output/QK-norm placement, the residual-growth mechanism. OUT: the norm-layer math itself (link Concept - RMSNorm and LayerNorm), general vanishing-gradient theory (link 02).",
+      "key_points": [
+        "Post-norm (Vaswani 2017): x = Norm(x + Sublayer(x)); strong but unstable when deep, needs careful LR warmup because gradients through the residual pass through the norm",
+        "Pre-norm (GPT-2 onward): x = x + Sublayer(Norm(x)); clean gradient highway through the residual, trains stably at depth, but causes growing residual-stream magnitude and representation collapse in very deep nets (Liu et al. 2020)",
+        "DeepNorm (Wang et al. 2022): post-norm with residual up-scaling alpha and down-scaled init beta, enabling stable 1000-layer transformers",
+        "Sandwich norm (norm before and after the sublayer, revived by Gemma 2); QK-norm and final-logit norm as auxiliary stabilizers (link Attention Logit Stabilization)",
+        "The residual-growth mechanism: pre-norm makes each layer an additive contribution on an ever-growing stream, so late layers see relatively smaller normalized updates",
+        "Warmup interacts with placement: post-norm demands longer warmup; loss-spike pathology at scale ties directly to placement and residual scaling (link 04 training stability)",
+        "Real convergence: nearly all modern LLMs are pre-norm + RMSNorm, but Gemma 2 revived hybrid sandwich norm for stability at scale, showing the choice is not settled"
+      ],
+      "links": [
+        "Concept - RMSNorm and LayerNorm",
+        "Concept - The Residual Stream",
+        "Concept - Attention Logit Stabilization (QK-Norm and Soft-Capping)",
+        "Deep Dive - The Transformer",
+        "Concept - Backpropagation",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Lore - The Standardization of the Transformer Block"
+      ]
+    },
+    {
+      "title": "Concept - The Residual Stream",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The transformer's additive skip-connection bus that every sublayer reads from and writes to, and why it is the right mental model for the architecture. IN: additive residuals, the linear communication view, magnitude growth with depth, weight tying to un/embedding. OUT: interpretability techniques built on it (superposition, SAEs, logit lens link 14), general ResNet history (link Concept - Convolutional Neural Networks).",
+      "key_points": [
+        "Each block does x <- x + f(x); the stream is a running sum, so sublayers communicate by writing linear features that later layers read (Elhage et al. 2021, 'A Mathematical Framework for Transformer Circuits')",
+        "Linearity of the residual path means gradients flow undamped to early layers, the reason very deep transformers train at all (contrast with pre/post-norm placement)",
+        "Attention moves information between positions; FFN processes within a position; both are increments to the same d_model-wide bus",
+        "Magnitude grows with depth as each layer adds; LayerNorm/RMSNorm re-scale reads; late-layer massive activations and attention sinks are residual-stream phenomena (link 18)",
+        "Un/embedding weight tying plus the logit lens: reading the stream through the unembedding at any layer exposes a running best-guess token distribution",
+        "Bottleneck: d_model channels shared by all features forces superposition (link 14); the stream is a scarce communication resource, not a free-form scratchpad",
+        "Practical consequence: adding/removing layers, residual scaling, and where you insert a new module all perturb this shared bus, so architecture edits are rarely local"
+      ],
+      "links": [
+        "Concept - Superposition",
+        "Concept - Induction Heads",
+        "Concept - Sparse Autoencoders",
+        "Concept - Normalization Placement (Pre-Norm, Post-Norm, DeepNorm)",
+        "Deep Dive - The Transformer",
+        "Concept - Convolutional Neural Networks",
+        "Concept - Backpropagation",
+        "Concept - Attention Sinks"
+      ]
+    },
+    {
+      "title": "Concept - Encoder-Decoder and Decoder-Only Architectures",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The taxonomy of transformer configurations by attention masking and its downstream consequences. IN: encoder-only (BERT), decoder-only (GPT), encoder-decoder (T5), cross-attention, PrefixLM, and why decoder-only dominates LLMs. OUT: pretraining objectives / MLM-vs-CLM training details (link 04), specific model breakdowns (own notes).",
+      "key_points": [
+        "Encoder-only (BERT, Devlin 2018): full bidirectional attention, masked-language-model objective, produces representations for classification/retrieval, cannot generate autoregressively",
+        "Decoder-only (GPT lineage): causal mask, next-token objective, unifies understanding and generation, and unlocks in-context learning",
+        "Encoder-decoder (original Transformer, T5): a bidirectional encoder plus a causal decoder joined by cross-attention; strong for seq2seq tasks like translation and summarization",
+        "Cross-attention mechanism: Q comes from the decoder, K/V from the encoder output; this is the one architectural piece not present in decoder-only models",
+        "PrefixLM / non-causal prefix (UL2, GLM): the prompt is attended bidirectionally while the target is generated causally, a middle ground",
+        "Why decoder-only won for LLMs: a single objective scales cleanly, no encoder/decoder parameter split, in-context learning, and KV-cache-friendly generation (Wang et al. 2022 architecture comparison)",
+        "Where encoders persist: embedding models/retrievers (link 11) and rerankers still use bidirectional encoders because they need whole-sequence representations, not generation"
+      ],
+      "links": [
+        "Deep Dive - The Transformer",
+        "Concept - Attention Mechanism",
+        "Concept - Embedding Models",
+        "Concept - Rerankers",
+        "Concept - Byte-Pair Encoding",
+        "Concept - Vision Transformers",
+        "Reference - Model Genealogy",
+        "Lore - The Standardization of the Transformer Block"
+      ]
+    },
+    {
+      "title": "Concept - Context Length Extension",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Post-hoc architectural methods to run a RoPE model beyond its trained context length. IN: Position Interpolation, NTK-aware scaling, YaRN, ABF/base-change, dynamic scaling, and the RoPE-frequency mechanism each uses. OUT: RoPE internals (link Concept - Rotary Position Embeddings), extrapolation folklore/edge behavior (link 18), long-context serving/KV memory (link 07), context-rot quality (link 09).",
+      "key_points": [
+        "The problem: a RoPE model trained to length L degrades sharply past L because high-frequency dims see rotation phases never observed in training; naive extrapolation makes perplexity explode",
+        "Position Interpolation (Chen et al. 2023): linearly downscale position indices by L/L' so all positions fall in the trained range; needs a brief fine-tune; loses high-frequency resolution",
+        "NTK-aware scaling: change the RoPE base theta so high frequencies are barely touched and low frequencies stretched, extending without fine-tuning; Dynamic NTK adjusts the scale to the current sequence length",
+        "YaRN (Peng et al. 2023): per-frequency interpolation (NTK-by-parts) plus an attention-temperature (1/sqrt(t)) correction; reaches 128k with minimal fine-tuning",
+        "ABF / base change (Xiong et al. 2023, Effective Long-Context Scaling): simply raise base theta (e.g. 10k -> 500k) then fine-tune, the LLaMA-3 approach",
+        "Evaluation caveat: passkey/needle tests pass long before real long-context reasoning does, so effective context is far shorter than advertised context (link Context Rot)",
+        "Interactions: extension changes attention entropy/temperature, and KV cache plus serving cost scale with the new advertised length (link 07)"
+      ],
+      "links": [
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Concept - Positional Encoding",
+        "Concept - Context Rot",
+        "Concept - KV Cache",
+        "Concept - Attention Sinks",
+        "Concept - Sparse and Sliding-Window Attention",
+        "Deep Dive - Anatomy of a Pretraining Run"
+      ]
+    },
+    {
+      "title": "Concept - Sparse and Sliding-Window Attention",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Architectural attention-sparsity patterns that cut the O(N^2) cost by restricting which positions attend to which. IN: sliding-window/local, dilated, global+local (Longformer/BigBird), Sparse Transformer strided patterns, Mistral SWA. OUT: the exact FlashAttention kernel (link 08), ring attention / extreme context (link 18), MoE sparsity (link Concept - Mixture of Experts Architecture).",
+      "key_points": [
+        "Sliding-window attention (Mistral 7B, window 4096): each token attends to the previous w tokens; stacking L layers gives an effective receptive field ~L*w while capping per-token cost at O(w)",
+        "Longformer (Beltagy et al. 2020): sliding window plus task-specific global tokens (e.g. [CLS]); BigBird (Zaheer et al. 2020): window + random + global with a universal-approximation argument",
+        "Sparse Transformer (Child et al. 2019): strided/fixed factorized patterns reduce N^2 to N*sqrt(N)",
+        "Local-vs-global tradeoff: pure local loses long-range exact recall, which is exactly why global layers are interleaved (link Pattern - Interleaving Global and Local Attention)",
+        "KV-cache benefit: a sliding window bounds the cache to w tokens per layer, a large serving-memory win, at the cost of exact long-range recall (link 07)",
+        "Streaming variants keep the first-k tokens plus the window (StreamingLLM) to preserve stability, tying into the attention-sink phenomenon (link 18)",
+        "Failure mode: information beyond the window can only propagate multi-hop through depth, degrading long-range exact-match and copy tasks"
+      ],
+      "links": [
+        "Concept - Attention Mechanism",
+        "Pattern - Interleaving Global and Local Attention",
+        "Concept - Attention Sinks",
+        "Deep Dive - FlashAttention",
+        "Concept - KV Cache",
+        "Concept - Context Length Extension",
+        "Concept - Mixture of Experts Architecture"
+      ]
+    },
+    {
+      "title": "Concept - Convolutional Neural Networks",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The convolutional architecture family as the pre-transformer workhorse and still-relevant lineage. IN: convolution mechanics, receptive field, weight sharing/equivariance, ResNet skip connections, the key architectures. OUT: Vision Transformers (link Concept - Vision Transformers), diffusion U-Nets (link 15), general backprop (link Concept - Backpropagation).",
+      "key_points": [
+        "Convolution: a learned kernel slides over the input computing local dot products; weight sharing gives translation equivariance and far fewer parameters than a dense layer",
+        "Receptive field grows with depth, stride, and dilation; a feature hierarchy emerges (edges -> textures -> objects); pooling downsamples spatially",
+        "Key lineage: LeNet-5 (1998) -> AlexNet (2012, the ImageNet/GPU moment) -> VGG (stacks of 3x3) -> ResNet (He et al. 2015, skip connections enabling 100+ layers) -> EfficientNet (compound scaling)",
+        "Residual/skip-connection origin: ResNet solved the degradation and vanishing-gradient problems in deep nets, the idea the transformer residual stream directly inherits",
+        "Efficiency tricks: 1x1 convs for channel mixing, depthwise-separable convs (MobileNet), dilated convs for larger receptive field without extra parameters",
+        "Where CNNs still win: small-data vision, edge/latency-constrained deployment, and a strong spatial inductive bias versus the data-hungry ViT (link 15)",
+        "Conceptual bridge: a convolution is like attention with a fixed local kernel; ViT replaced the fixed inductive bias with learned global attention"
+      ],
+      "links": [
+        "Concept - The Residual Stream",
+        "Concept - Vision Transformers",
+        "Concept - Attention Mechanism",
+        "Concept - Backpropagation",
+        "Deep Dive - Diffusion Models",
+        "Concept - Recurrent Networks and the LSTM",
+        "Reference - Model Genealogy"
+      ]
+    },
+    {
+      "title": "Concept - Recurrent Networks and the LSTM",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The RNN lineage that preceded transformers, why gating solved vanishing gradients, and why parallelism killed RNNs for LLMs. IN: vanilla RNN, BPTT, LSTM/GRU gating, seq2seq and the attention origin. OUT: the modern SSM revival (link Concept - State Space Models and Mamba), linear attention (link Concept - Linear Attention), backprop mechanics (link Concept - Backpropagation).",
+      "key_points": [
+        "Vanilla RNN: h_t = tanh(W_h h_{t-1} + W_x x_t); trained by backprop-through-time; suffers vanishing/exploding gradients over long sequences (Bengio et al. 1994)",
+        "LSTM (Hochreiter and Schmidhuber 1997): a cell state plus input/forget/output gates create an additive gradient path (the forget gate acts like a residual highway) enabling long-range memory",
+        "GRU (Cho et al. 2014): reset and update gates, fewer parameters, similar performance in practice",
+        "Seq2seq (Sutskever et al. 2014) plus Bahdanau attention (2014): attention was invented to fix the RNN encoder's fixed-vector bottleneck, the seed that grew into the transformer",
+        "Why RNNs lost: inherently sequential over time, so no within-sequence parallelism and poor GPU utilization; transformers process all positions in parallel",
+        "The comeback context: SSMs/Mamba and linear attention are effectively RNNs done right, constant-state inference with parallelizable training (link SSM note)",
+        "Era tribal knowledge that still matters: gradient clipping, truncated BPTT, and orthogonal/identity initialization for recurrent weight matrices"
+      ],
+      "links": [
+        "Concept - State Space Models and Mamba",
+        "Concept - Linear Attention",
+        "Concept - Attention Mechanism",
+        "Concept - Backpropagation",
+        "Deep Dive - The Transformer",
+        "Reference - Model Genealogy",
+        "Concept - Adam and AdamW"
+      ]
+    },
+    {
+      "title": "Concept - Linear Attention",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Attention reformulated to O(N) by removing the softmax and exploiting associativity, and its equivalence to fast-weight RNNs. IN: kernel feature maps, the (K^T V) associativity trick, the recurrent form, Performer/linear-transformer lineage, modern gated variants. OUT: full softmax attention (link Concept - Attention Mechanism), SSMs (link Concept - State Space Models and Mamba), the exact kernels (link 08).",
+      "key_points": [
+        "Softmax attention is O(N^2) because softmax(QK^T) cannot be factored; replacing exp(q.k) with phi(q).phi(k) for a feature map phi lets you compute phi(Q)(phi(K)^T V), reordering to O(N * d^2)",
+        "Recurrent view (Katharopoulos et al. 2020): linear attention is an RNN with a matrix-valued hidden state S_t = S_{t-1} + phi(k_t) v_t^T, giving constant-memory inference like SSMs",
+        "Performer (Choromanski et al. 2020): random-feature (FAVOR+) approximation of the softmax kernel; other kernels use elu+1 or ReLU feature maps",
+        "The catch: linear attention underperforms softmax on recall and associative tasks because it loses the spiky softmax that performs sharp exact lookup",
+        "Modern revival: gated linear attention (GLA), RetNet's exponential decay, DeltaNet, and the SSM-linear-attention duality (Mamba-2 SSD), all fast-weight RNNs with different gating/decay rules",
+        "Practical role: high throughput and long-context inference where exact recall is not critical; usually hybridized with a few full-attention layers (link Hybrid note)",
+        "Failure modes: numerical issues from unbounded feature maps and unbounded state growth (forgetting) without a decay/gating term"
+      ],
+      "links": [
+        "Concept - Attention Mechanism",
+        "Concept - State Space Models and Mamba",
+        "Concept - Hybrid SSM-Attention Architectures",
+        "Concept - Recurrent Networks and the LSTM",
+        "Decision - Choosing a Sequence Mixer",
+        "Deep Dive - FlashAttention",
+        "Concept - Induction Heads"
+      ]
+    },
+    {
+      "title": "Concept - Hybrid SSM-Attention Architectures",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Models that interleave attention and SSM/linear-recurrent layers to combine exact recall with cheap long-context inference. IN: why hybrids, layer ratios, real systems (Jamba/Griffin/Zamba/Nemotron-H), where full-attention layers go. OUT: SSM internals (link Concept - State Space Models and Mamba), linear attention (link Concept - Linear Attention), MoE (link Concept - Mixture of Experts Architecture).",
+      "key_points": [
+        "Motivation: pure SSM/linear models fail exact copy and associative recall, and a small fraction of full-attention layers restores it cheaply (Jelassi et al. 2024, 'attention is needed for recall')",
+        "Jamba (AI21 2024): interleaves Mamba, attention, and MoE layers at roughly 1 attention per 7 Mamba; 256k context with a small KV footprint that fits a single GPU",
+        "Griffin / RecurrentGemma (De et al. 2024): gated linear recurrence (RG-LRU) blocks plus local attention, matching transformer quality with faster inference",
+        "Design knobs: attention-to-recurrence ratio, placement of attention layers (early vs periodic), full vs sliding-window attention, and whether to add MoE on top",
+        "Inference win: most layers carry only a constant-size recurrent state, so the KV cache is dominated by the few attention layers and long-context memory scales far better (link 07)",
+        "Data points: Nemotron-H, Zamba2, Falcon-Mamba (2024-2025); an emerging consensus that roughly 5-15% attention layers is enough",
+        "Open question (frontier, weakly settled): optimal attention placement and whether hybrids reach frontier quality at the largest scales"
+      ],
+      "links": [
+        "Concept - State Space Models and Mamba",
+        "Concept - Linear Attention",
+        "Concept - Sparse and Sliding-Window Attention",
+        "Decision - Choosing a Sequence Mixer",
+        "Concept - KV Cache",
+        "Concept - Mixture of Experts Architecture",
+        "Concept - Induction Heads"
+      ]
+    },
+    {
+      "title": "Concept - Multi-Token Prediction",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Architecting a model to predict several future tokens per position instead of one, as both a training signal and an inference accelerator. IN: MTP heads, DeepSeek-V3's sequential MTP module, Meta's parallel-head MTP, the self-speculative-decoding payoff. OUT: speculative-decoding serving mechanics (link Concept - Speculative Decoding), standard next-token training (link 04), distillation (link 06).",
+      "key_points": [
+        "Standard LMs predict only token t+1; MTP adds auxiliary objectives/heads predicting t+2, t+3, ... giving a denser gradient signal per position",
+        "Meta MTP (Gloeckle et al. 2024): n independent output heads on a shared trunk predict the next n tokens in parallel, improving sample efficiency and providing a free self-speculative draft",
+        "DeepSeek-V3 MTP: a sequential MTP module (an extra transformer block) predicts the second-next token while keeping the causal chain intact; used as an auxiliary training loss",
+        "Why it helps training: it forces representations that plan ahead and densifies the learning signal, with reported gains concentrated in code and reasoning",
+        "Inference payoff: the extra heads are a built-in draft model, enabling speculative decoding without a separate draft model; DeepSeek reports roughly 1.8x decode speedup from acceptance",
+        "Design choices: parallel independent heads vs a sequential module, the loss weighting of the extra heads, and whether to keep or discard the heads at inference",
+        "Status: promising but not universal, with gains uneven across tasks; actively evolving frontier technique"
+      ],
+      "links": [
+        "Concept - Speculative Decoding",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Breakdown - DeepSeek-V3 Architecture",
+        "Deep Dive - The Transformer",
+        "Concept - Knowledge Distillation",
+        "Concept - Sampling and Decoding Parameters"
+      ]
+    },
+    {
+      "title": "Breakdown - Mixtral 8x7B",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "Mistral's sparse-MoE model as the canonical, well-documented open MoE. IN: exact config, top-2-of-8 routing, param/active math, the expert-specialization finding, serving implications. OUT: general MoE theory (link Concept - Mixture of Experts Architecture), load-balancing training (link 04), expert-parallel serving (link 07/04).",
+      "key_points": [
+        "Config: 32 layers, d_model 4096, 8 experts per layer, top-2 routing, 47B total params and ~13B active per token; only the FFN sublayers are MoE, attention stays dense",
+        "Router: a per-layer linear gate -> softmax over 8 -> top-2 experts, with the two gate weights renormalized before combining expert outputs",
+        "Param math: shared attention and embeddings plus 8x the FFN per layer explains why 8x7B is 47B, not 56B; the naming double-counts the shared components",
+        "Inheritance from Mistral 7B: GQA (8 KV heads), SwiGLU, pre-norm RMSNorm, and RoPE",
+        "Expert-specialization finding: experts do NOT specialize by topic; routing is largely syntactic/positional and fairly uniform across experts (Jiang et al. 2024), a widely misunderstood result",
+        "Serving reality: you must hold all 47B in memory though only 13B is active, so it is memory-bound like a big dense model but compute-light like a small one; batching changes the active-expert set",
+        "What to steal vs what is dated: the clean top-2 recipe transfers, but it is superseded by fine-grained + shared-expert designs (DeepSeek) that specialize better"
+      ],
+      "links": [
+        "Concept - Mixture of Experts Architecture",
+        "Breakdown - DeepSeek-V3 Architecture",
+        "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)",
+        "Decision - Dense vs Mixture-of-Experts",
+        "Concept - Cost Engineering for LLM Applications",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Reference - Model Genealogy"
+      ]
+    },
+    {
+      "title": "Breakdown - DeepSeek-V3 Architecture",
+      "type": "breakdown",
+      "level": "unicorn",
+      "scope": "DeepSeek-V3 as the 2024-25 high-water mark of efficient architecture design: MLA + fine-grained MoE + aux-loss-free balancing + MTP + fp8. IN: each architectural decision and its mechanism. OUT: fp8 training-systems details (link 04/08), RL post-training / R1 (link 06), serving internals (link 07).",
+      "key_points": [
+        "Scale: 671B total / 37B active, 61 layers, trained on 14.8T tokens for ~2.8M H800 GPU-hours, the cost-efficiency headline that shocked the field",
+        "MLA (Multi-head Latent Attention): compresses K,V to a ~512-d latent cached per token with decoupled RoPE dims (64) carried separately, giving ~1/4 the KV cache of GQA at higher quality",
+        "DeepSeekMoE: 256 fine-grained routed experts (top-8) plus 1 always-on shared expert per layer; fine-grained many-small-experts improve specialization and combinatorial routing capacity",
+        "Aux-loss-free load balancing (Wang et al. 2024): a per-expert bias is added to routing logits and nudged up/down by observed load instead of a gradient auxiliary loss, avoiding the aux-loss-vs-quality tradeoff, a decision worth stealing",
+        "Multi-Token Prediction module: a sequential extra block predicting the second-next token densifies training signal and doubles as a speculative draft (~1.8x decode)",
+        "fp8 mixed precision with fine-grained (tile/block) quantization plus DualPipe scheduling (link 04/08) is how they hit the cost number",
+        "What to steal: MLA for KV-bound serving, bias-based balancing, MTP-as-draft; what is specialized: the fp8/comms co-design assumes their exact H800 cluster topology"
+      ],
+      "links": [
+        "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)",
+        "Concept - Mixture of Experts Architecture",
+        "Concept - Multi-Token Prediction",
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Breakdown - Mixtral 8x7B",
+        "Concept - Mixed Precision Training",
+        "Concept - KV Cache",
+        "Reference - Model Genealogy",
+        "Concept - GRPO and RL with Verifiable Rewards"
+      ]
+    },
+    {
+      "title": "Reference - Transformer Architecture Cheat Sheet",
+      "type": "reference",
+      "level": "core",
+      "scope": "Fast lookup for transformer dimensions, parameter-count and FLOP formulas, and side-by-side configs of real models. IN: param/FLOP formulas, shape conventions, a model-config comparison table. OUT: memory-during-training math (link Reference - Memory Math for Transformers), attention KV-cache serving math (link 07).",
+      "key_points": [
+        "Parameter formulas per block: attention ~4*d_model^2 (QKVO; less with GQA/MLA), FFN 2*d_ff*d_model (3*d_ff*d_model with a GLU gate) plus norms; embedding = vocab*d_model",
+        "Total-param approximation N ~= 12 * n_layers * d_model^2 for a dense pre-norm decoder (valid when d_ff=4d and MHA), with correction notes for GQA, GLU, and MoE",
+        "FLOPs conventions: forward ~= 2N per token, training ~= 6N per token (Kaplan/Chinchilla), the basis for compute budgeting (link Scaling Laws)",
+        "Config comparison table columns: d_model, n_layers, n_heads, n_kv_heads, d_head, d_ff, vocab, activation, norm, positional scheme, context length, total/active params",
+        "Rows: GPT-2, GPT-3 175B, LLaMA-2 7B/70B, LLaMA-3, Mistral 7B, Mixtral 8x7B, DeepSeek-V3, Qwen2.5, Gemma 2 (date-stamped as of 2026)",
+        "Conventions worth tabulating: head_dim 64/128, d_ff rounding to hardware-friendly multiples, and the vocab-size trend 32k -> 128k -> 256k",
+        "Footnote which fields are folklore-driven (head_dim 128, 4x FFN) and link to the numerology discussion (18)"
+      ],
+      "links": [
+        "Deep Dive - The Transformer",
+        "Reference - Memory Math for Transformers",
+        "Concept - Scaling Laws",
+        "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)",
+        "Reference - Model Genealogy",
+        "Concept - Byte-Pair Encoding"
+      ]
+    },
+    {
+      "title": "Decision - Dense vs Mixture-of-Experts",
+      "type": "decision",
+      "level": "advanced",
+      "scope": "Choosing between a dense model and a sparse MoE at a fixed training or serving budget. IN: the tradeoff axes (quality-per-FLOP, memory, comms, serving batch, fine-tuning) and when each wins. OUT: MoE architecture internals (link Concept - Mixture of Experts Architecture), expert-parallel systems (link 04/08), serving batching (link 07).",
+      "key_points": [
+        "Core tradeoff: MoE buys more parameters (capacity/quality) at roughly constant active FLOPs, but pays in total memory (all experts resident), all-to-all comms, and serving complexity",
+        "When MoE wins: training-compute-bound regimes and high-throughput serving where memory is available (Mixtral, DeepSeek, Qwen-MoE data points)",
+        "When dense wins: memory-constrained deployment, low or variable batch (single-user latency), simpler fine-tuning and quantization, and edge devices",
+        "Serving nuance: MoE needs large batches to keep experts busy; at batch=1 you pay full memory bandwidth for the whole model while getting only small-model compute, often a wash or worse than a same-active dense model",
+        "Fine-tuning/quantization friction: MoE routers are brittle to post-training quantization and small-data fine-tunes can wreck load balance (link 12)",
+        "Rule of thumb (folklore): a MoE gives roughly the quality of a dense model with sqrt(total * active) parameters; token-choice vs expert-choice routing shifts the calculus",
+        "Decision flow: identify the binding budget (train-FLOP vs serve-memory vs latency), the batch profile, and the team's infra maturity for expert parallelism"
+      ],
+      "links": [
+        "Concept - Mixture of Experts Architecture",
+        "Breakdown - Mixtral 8x7B",
+        "Breakdown - DeepSeek-V3 Architecture",
+        "Concept - Scaling Laws",
+        "Concept - Cost Engineering for LLM Applications",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Decision - Choosing a Sequence Mixer"
+      ]
+    },
+    {
+      "title": "Decision - Choosing a Sequence Mixer",
+      "type": "decision",
+      "level": "frontier",
+      "scope": "Selecting the token-mixing layer(s) for a new model: full attention, sliding-window, linear attention, SSM, or a hybrid. IN: the recall-vs-cost tradeoff, context-length target, training/inference budget, ecosystem risk. OUT: each mechanism's internals (link respective notes), kernels (link 08).",
+      "key_points": [
+        "Primary axis: exact in-context recall (full attention best) versus long-context inference cost (SSM/linear best, constant state); recall effectively costs memory",
+        "Full attention: gold standard for recall/reasoning, O(N^2) training and a linearly growing KV cache at serve time, still the default for frontier quality",
+        "Sliding-window: bounded KV cache and cheap, but loses exact long-range recall unless interleaved with global layers",
+        "Linear attention / SSM: O(N) training, constant-state inference, weak exact recall, good for streaming, long audio, and genomics",
+        "Hybrid (a few full-attention layers plus a recurrent majority): current best long-context/quality tradeoff (Jamba, Griffin); choose the attention ratio and placement",
+        "Decision flow: target context length, whether exact retrieval is required, train-vs-inference cost priority, and willingness to leave the well-supported full-attention path",
+        "Ecosystem risk (often decisive): full attention has FlashAttention and vLLM/SGLang support; exotic mixers have thin kernel and serving support (link 07/08)"
+      ],
+      "links": [
+        "Concept - Attention Mechanism",
+        "Concept - State Space Models and Mamba",
+        "Concept - Linear Attention",
+        "Concept - Hybrid SSM-Attention Architectures",
+        "Concept - Sparse and Sliding-Window Attention",
+        "Concept - KV Cache",
+        "Deep Dive - FlashAttention",
+        "Decision - Dense vs Mixture-of-Experts"
+      ]
+    },
+    {
+      "title": "Gotchas - Implementing Attention",
+      "type": "gotchas",
+      "level": "advanced",
+      "scope": "The bugs that produce a model which trains but is subtly wrong, specific to hand-implementing attention and positional encoding. IN: masking, scaling, dtype, reshape, RoPE application, GQA repeat, padding. OUT: MoE-specific gotchas (link Gotchas - Mixture of Experts), kernel numerics (link 08).",
+      "key_points": [
+        "Causal mask off-by-one / wrong triangle: letting a token see itself+future or masking the diagonal; symptom is suspiciously low training loss (label leakage), detect with a causality self-test on shifted targets",
+        "Softmax in bf16/fp16: computing softmax in low precision overflows or loses mass; scores must be upcast to fp32 before softmax then cast back (link Floating Point)",
+        "Missing or wrong 1/sqrt(d_head) scale (or scaling by d_model instead of d_head): attention entropy collapses and loss plateaus high",
+        "Head reshape/transpose bugs: mixing head and feature dims via view vs permute silently scrambles heads while output shape still looks plausible; catch with a per-head identity unit test",
+        "RoPE applied to the wrong dims, after an incorrect head split, or to V; interleaved-vs-half ordering and base/theta mismatch versus the reference garble long-context (link RoPE, Playbook)",
+        "GQA/MQA repeat_kv: forgetting to expand KV heads to the query-head count, or using repeat vs repeat_interleave, silently mis-groups keys and values",
+        "Padding and causal-mask interaction in batched training (attending to pad tokens); left- vs right-padding at inference breaks position indices and RoPE offsets"
+      ],
+      "links": [
+        "Concept - Attention Mechanism",
+        "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)",
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Snippet - Scaled Dot-Product Attention from Scratch",
+        "Concept - Floating Point for Deep Learning",
+        "Deep Dive - FlashAttention",
+        "Playbook - Numerically Matching a Reference Implementation",
+        "Concept - Attention Sinks"
+      ]
+    },
+    {
+      "title": "Gotchas - Mixture of Experts",
+      "type": "gotchas",
+      "level": "advanced",
+      "scope": "Architecture-level MoE pitfalls that survive into inference and fine-tuning, distinct from at-scale training load-balancing (owned by 04). IN: routing collapse, capacity/dropping, batch dependence, PTQ brittleness, shared-expert bookkeeping, gate precision. OUT: aux-loss training dynamics (link 04), expert-parallel comms bugs (link 04/08).",
+      "key_points": [
+        "Routing collapse / dead experts: a few experts win everything and the rest never train; symptom is a spiky load histogram, detect by logging per-expert token counts (fix via aux-loss or bias, link 04)",
+        "Token dropping under a capacity factor < 1.0: overflow tokens skip the expert and pass through the residual, causing silent quality loss and a train/eval mismatch when capacity differs between the two",
+        "Batch-size dependence at inference: which tokens share a batch changes expert load and, with capacity limits, changes outputs, producing nondeterminism across batch sizes; drop capacity limits or use large capacity at inference",
+        "Post-training quantization brittleness: routers and low-magnitude expert weights are sensitive, and naive GPTQ/AWQ can flip routing decisions (link 07 quantization)",
+        "Shared-vs-routed expert bookkeeping: forgetting the always-on shared expert (DeepSeek-style) or double-counting parameters when computing active params",
+        "Gate precision and normalization: computing gates in low precision or forgetting to renormalize the top-k gate weights shifts the output scale",
+        "Fine-tuning a MoE: small datasets can wreck routing balance, so freezing routers or using a low LR on the gates is common tribal practice (link 12)"
+      ],
+      "links": [
+        "Concept - Mixture of Experts Architecture",
+        "Breakdown - Mixtral 8x7B",
+        "Breakdown - DeepSeek-V3 Architecture",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Concept - Post-Training Quantization Formats",
+        "Snippet - Top-2 MoE Routing Layer",
+        "Decision - Dense vs Mixture-of-Experts"
+      ]
+    },
+    {
+      "title": "Snippet - Scaled Dot-Product Attention from Scratch",
+      "type": "snippet",
+      "level": "core",
+      "scope": "A minimal, correct, runnable PyTorch implementation of causal multi-head attention. IN: projections, reshape, scaled scores, causal mask, fp32 softmax, output projection, a causality self-test. OUT: RoPE (link Snippet - RoPE Implementation), the KV-cache generation loop (link 07), the fused kernel (link 08).",
+      "key_points": [
+        "~40-line nn.Module: qkv projection, reshape to [B,H,T,d_head], scores = q @ k.transpose(-2,-1) / sqrt(d_head), causal mask via triu(-inf), softmax(dim=-1), @ v, merge heads, out-projection",
+        "Show the causal mask constructed correctly (upper-triangular -inf, diagonal kept) and applied before softmax",
+        "Show the explicit fp32 upcast of scores before softmax and the cast back, the numerical-stability decision spelled out",
+        "Comment the sqrt(d_head) scale and why (variance control so softmax does not saturate)",
+        "Runnable __main__ with a random input, an assertion on output shape, and a causality test proving position t's output is independent of tokens > t",
+        "Why-it-is-written-this-way: fp32 softmax, the causality self-test, and the reshape/transpose order that avoids the classic head-scramble bug",
+        "Header block states dependencies (torch version) and expected printed output"
+      ],
+      "links": [
+        "Concept - Attention Mechanism",
+        "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)",
+        "Snippet - RoPE Implementation",
+        "Gotchas - Implementing Attention",
+        "Deep Dive - FlashAttention",
+        "Concept - Softmax"
+      ]
+    },
+    {
+      "title": "Snippet - RoPE Implementation",
+      "type": "snippet",
+      "level": "advanced",
+      "scope": "A correct, runnable RoPE application showing the frequency computation and the rotate_half trick. IN: inv_freq, position angles, cos/sin caches, applying rotation to Q and K, an empirical relative-position check. OUT: RoPE theory (link Concept - Rotary Position Embeddings), context-extension scaling (link Concept - Context Length Extension).",
+      "key_points": [
+        "Compute inv_freq = 1 / base^(arange(0,d,2)/d); outer product with positions gives angles; build cos and sin tensors",
+        "rotate_half(x): split the last dim in half and return cat(-x2, x1); apply q_rot = q*cos + rotate_half(q)*sin, same for k",
+        "Show that only Q and K are rotated (never V), applied after the head reshape, on the d_head dimension",
+        "Expose base/theta as a parameter and comment where NTK/YaRN scaling would hook in (link Context Length Extension)",
+        "Runnable test that empirically verifies the relative-position property: the dot product of rotated q_m and k_n depends only on (m - n)",
+        "Why-it-is-written-this-way: the interleaved-vs-half-split convention mismatch (GPT-NeoX vs original RoPE ordering) that silently breaks weight porting, the single most common RoPE bug (link Playbook)",
+        "Header block states torch version and the expected printed relative-property check output"
+      ],
+      "links": [
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Concept - Context Length Extension",
+        "Snippet - Scaled Dot-Product Attention from Scratch",
+        "Gotchas - Implementing Attention",
+        "Playbook - Numerically Matching a Reference Implementation",
+        "Concept - Floating Point for Deep Learning"
+      ]
+    },
+    {
+      "title": "Snippet - Top-2 MoE Routing Layer",
+      "type": "snippet",
+      "level": "advanced",
+      "scope": "A minimal runnable sparse-MoE FFN layer with top-2 token-choice routing. IN: the gate, top-k selection, renormalization, weighted expert combination, per-expert load logging. OUT: capacity/dropping and load-balance loss (link 04 / Gotchas), expert-parallel dispatch (link 04/08).",
+      "key_points": [
+        "nn.Module with N expert MLPs plus a linear gate; forward: logits = gate(x), weights = softmax(logits), topk(2), renormalize the two selected weights, output = sum of weight_i * expert_i(x)",
+        "Implement the simple dense-compute reference form and note that production uses scatter/gather dispatch and expert parallelism for efficiency (link 04)",
+        "Log per-expert token counts to surface load imbalance (ties directly to Gotchas - Mixture of Experts)",
+        "Renormalize the top-2 gate weights and explain why (keeps the output scale consistent), a commonly omitted step",
+        "Runnable __main__: a random batch printing an expert-load histogram that shows imbalance in the absence of a balance loss",
+        "Why-it-is-written-this-way: top-2 renormalization, the dense-vs-dispatch tradeoff comment, and surfacing load counts as the thing you must monitor",
+        "Header block states torch version and expected printed output"
+      ],
+      "links": [
+        "Concept - Mixture of Experts Architecture",
+        "Gotchas - Mixture of Experts",
+        "Breakdown - Mixtral 8x7B",
+        "Concept - Feed-Forward Networks and GLU Variants",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Snippet - Scaled Dot-Product Attention from Scratch"
+      ]
+    },
+    {
+      "title": "Checklist - New Architecture Bring-Up",
+      "type": "checklist",
+      "level": "advanced",
+      "scope": "Pre-flight verification before committing compute to train a new or modified transformer architecture. IN: shape/param sanity, init, causality, positional correctness, overfit-a-batch, MoE load, throughput sanity. OUT: full training-run operations (link Deep Dive - Anatomy of a Pretraining Run), the data pipeline (link 05).",
+      "key_points": [
+        "Parameter count matches the analytic formula (12 * n_layers * d^2 plus corrections), catching wrong d_ff, missing GLU rescale, or vocab errors",
+        "Overfit a single batch to near-zero loss, proving the model can learn and backprop is wired end to end (link The Training Loop)",
+        "Causality test: the output at position t is unchanged when tokens > t are perturbed",
+        "Positional correctness: shuffling input positions changes the output (position is actually used) and the RoPE base matches the intended context length",
+        "Init sanity: activation and gradient RMS are stable across layers at step 0 (no explosion), confirming correct residual/norm placement (link Normalization Placement)",
+        "Softmax and logits computed in fp32; no NaN under bf16 for the first hundred steps (link Mixed Precision)",
+        "For MoE: every expert receives tokens and the load histogram is not collapsed; capacity factor set intentionally",
+        "Throughput / MFU is in the expected range and the attention-vs-FFN FLOP split matches the cheat-sheet estimate (link Roofline)"
+      ],
+      "links": [
+        "Deep Dive - The Transformer",
+        "Gotchas - Implementing Attention",
+        "Gotchas - Mixture of Experts",
+        "Concept - The Training Loop",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Concept - Mixed Precision Training",
+        "Playbook - Numerically Matching a Reference Implementation"
+      ]
+    },
+    {
+      "title": "Playbook - Numerically Matching a Reference Implementation",
+      "type": "playbook",
+      "level": "unicorn",
+      "scope": "The procedure to port a model architecture to a new codebase and prove it correct against the reference (HF vs original vs your kernel) by diffing activations. IN: weight-name mapping, layer-by-layer activation diffing, the usual culprits, tolerance budgeting. OUT: kernel-level numerics (link 08), quantization mismatch (link 07).",
+      "key_points": [
+        "Goal/when: you reimplemented or converted a model and logits or generations differ from the reference, and you must confirm correctness before trusting a fine-tune or a serving port",
+        "Step: freeze both models in eval mode, force the same dtype (start in fp32/fp64 to remove precision noise), feed identical input, compare final logits against a tolerance (e.g. max-abs-diff < 1e-4 in fp32)",
+        "Step: if mismatched, binary-search by hooking and diffing per-layer residual-stream activations to localize the first divergent layer",
+        "The usual-culprits list: RoPE ordering (interleaved vs half) and base theta; norm epsilon value and inside-vs-outside the sqrt; attention scale (d_head vs d_model); GQA repeat method; SwiGLU gate/up order and d_ff; logit soft-cap/QK-norm presence; embedding weight-tying; BOS/special-token handling",
+        "Step: build a weight-name mapping table; the packed-QKV split order (fused qkv sliced into q,k,v in the wrong order) is a top silent bug",
+        "Verification: greedy generations are identical for N tokens and perplexity on a fixed text matches to 3-4 significant figures",
+        "When-it-goes-wrong branch table: diverges at layer 0 -> embedding/positional; grows with depth -> norm eps or residual scale; only at long context -> RoPE base; only on certain tokens -> tokenizer/special-token"
+      ],
+      "links": [
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Concept - Normalization Placement (Pre-Norm, Post-Norm, DeepNorm)",
+        "Gotchas - Implementing Attention",
+        "Snippet - RoPE Implementation",
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)",
+        "Deep Dive - FlashAttention",
+        "Reference - Transformer Architecture Cheat Sheet"
+      ]
+    },
+    {
+      "title": "Lore - The Standardization of the Transformer Block",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The narrative of how the 2017 Vaswani block converged, component by component, into the 2024 LLaMA-standard decoder block, and the people and papers that drove each swap. IN: the sequence of changes and why each stuck. OUT: each component's mechanism (link its own note), the scaling-law drivers (link 04).",
+      "key_points": [
+        "Original (2017): post-norm LayerNorm, sinusoidal absolute PE, ReLU FFN at 4x, MHA with bias terms, encoder-decoder",
+        "The decoder-only turn: GPT/GPT-2 drop the encoder, use learned absolute PE, and adopt pre-norm for stability at depth",
+        "Noam Shazeer's outsized fingerprints: MQA (2019), the GLU/SwiGLU variants (2020), and the spread of RMSNorm; much of the modern block traces to a handful of his papers",
+        "RoPE (RoFormer 2021) displaces absolute PE while ALiBi competes; RoPE wins largely on ecosystem momentum",
+        "LLaMA (2023) crystallizes the consensus: pre-norm RMSNorm, RoPE, SwiGLU (d_ff ~= 8/3 * 4d), no bias terms, and GQA in LLaMA-2, and nearly everyone copies it",
+        "The counter-current: Gemma 2 (2024) re-adds ideas thought dead (sandwich/post-norm hybrid, logit soft-capping, local/global interleave), showing the standard is not actually settled",
+        "Evidence status: mostly well-sourced from papers and model cards, but the why-each-stuck attribution is partly folklore (ecosystem lock-in, not always proven superiority)"
+      ],
+      "links": [
+        "Deep Dive - The Transformer",
+        "Concept - Normalization Placement (Pre-Norm, Post-Norm, DeepNorm)",
+        "Concept - Feed-Forward Networks and GLU Variants",
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)",
+        "Reference - Model Genealogy",
+        "Concept - RMSNorm and LayerNorm",
+        "Lore - The OPT-175B Logbook"
+      ]
+    },
+    {
+      "title": "Pattern - Interleaving Global and Local Attention",
+      "type": "pattern",
+      "level": "frontier",
+      "scope": "The design pattern of alternating full-context (global) attention layers with cheap local/sliding-window layers to bound KV cost while preserving long-range recall. IN: the interleave structure, ratios, real systems, tradeoffs. OUT: sliding-window mechanics (link Concept - Sparse and Sliding-Window Attention), SSM hybrids (link Concept - Hybrid SSM-Attention Architectures), the FlashAttention kernel (link 08).",
+      "key_points": [
+        "Problem/solution: full attention everywhere is O(N^2)*L while local everywhere loses long-range recall; interleave a minority of global layers among local ones to get both",
+        "Structure: Gemma 2/3 alternate local (sliding-window) and global layers at roughly 5:1; GPT-OSS and Cohere Command-R use similar patterns; Character.AI experimented with a single global layer",
+        "Why it works: local layers move information within a window cheaply while periodic global layers provide long-range mixing, and effective receptive field compounds through depth",
+        "KV-cache payoff: only the global layers keep a full-length KV cache while local layers cap at window w, a large serving-memory reduction (link 07)",
+        "Knobs: local-to-global ratio, window size, whether global layers use a different RoPE base/scaling, and periodic-vs-blocked placement",
+        "Tradeoffs / when-not: retrieval-heavy workloads may need more global layers, it complicates KV-cache paging (link 07), and kernel support for mixed patterns varies",
+        "Known uses: Gemma 2/3, GPT-OSS, Cohere Command, with Longformer's global-token scheme as the ancestor"
+      ],
+      "links": [
+        "Concept - Sparse and Sliding-Window Attention",
+        "Concept - Attention Mechanism",
+        "Concept - Hybrid SSM-Attention Architectures",
+        "Concept - KV Cache",
+        "Deep Dive - FlashAttention",
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Concept - Attention Sinks"
+      ]
+    },
+    {
+      "title": "Concept - Attention Logit Stabilization (QK-Norm and Soft-Capping)",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "The small architectural tricks that keep attention logits and training stable at scale: QK-norm, logit soft-capping, and related clamps. IN: the mechanisms, the instability each prevents, the models that use them, and the FlashAttention incompatibility. OUT: general normalization placement (link Concept - Normalization Placement), loss-spike training dynamics (link 04), the norm-layer math (link 02).",
+      "key_points": [
+        "The problem: attention logits (and final logits) can grow unboundedly during training, saturating softmax and causing loss spikes and divergence at scale, the attention-entropy-collapse pathology (Zhai et al. 2023)",
+        "QK-norm: apply LayerNorm/RMSNorm to queries and keys before the dot product so logit magnitude is controlled independent of learned weight norms; used in Gemma 2 and the ViT-22B lineage (Dehghani et al. 2023)",
+        "Logit soft-capping (Gemma 2): logits = cap * tanh(logits/cap) applied to attention logits (cap=50) and final logits (cap=30) to bound magnitude smoothly",
+        "The serving gotcha: soft-capping is incompatible with the standard FlashAttention kernel and is often disabled at inference, a real source of Gemma-porting quality bugs",
+        "z-loss / final-logit regularization (PaLM): penalize log Z to keep the softmax normalizer near 1, a related stabilizer from the training side (link 04 training stability)",
+        "Interaction with low precision: bounded logits improve fp8/bf16 stability, and unbounded QK products are a known fp8 hazard (link Mixed Precision)",
+        "Why unicorn-tier: rarely explained, buried in model cards, and the exact cap values are folklore; evidence from the Gemma 2 tech report and ViT-22B"
+      ],
+      "links": [
+        "Concept - Normalization Placement (Pre-Norm, Post-Norm, DeepNorm)",
+        "Concept - Attention Mechanism",
+        "Concept - RMSNorm and LayerNorm",
+        "Deep Dive - FlashAttention",
+        "Concept - Mixed Precision Training",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)"
+      ]
+    }
+  ]
+}

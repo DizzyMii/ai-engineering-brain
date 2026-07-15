@@ -1,0 +1,619 @@
+{
+  "domain": "12 - Fine-Tuning",
+  "slug": "fine-tuning",
+  "notes": [
+    {
+      "title": "Concept - Parameter-Efficient Fine-Tuning (PEFT)",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The family of methods that adapt a frozen pretrained model by training a tiny set of new or selected parameters. IN: the shared motivation (memory), the three-family taxonomy, what unifies them. OUT: per-method mechanisms (link to LoRA/adapters/prompt-tuning notes) and lab-scale SFT training (link to 06).",
+      "key_points": [
+        "Core setup: freeze W (billions of params), train theta with |theta| << |W|, often 0.01-1% of params; gradient and optimizer memory scale with |theta|, not |W|.",
+        "Three families (Ding et al. 2022 taxonomy): additive (adapters, soft prompts), selective (BitFit trains only biases, ~0.08%), reparameterization (LoRA, DoRA).",
+        "Why memory is the real win: AdamW stores 2 fp32 moments + fp32 master per trainable param (~16 bytes); full FT of 7B needs ~14GB weights + ~84GB optimizer/grad/master; PEFT drops optimizer state to megabytes.",
+        "Quality: PEFT matches full FT on instruction/style adaptation, lags on large-distribution-shift domains (code, math) — forward-reference the underperformance note.",
+        "Serving win: one frozen base + many small swappable adapters per request (this is owned by 07 serving — link, do not re-explain).",
+        "HF `peft` library is the de-facto implementation (`LoraConfig`, `get_peft_model`); PEFT is orthogonal to whether the objective is SFT, DPO, or RLVR (those are 06's)."
+      ],
+      "links": [
+        "Deep Dive - LoRA",
+        "Concept - QLoRA",
+        "Concept - Adapter Layers",
+        "Concept - Prompt Tuning and Prefix Tuning",
+        "Reference - PEFT Method Comparison",
+        "Concept - Mixed Precision Training",
+        "Concept - Adam and AdamW",
+        "Reference - Memory Math for Transformers",
+        "Concept - Supervised Fine-Tuning (SFT)",
+        "Concept - Why LoRA Underperforms Full Fine-Tuning"
+      ]
+    },
+    {
+      "title": "Concept - What Fine-Tuning Can and Cannot Teach",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The mental model of what changes when you fine-tune: behavior, format, and style shift reliably; factual knowledge injection is unreliable. IN: why FT reshapes the conditional distribution but not the fact store, the 'teach it my docs' anti-pattern, and where continued pretraining fits. OUT: the full decision framework (link to Decision note) and RAG internals (link to 11).",
+      "key_points": [
+        "Fine-tuning adjusts p(y|x): excellent at teaching form (JSON schema, tone, refusal style, a fixed classification scheme) and surfacing behaviors already latent in the base.",
+        "Knowledge injection is unreliable: a handful of examples teaches confident format-matching while the model hallucinates specifics — 'sounds right, invents the numbers'.",
+        "Gekhman et al. 2024 ('Does Fine-Tuning LLMs on New Knowledge Encourage Hallucination?'): unknown facts are learned slowly by SFT and their introduction increases hallucination on unrelated facts — teaching new knowledge via SFT degrades factuality.",
+        "Capacity intuition: a rank-16 LoRA on 7B adds a few million params — nowhere near enough to store a corpus; even full FT needs many exposures to overwrite a strong prior.",
+        "Rule of thumb: FT for stable behavior/skills, RAG for facts (especially changing facts), prompting for quick behavior shifts.",
+        "Continued pretraining is the real knowledge-injection path: many-epoch next-token training on a large domain corpus (DAPT — Gururangan et al. 2020) CAN inject knowledge, but it behaves like pretraining, not SFT — it needs LR re-warming (Ibrahim et al. 2024, 'Simple and Scalable Strategies to Continually Pre-train LLMs'), a replay slice of the original data mixture to limit forgetting, and orders of magnitude more tokens than an instruction fine-tune."
+      ],
+      "links": [
+        "Decision - Fine-Tuning vs RAG vs Prompting",
+        "Deep Dive - RAG Architectures",
+        "Deep Dive - LoRA",
+        "Concept - Catastrophic Forgetting",
+        "Concept - Supervised Fine-Tuning (SFT)",
+        "Concept - Knowledge Distillation",
+        "Concept - Data Mixtures",
+        "Concept - Chain-of-Thought and Why It Works",
+        "Concept - Why LoRA Underperforms Full Fine-Tuning"
+      ]
+    },
+    {
+      "title": "Decision - Fine-Tuning vs RAG vs Prompting",
+      "type": "decision",
+      "level": "core",
+      "scope": "Choosing among prompting, RAG, fine-tuning, and their combinations for a given task. IN: the decision flow, cost/latency/quality tradeoffs, when to combine. OUT: RAG mechanism (link to 11), prompt engineering craft (link to 09), how to actually run a fine-tune (other domain notes).",
+      "key_points": [
+        "Default ladder: prompt first -> few-shot/structured output -> RAG if the gap is knowledge -> FT if the gap is behavior/format/latency. Most teams over-jump to FT.",
+        "The deciding question: is the gap knowledge (-> RAG) or behavior/format/latency (-> FT)? Does the knowledge change often (-> never FT it)?",
+        "Cost model: prompting = $0 eng, high per-token (long prompts); RAG = retrieval infra + latency; FT = one-time training cost (tens to thousands of $) + adapter serving, but permanently shorter prompts.",
+        "Combine: RAG + FT is common (FT the citation/format behavior, RAG the facts); FT to bake repeated few-shot exemplars into weights and cut prompt tokens.",
+        "Decision-flippers: strict output schema at high call volume -> FT beats repeating few-shot every call; rapidly changing data -> never FT; <~500 good examples -> prompting/RAG usually wins.",
+        "Named anti-pattern: fine-tuning to 'teach the model our documentation' — link the can/cannot-teach note; this is the single most common wasted FT project."
+      ],
+      "links": [
+        "Concept - What Fine-Tuning Can and Cannot Teach",
+        "Decision - Full Fine-Tuning vs PEFT",
+        "Deep Dive - RAG Architectures",
+        "Concept - Prompt Caching",
+        "Playbook - Reliable Structured Output",
+        "Concept - Chain-of-Thought and Why It Works",
+        "Concept - Cost Engineering for LLM Applications",
+        "Concept - Semantic Caching"
+      ]
+    },
+    {
+      "title": "Decision - Full Fine-Tuning vs PEFT",
+      "type": "decision",
+      "level": "core",
+      "scope": "Given you have decided to fine-tune, choosing full FT vs LoRA vs QLoRA vs other PEFT. IN: memory/compute/quality tradeoffs, reversibility, when full FT is worth it. OUT: the FT-vs-RAG-vs-prompting choice (other Decision note) and specific numeric knobs (link to references).",
+      "key_points": [
+        "Memory math: full FT 7B in bf16 + AdamW ~= 14GB weights + 14GB grads + ~56GB fp32 master+moments ~= 84GB -> needs A100-80G with offload or multi-GPU; QLoRA 7B fits <16GB on one consumer card.",
+        "Quality ceiling: full FT is the ceiling; LoRA closes most of the gap on instruction/style; for code, math, and large domain shift full FT wins measurably (Biderman et al. 2024).",
+        "Choose full FT when: you have the hardware, the domain shift is large, you deploy ONE model, and you need the last few points. Choose PEFT when: limited GPU, many task variants, want reversibility/composability.",
+        "QLoRA vs LoRA vs full: QLoRA (4-bit base) is the biggest memory saver at a speed cost; 16-bit LoRA if you have the VRAM and want throughput; full FT if you can afford it.",
+        "Reversibility and forgetting: PEFT keeps the base frozen -> trivial rollback and less catastrophic forgetting (link).",
+        "Non-obvious: LoRA barely reduces forward-pass FLOPs; the win is optimizer + gradient + activation memory, not compute — so LoRA is not automatically faster per step than full FT."
+      ],
+      "links": [
+        "Deep Dive - LoRA",
+        "Concept - QLoRA",
+        "Concept - Catastrophic Forgetting",
+        "Reference - PEFT Method Comparison",
+        "Reference - Fine-Tuning Hyperparameters",
+        "Reference - Memory Math for Transformers",
+        "Concept - GPU Memory Hierarchy",
+        "Concept - Mixed Precision Training",
+        "Concept - Data Parallelism and ZeRO",
+        "Concept - Supervised Fine-Tuning (SFT)"
+      ]
+    },
+    {
+      "title": "Deep Dive - LoRA",
+      "type": "deep-dive",
+      "level": "advanced",
+      "scope": "The full mechanism of Low-Rank Adaptation: the low-rank update, rank/alpha scaling, target modules, initialization, dropout, and merging. IN: everything about vanilla LoRA. OUT: variants get their own notes (QLoRA, DoRA, rsLoRA, init methods) and serving many adapters at once (link to 07).",
+      "key_points": [
+        "Core: W' = W + dW, dW = (alpha/r) * B @ A, with A in R^{r x k} init ~N(0,sigma^2) and B in R^{d x r} init 0, so dW=0 at step 0 and training starts exactly at the pretrained function; only A,B receive gradients. Params drop from d*k to r*(d+k).",
+        "Hypothesis (Hu et al. 2021, building on Aghajanyan et al. 2020 intrinsic dimensionality): the adaptation update has low intrinsic rank; r = 1-8 often suffices to adapt existing capabilities.",
+        "alpha/r scaling decouples the update magnitude from rank; effective update scales with alpha/r. Changing r without rescaling alpha silently changes the effective learning rate — the classic footgun (link rsLoRA).",
+        "Target modules: original paper used attention q,v only; modern practice (QLoRA, Raschka experiments) applies LoRA to ALL linear layers including MLP gate/up/down — coverage matters more than rank for quality.",
+        "Merging: W_merged = W + (alpha/r) B A folds the adapter into base weights for zero inference overhead; merging into a quantized base loses precision (QLoRA merge gotcha).",
+        "Architecture walkthrough (diagram required): a parallel BA branch injected alongside the frozen linear via forward hooks, dropout applied to the input of A; optimizer state ~ r(d+k), e.g. 7B all-linear r=16 ~= 40M params (~0.6%).",
+        "Evolution: intrinsic dimensionality -> LoRA -> QLoRA (4-bit base) -> DoRA / rsLoRA / PiSSA (decomposition, scaling, and init refinements)."
+      ],
+      "links": [
+        "Concept - QLoRA",
+        "Concept - DoRA",
+        "Concept - rsLoRA and the Rank-Alpha Scaling Trap",
+        "Concept - LoRA Initialization (PiSSA, LoftQ, OLoRA)",
+        "Concept - Parameter-Efficient Fine-Tuning (PEFT)",
+        "Concept - Why LoRA Underperforms Full Fine-Tuning",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - Adam and AdamW",
+        "Concept - Backpropagation",
+        "Concept - Attention Mechanism",
+        "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)",
+        "Reference - Memory Math for Transformers",
+        "Gotchas - LoRA Fine-Tuning",
+        "Snippet - LoRA Linear Layer from Scratch",
+        "Reference - Fine-Tuning Hyperparameters"
+      ]
+    },
+    {
+      "title": "Concept - QLoRA",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "4-bit LoRA fine-tuning: NF4 quantization of the frozen base, double quantization, paged optimizers, with compute in bf16. IN: the three innovations and how they combine. OUT: general post-training quantization formats for inference (link to 07) and LoRA basics (link to Deep Dive - LoRA).",
+      "key_points": [
+        "Insight (Dettmers et al. 2023): quantize the frozen base to 4-bit, keep LoRA adapters in bf16; the base never updates so quantization error is fixed and the adapters compensate. Guanaco 65B was trained on one 48GB GPU in 24h, ~99% of ChatGPT on the Vicuna benchmark (as of 2023).",
+        "NF4 (NormalFloat4): an information-theoretically optimal 4-bit datatype for zero-mean normally-distributed weights — its 16 code points are quantiles of a normal distribution, per-block normalized so each bin holds equal probability mass; beats fp4/int4 for NN weights.",
+        "Double quantization: quantize the per-block absmax scale constants themselves (from 32-bit to 8-bit) -> saves ~0.37 bits/param (~3GB on a 65B model).",
+        "Paged optimizers: use NVIDIA unified memory to page optimizer states to CPU RAM during gradient-checkpointing memory spikes -> prevents OOM on long sequences.",
+        "Compute path: weights stored NF4 are dequantized to bf16 on the fly per matmul (storage dtype != compute dtype) — this dequant overhead is why kernel work (Unsloth) matters for speed.",
+        "Failure modes: merging a QLoRA adapter into a 4-bit base loses accuracy (dequantize to fp16 first, then merge); slower than 16-bit LoRA; NF4 assumes near-normal weights and degrades on outlier-heavy layers."
+      ],
+      "links": [
+        "Deep Dive - LoRA",
+        "Concept - LoRA Initialization (PiSSA, LoftQ, OLoRA)",
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Post-Training Quantization Formats",
+        "Concept - Mixed Precision Training",
+        "Concept - Adam and AdamW",
+        "Concept - GPU Memory Hierarchy",
+        "Reference - Memory Math for Transformers",
+        "Snippet - QLoRA Fine-Tune Configuration",
+        "Breakdown - Unsloth"
+      ]
+    },
+    {
+      "title": "Concept - Adapter Layers",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Additive bottleneck adapters (Houlsby, Pfeiffer), IA3, and BitFit — the pre-LoRA PEFT lineage that still matters. IN: bottleneck architecture, placement, IA3 rescaling, BitFit, AdapterFusion. OUT: reparameterization methods (link to LoRA notes) and soft prompts (link to prompt-tuning note).",
+      "key_points": [
+        "Houlsby et al. 2019: insert a small bottleneck MLP (down-project to dim m << d, nonlinearity, up-project, residual) after BOTH attention and FFN sublayers; ~0.5-8% params; near-full-FT on GLUE.",
+        "Pfeiffer adapters: a single adapter per layer (after FFN only) -> roughly half the params, similar quality; the AdapterHub default.",
+        "Decisive tradeoff vs LoRA: adapters add SEQUENTIAL layers that cannot be merged into base -> permanent extra inference latency; this is the core reason LoRA won for large-scale LLM serving.",
+        "IA3 (Liu et al. 2022): learned element-wise rescaling vectors on keys, values, and FFN activations; fewer params than LoRA; the basis of the T-Few few-shot recipe.",
+        "BitFit (Ben-Zaken et al. 2021): train only bias terms (~0.08% params); surprisingly strong on small models, weakens at scale.",
+        "AdapterFusion: compose multiple task adapters via a learned attention over them -> multi-task use without cross-task interference."
+      ],
+      "links": [
+        "Concept - Parameter-Efficient Fine-Tuning (PEFT)",
+        "Deep Dive - LoRA",
+        "Concept - Prompt Tuning and Prefix Tuning",
+        "Concept - Representation Fine-Tuning (ReFT)",
+        "Reference - PEFT Method Comparison",
+        "Reference - Fine-Tuning Hyperparameters",
+        "Concept - RMSNorm and LayerNorm",
+        "Concept - Attention Mechanism",
+        "Deep Dive - The Transformer",
+        "Concept - Continuous Batching"
+      ]
+    },
+    {
+      "title": "Concept - Prompt Tuning and Prefix Tuning",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Soft-prompt / continuous-prompt PEFT: prompt tuning, prefix tuning, and P-tuning v2. IN: learnable embeddings in input and KV space, the mechanism, when it works and when it fails. OUT: discrete prompt engineering (link to 09) and adapters/LoRA (other notes).",
+      "key_points": [
+        "Prompt tuning (Lester et al. 2021): prepend k learnable embedding vectors to the input and train only those (~k*d params, e.g. 20*4096 ~= 80k); matches full FT only at scale (>10B), weak on small models.",
+        "Prefix tuning (Li & Liang 2021): learnable vectors prepended to the KEY and VALUE of every attention layer (not just input embeddings) -> more capacity; reparameterized through an MLP during training for optimization stability.",
+        "P-tuning v2 (Liu et al. 2021): deep prefix at every layer, matches full FT across scales and NLU tasks — essentially prefix tuning generalized.",
+        "Mechanism intuition: soft prompts steer attention without touching weights; they live in continuous embedding space, untied to real tokens, hence not human-readable.",
+        "Costs: prefix tokens consume context window; sensitive to init and LR; largely superseded by LoRA for generative FT but relevant for multi-task serving (swap prompts, not weights) and as the conceptual root of prompt caching.",
+        "Failure mode: instability and underfitting on <1B models; initializing soft prompts from real token embeddings helps convergence."
+      ],
+      "links": [
+        "Concept - Parameter-Efficient Fine-Tuning (PEFT)",
+        "Concept - Adapter Layers",
+        "Deep Dive - LoRA",
+        "Reference - PEFT Method Comparison",
+        "Concept - KV Cache",
+        "Concept - Attention Mechanism",
+        "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)",
+        "Concept - Prompt Caching",
+        "Concept - In-Context Learning"
+      ]
+    },
+    {
+      "title": "Concept - DoRA",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Weight-Decomposed Low-Rank Adaptation (Liu et al. 2024): decompose weights into magnitude and direction, fine-tune magnitude directly and apply LoRA to the direction. IN: the decomposition, why it closes part of the LoRA-full FT gap, its cost. OUT: vanilla LoRA math (link to Deep Dive - LoRA).",
+      "key_points": [
+        "Decompose W = m * (V / ||V||_c): a per-column magnitude vector m and a direction matrix V; DoRA fine-tunes m fully and applies a LoRA update to the directional component.",
+        "Motivation: an analysis of the correlation between magnitude change and direction change shows full FT decouples them while LoRA couples them; DoRA reintroduces the full-FT-like learning pattern.",
+        "Result: consistently beats LoRA at equal trainable params (reported +1-4 points on commonsense reasoning), narrows the gap to full FT, most noticeably at LOW ranks where LoRA is weakest.",
+        "Cost: extra compute for the column-norm and magnitude update -> slightly slower and more memory than LoRA; still mergeable, so no inference overhead after merge.",
+        "Adoption: available in HF `peft` (`use_dora=True`) and Unsloth; increasingly a drop-in default when the small quality bump is worth the training cost.",
+        "Orthogonality: composable with rsLoRA scaling and PiSSA-style init — the improvements target different failure modes."
+      ],
+      "links": [
+        "Deep Dive - LoRA",
+        "Concept - Why LoRA Underperforms Full Fine-Tuning",
+        "Concept - rsLoRA and the Rank-Alpha Scaling Trap",
+        "Concept - LoRA Initialization (PiSSA, LoftQ, OLoRA)",
+        "Reference - PEFT Method Comparison",
+        "Reference - Fine-Tuning Hyperparameters",
+        "Breakdown - Unsloth",
+        "Concept - RMSNorm and LayerNorm",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning"
+      ]
+    },
+    {
+      "title": "Concept - LoRA Initialization (PiSSA, LoftQ, OLoRA)",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "How LoRA adapters are initialized and why it changes convergence and final quality: the zero-init baseline, SVD-based inits, and quantization-aware init. IN: PiSSA, OLoRA, LoftQ, the QLoRA init gap. OUT: quantization datatypes for inference (link to 07) and vanilla LoRA math (link to Deep Dive - LoRA).",
+      "key_points": [
+        "Baseline: A ~ Gaussian, B = 0 so dW = 0 at start; simple, but the adapter must travel from zero and captures only residual directions, giving slow early training.",
+        "PiSSA (Meng et al. 2024): SVD the base weight and initialize A,B from the TOP r singular components while freezing the residual -> the adapter starts on the principal high-energy subspace, giving faster convergence and better final quality.",
+        "OLoRA: QR-decomposition-based orthonormal initialization -> more stable optimization than random init.",
+        "LoftQ (Li et al. 2023): jointly optimize the quantized base and a low-rank init so that quantize(W) + BA ~= W -> closes the accuracy gap QLoRA opens at low bit-width (especially 2-bit) via alternating optimization of the NF4 base and the SVD adapter.",
+        "Why init matters most for QLoRA: naive QLoRA leaves quantization error uncompensated at step 0; LoftQ / 4-bit PiSSA start the adapter already correcting that error.",
+        "Tradeoff: SVD/QR init costs a one-time decomposition of every target weight (minutes and extra memory); folklore says the advantage shrinks as training data grows."
+      ],
+      "links": [
+        "Deep Dive - LoRA",
+        "Concept - QLoRA",
+        "Concept - DoRA",
+        "Concept - rsLoRA and the Rank-Alpha Scaling Trap",
+        "Reference - PEFT Method Comparison",
+        "Concept - Post-Training Quantization Formats",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - Floating Point for Deep Learning",
+        "Gotchas - LoRA Fine-Tuning"
+      ]
+    },
+    {
+      "title": "Concept - Representation Fine-Tuning (ReFT)",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "ReFT and LoReFT (Wu et al. 2024): adapt a model by editing hidden representations at inference instead of updating weights. IN: the low-rank intervention mechanism, its extreme parameter efficiency, and its roots in interpretability. OUT: weight-based PEFT (link to LoRA) and SAE/interp theory (link to 14).",
+      "key_points": [
+        "Idea: freeze all weights and learn low-rank interventions on hidden states at selected layers and token positions: edit h within a rank-r subspace of the residual stream (LoReFT applies h <- h + R^T (W h + b - R h)).",
+        "Efficiency: LoReFT reports 10-50x fewer parameters than LoRA at comparable quality on some tasks (commonsense, instruction following) — often only hundreds of thousands of params.",
+        "Interpretability roots: builds on distributed alignment search and activation steering, treating the residual stream as an interpretable object; interventions are applied at specific positions (e.g. the last prompt token).",
+        "Tradeoff: interventions run at inference like adapters (not mergeable) -> small serving overhead; position-specific edits need care with variable-length inputs; tooling is less mature than LoRA.",
+        "Why it matters: strong evidence that adaptable behavior lives in low-rank subspaces of ACTIVATIONS, not only weights — connects PEFT to the linear representation / superposition line of interpretability work."
+      ],
+      "links": [
+        "Deep Dive - LoRA",
+        "Concept - Parameter-Efficient Fine-Tuning (PEFT)",
+        "Reference - PEFT Method Comparison",
+        "Concept - Sparse Autoencoders",
+        "Concept - Superposition",
+        "Concept - Induction Heads",
+        "Concept - Attention Mechanism",
+        "Deep Dive - The Transformer"
+      ]
+    },
+    {
+      "title": "Concept - Catastrophic Forgetting",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Loss of pretrained/base capabilities during fine-tuning, treated as a fine-tuning pathology to detect and mitigate. IN: the mechanism, how to measure it, and mitigations (PEFT, rehearsal, low LR, KL penalty, LR re-warming for continued pretraining). OUT: general continual-learning theory beyond FT and the RLHF alignment-tax framing (link to 06).",
+      "key_points": [
+        "Mechanism: SGD on narrow data reduces new-task loss with no constraint to preserve old behavior; the pretrained solution is a broad basin and FT gradients push out of it. Narrow SFT famously destroys general instruction-following ('fine-tuned to classify, now can't chat').",
+        "Measurement: always eval base capabilities (MMLU subset, general chat, refusal behavior) BEFORE and AFTER; a fine-tune that gains 5 points on-task but drops 15 on MMLU can be net-negative.",
+        "Why PEFT forgets less (Biderman et al. 2024, 'LoRA Learns Less and Forgets Less'): a frozen base plus a small update stays near the pretrained solution -> LoRA acts as a regularizer; the same property that caps its learning limits its forgetting.",
+        "Mitigations: lower LR and fewer epochs (1-3); replay/rehearsal by mixing in 5-30% general instruction data; constrain to LoRA; add a KL penalty to the base (link DPO/RLHF KL control); EWC/weight-penalty methods (rare in LLM practice).",
+        "Continued-pretraining case: naively continuing pretraining on a domain corpus at the original peak LR wrecks general ability; Ibrahim et al. 2024 show LR re-warming + re-decaying plus a small replay fraction of the original mixture recovers most of it — the replay ratio is the load-bearing knob.",
+        "Format collapse: over-training on one output format collapses generation diversity (mode collapse) — link to the frontier phenomena domain.",
+        "Detection signal: rising confidence plus a narrowing vocabulary/format on out-of-domain prompts is an early warning of forgetting."
+      ],
+      "links": [
+        "Concept - Why LoRA Underperforms Full Fine-Tuning",
+        "Concept - What Fine-Tuning Can and Cannot Teach",
+        "Deep Dive - LoRA",
+        "Playbook - Evaluating a Fine-Tune",
+        "Concept - Supervised Fine-Tuning (SFT)",
+        "Deep Dive - RLHF End to End",
+        "Concept - KL Divergence",
+        "Concept - Data Mixtures",
+        "Concept - Double Descent"
+      ]
+    },
+    {
+      "title": "Concept - Why LoRA Underperforms Full Fine-Tuning",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "The mechanistic account of the LoRA-vs-full-FT quality gap: when it appears, when it vanishes, and why. IN: LoRA-learns-less-forgets-less, intruder dimensions, rank saturation, domain dependence, and the fixes that narrow it. OUT: how to set rank operationally (link to references) and the DoRA fix in detail (link to DoRA).",
+      "key_points": [
+        "Biderman et al. 2024 (Databricks): on code and math continued pretraining LoRA underperforms full FT substantially; on instruction fine-tuning the gap is small. Effective learning capacity scales with rank, and hard new domains need more rank than is practical.",
+        "Intruder dimensions (Shuttleworth et al. 2024): LoRA introduces new high-ranking singular vectors ('intruder dimensions') in dW that are absent from full FT's spectrum; they correlate with worse continual learning and out-of-distribution brittleness even when in-domain accuracy matches.",
+        "Rank saturation: too-low rank bottlenecks the update, but naively raising rank without fixing alpha scaling collapses the effective LR (link rsLoRA) — high rank alone does not recover full-FT quality because the update subspace differs qualitatively.",
+        "Target-module dependence: applying LoRA to ALL linear layers (not just q,v) recovers much of the gap — coverage beats rank.",
+        "Reconciliation: LoRA ~= full FT for adapting existing capabilities; LoRA != full FT for injecting substantial new knowledge or skills — this ties directly to what fine-tuning can and cannot teach.",
+        "Narrowing fixes: DoRA, PiSSA init, higher rank WITH rsLoRA scaling, or full FT of just a few layers."
+      ],
+      "links": [
+        "Deep Dive - LoRA",
+        "Concept - DoRA",
+        "Concept - rsLoRA and the Rank-Alpha Scaling Trap",
+        "Concept - LoRA Initialization (PiSSA, LoftQ, OLoRA)",
+        "Concept - Catastrophic Forgetting",
+        "Concept - What Fine-Tuning Can and Cannot Teach",
+        "Reference - PEFT Method Comparison",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - Scaling Laws",
+        "Concept - Double Descent"
+      ]
+    },
+    {
+      "title": "Concept - rsLoRA and the Rank-Alpha Scaling Trap",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "The alpha/r scaling dysfunction and rank-stabilized LoRA (Kalajdzievski 2023): why standard scaling caps usable rank and how the 1/sqrt(r) fix unlocks it. IN: the scaling collapse, the fix, and the effective-LR folklore. OUT: general LoRA mechanism (link to Deep Dive) and init methods (link to init note).",
+      "key_points": [
+        "Standard scaling dW = (alpha/r) B A combined with common inits makes the LoRA path's contribution shrink roughly like 1/r as rank grows -> high-rank LoRAs train sluggishly and gains plateau; practitioners wrongly concluded 'rank does not help past 16'.",
+        "rsLoRA fix (Kalajdzievski 2023): scale by alpha/sqrt(r) instead of alpha/r -> forward/backward magnitudes become rank-invariant, so higher ranks (64, 256) actually improve and unlock capacity for hard domains.",
+        "Silent-bug folklore: because alpha and r are separate knobs, copying someone's alpha while changing r silently rescales the update by alpha*(1/r2 - 1/r1); countless configs trained at an effectively wrong LR. The alpha = 2r convention is a heuristic to keep alpha/r ~= 2.",
+        "Effective-LR view: alpha/r is a fixed multiplier on the update that interacts multiplicatively with the optimizer LR; tuning both independently is redundant — fix the alpha scaling, then tune LR.",
+        "Practical: HF `peft` supports `use_rslora=True`; above r=32, enable it or expect disappointment.",
+        "Detection: loss curves that flatten as you raise rank with no LR change indicate scaling collapse, not a real capacity limit."
+      ],
+      "links": [
+        "Deep Dive - LoRA",
+        "Concept - Why LoRA Underperforms Full Fine-Tuning",
+        "Concept - LoRA Initialization (PiSSA, LoftQ, OLoRA)",
+        "Concept - DoRA",
+        "Reference - Fine-Tuning Hyperparameters",
+        "Gotchas - LoRA Fine-Tuning",
+        "Lore - LoRA Folklore and Hard-Won Defaults",
+        "Concept - Adam and AdamW",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning"
+      ]
+    },
+    {
+      "title": "Reference - PEFT Method Comparison",
+      "type": "reference",
+      "level": "core",
+      "scope": "A lookup matrix comparing PEFT methods across parameter count, family, mergeability, inference cost, quality vs full FT, and best-fit use case. IN: LoRA, QLoRA, DoRA, rsLoRA, adapters, IA3, BitFit, prompt/prefix tuning, VeRA, (Lo)ReFT. OUT: each method's mechanism (link out to its note).",
+      "key_points": [
+        "Columns: method | family (additive/selective/reparam) | typical % trainable params | mergeable (no inference cost)? | extra inference latency | relative quality vs full FT | best-fit use case | key paper+year.",
+        "LoRA: reparam, 0.1-1%, mergeable, +0 latency, ~95-99% on instruction/style but lags on code-math, general default (Hu 2021).",
+        "QLoRA: reparam + 4-bit NF4 base, same adapter %, mergeable only after dequantizing base, dequant overhead at train time, best for consumer-GPU FT (Dettmers 2023).",
+        "DoRA (Liu 2024) slightly more params than LoRA, mergeable, > LoRA quality; adapters Houlsby/Pfeiffer (2019) 0.5-8%, NOT mergeable, add latency, strong NLU; IA3 (Liu 2022) ~0.01-0.05% for few-shot; BitFit (2021) ~0.08% small-model only.",
+        "Prompt/Prefix tuning (Lester / Li-Liang 2021) <0.1%, not mergeable, consume context window, good for multi-task serving; VeRA (Kopiczko 2024) ~1/10 of LoRA params via shared frozen random matrices + tiny trainable scaling vectors; (Lo)ReFT (Wu 2024) ~0.01-0.05% via activation interventions.",
+        "Footnotes: define 'mergeable' and why it matters for serving cost (link to 07); give a memory-per-method rule of thumb; date-stamp quality claims to 2024-2026 open-model practice."
+      ],
+      "links": [
+        "Deep Dive - LoRA",
+        "Concept - QLoRA",
+        "Concept - DoRA",
+        "Concept - Adapter Layers",
+        "Concept - Prompt Tuning and Prefix Tuning",
+        "Concept - Representation Fine-Tuning (ReFT)",
+        "Concept - Continuous Batching",
+        "Reference - Memory Math for Transformers"
+      ]
+    },
+    {
+      "title": "Reference - Fine-Tuning Hyperparameters",
+      "type": "reference",
+      "level": "core",
+      "scope": "Typical values and ranges for fine-tuning knobs (LoRA, QLoRA, and full FT): LR, epochs, batch/grad-accum, warmup, schedule, rank, alpha, dropout, weight decay, sequence length, precision. IN: numeric defaults with one-line rationale. OUT: operational how-to (link to playbook) and the scaling-trap mechanism (link to rsLoRA).",
+      "key_points": [
+        "LoRA LR: 1e-4 to 3e-4 typical (roughly 10x higher than full-FT LR because only A,B train); QLoRA commonly 2e-4; full-FT 7B SFT: 1e-5 to 2e-5.",
+        "Epochs: 1-3 for SFT-style FT; >3 overfits small datasets fast; large datasets often run a single epoch.",
+        "Rank r: 8-64 typical, 16 a common default; raise for hard domains WITH rsLoRA scaling. Alpha: alpha=2r or alpha=r conventions, with the scaling caveat flagged.",
+        "LoRA dropout 0.05-0.1; weight decay usually 0 on adapters; effective batch 16-128 via gradient accumulation, LR scales with effective batch.",
+        "Warmup 3-10% of steps (or ~100 steps); cosine or linear decay to ~0 or to ~10% of peak; target modules default to all linear (q,k,v,o,gate,up,down).",
+        "Precision: bf16 compute; QLoRA uses NF4 base with bf16 compute and double quant; enable gradient checkpointing to trade compute for activation memory; date-stamp values to 2024-2026 Llama/Qwen/Mistral-family practice."
+      ],
+      "links": [
+        "Deep Dive - LoRA",
+        "Concept - QLoRA",
+        "Concept - rsLoRA and the Rank-Alpha Scaling Trap",
+        "Playbook - Preparing a Fine-Tuning Dataset",
+        "Concept - Supervised Fine-Tuning (SFT)",
+        "Concept - Adam and AdamW",
+        "Concept - Mixed Precision Training",
+        "Reference - Memory Math for Transformers"
+      ]
+    },
+    {
+      "title": "Playbook - Preparing a Fine-Tuning Dataset",
+      "type": "playbook",
+      "level": "core",
+      "scope": "End-to-end procedure to build a dataset for an instruction/behavior fine-tune. IN: sourcing, sizing, quality bar, formatting, dedup, splitting, and manual validation. OUT: chat-template internals and loss-masking mechanics (owned by 06 - link), synthetic-data generation theory and corpus construction (owned by 05 - link).",
+      "key_points": [
+        "Define the target behavior precisely and hand-write ~10 gold examples first — they fix the schema and surface ambiguity before you scale.",
+        "Size: quality beats quantity; ~500-1000 excellent examples often beats 100k scraped ones. LIMA (Zhou et al. 2023, 'Less Is More for Alignment') got strong alignment from 1000 curated examples.",
+        "Sourcing: hand-write, distill from a stronger model (link Knowledge Distillation in 06), or mine production logs; near-dedup to prevent memorization (link 05 dedup).",
+        "Format consistency: every example must use the EXACT chat template the base model expects (link Chat Templates and Special Tokens in 06); a mismatched template is the number-one silent failure (link gotchas).",
+        "Loss masking: train only on completion tokens and mask the prompt (mechanics owned by 06 - link Loss Masking and Sequence Packing), otherwise the model learns to generate your instructions.",
+        "Coverage and anti-forgetting: include edge cases, refusals, and a 5-30% slice of general instruction data as replay; hold out a real eval set and a few general-capability probes BEFORE training.",
+        "Verification step: manually read 50 fully-formatted, tokenized samples end to end — confirm special tokens render, the answer is not truncated, and no eval data leaked in (link contamination in 13)."
+      ],
+      "links": [
+        "Playbook - Evaluating a Fine-Tune",
+        "Gotchas - Fine-Tuning Data and Chat Templates",
+        "Concept - Supervised Fine-Tuning (SFT)",
+        "Concept - Chat Templates and Special Tokens",
+        "Concept - Loss Masking and Sequence Packing",
+        "Concept - Knowledge Distillation",
+        "Concept - Synthetic Training Data",
+        "Concept - Deduplication at Scale",
+        "Concept - Benchmark Contamination"
+      ]
+    },
+    {
+      "title": "Playbook - Evaluating a Fine-Tune",
+      "type": "playbook",
+      "level": "advanced",
+      "scope": "How to know a fine-tune actually worked without fooling yourself. IN: held-out task eval, base-capability regression, overfitting/forgetting checks, choosing the right baseline, LLM-judge pitfalls, ship gate. OUT: general eval methodology and statistical machinery (owned by 13 - link heavily), benchmark design (link to 13).",
+      "key_points": [
+        "Task metric on a held-out set NOT seen in training; report a confidence interval, not a point estimate (link Statistical Rigor in 13).",
+        "Regression suite: run base-capability probes (MMLU subset, general chat, format-following, refusals) before and after to quantify catastrophic forgetting (link).",
+        "Overfitting check: watch eval-loss vs train-loss divergence; evaluate multiple checkpoints (epoch 1/2/3) and pick by held-out metric, not by final training loss.",
+        "Compare against the RIGHT baseline: the base model with the SAME prompt/few-shot, not a zero-shot strawman — a good prompt frequently beats a mediocre fine-tune (link the Decision note).",
+        "LLM-as-judge with care: control position, verbosity, and self-preference bias (link 13); prefer randomized-order pairwise comparison against the base.",
+        "Behavioral robustness: does the format hold under adversarial/out-of-distribution inputs? Sample at temperature to detect diversity loss / mode collapse (link sampling params in 07), and re-check refusal behavior for a safety regression (link 14).",
+        "Ship gate: net-positive = task gain minus capability regression minus diversity loss above a set threshold; log exact data + config for reproducibility."
+      ],
+      "links": [
+        "Playbook - Preparing a Fine-Tuning Dataset",
+        "Concept - Catastrophic Forgetting",
+        "Decision - Fine-Tuning vs RAG vs Prompting",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Deep Dive - Designing an Eval Harness",
+        "Concept - LLM-as-Judge",
+        "Concept - Benchmark Contamination",
+        "Concept - Sampling and Decoding Parameters",
+        "Concept - Refusal Mechanics"
+      ]
+    },
+    {
+      "title": "Gotchas - LoRA Fine-Tuning",
+      "type": "gotchas",
+      "level": "advanced",
+      "scope": "Aggregated pitfalls specific to LoRA/QLoRA training, saving, and merging. IN: target-module coverage, alpha scaling, merge precision, embedding resize, checkpoint/base mismatch, gradient-checkpointing wiring, dtype. OUT: data/template pitfalls (the other Gotchas note) and general SFT mechanics (link to 06).",
+      "key_points": [
+        "Only q,v targeted -> underfits: default configs miss MLP layers; fix by targeting all linear; symptom is quality far below full FT at any rank.",
+        "Changing rank without adjusting alpha silently rescales the effective LR (link rsLoRA) -> loss will not move or blows up.",
+        "Merging a QLoRA adapter into a 4-bit base loses accuracy -> dequantize base to fp16 first, then merge; symptom is the merged model performing worse than adapter-on-4bit.",
+        "Added special tokens / resized embeddings are not trained by a standard LoRA -> new tokens emit garbage; fix by also training embed_tokens/lm_head via modules_to_save (ties to tokenizer/BPE in 04).",
+        "Gradient checkpointing + LoRA needs enable_input_require_grads (or prepare_model_for_kbit_training) or no gradients flow -> loss stays constant.",
+        "Saving only the adapter and reloading against a different base revision silently degrades quality -> pin the base model hash/revision.",
+        "Norm layers and softmax should stay fp32 under mixed precision -> otherwise NaN loss; and applying LoRA on top of an already-merged model accumulates error. QLoRA + DeepSpeed ZeRO-3 has sharp edges (4-bit params + sharding)."
+      ],
+      "links": [
+        "Deep Dive - LoRA",
+        "Concept - QLoRA",
+        "Concept - rsLoRA and the Rank-Alpha Scaling Trap",
+        "Gotchas - Fine-Tuning Data and Chat Templates",
+        "Snippet - QLoRA Fine-Tune Configuration",
+        "Breakdown - Unsloth",
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Mixed Precision Training",
+        "Concept - Byte-Pair Encoding",
+        "Concept - Data Parallelism and ZeRO"
+      ]
+    },
+    {
+      "title": "Gotchas - Fine-Tuning Data and Chat Templates",
+      "type": "gotchas",
+      "level": "core",
+      "scope": "Aggregated data and formatting pitfalls that silently wreck fine-tunes, from the dataset-builder's seat. IN: template mismatch as it hits YOUR data, loss-masking errors, EOS/special tokens, contamination, overfitting, tokenizer drift, padding. OUT: the canonical chat-template mechanics and template-bug catalog (owned by 06 - link Chat Template Bugs), LoRA mechanics pitfalls (the other Gotchas note).",
+      "key_points": [
+        "Wrong chat template (e.g. ChatML applied to a Llama-3 base) -> the model never learns to stop and degrades; fix by using the base's exact template (link Chat Templates and Special Tokens in 06); symptom is broken turn structure and runaway generation.",
+        "Not masking the prompt in the loss -> the model learns to emit instructions; symptom is it echoing your system prompt (mechanics in 06 loss masking).",
+        "Missing or duplicated EOS token -> never stops, or stops early; verify every tokenized sample ends with the correct EOS.",
+        "Eval-set contamination in training data -> inflated metrics; dedup train against eval (link 13).",
+        "Dataset too small or repetitive -> memorization; symptom is verbatim regurgitation and eval-loss rising while train-loss falls.",
+        "Tokenizer mismatch between data prep and model (added tokens, different revision) -> silent misalignment of token ids (link BPE in 04).",
+        "Left- vs right-padding and attention-mask mistakes -> training on pad tokens; and all-one-length examples create length/format bias with truncated answers."
+      ],
+      "links": [
+        "Playbook - Preparing a Fine-Tuning Dataset",
+        "Playbook - Evaluating a Fine-Tune",
+        "Gotchas - LoRA Fine-Tuning",
+        "Concept - Chat Templates and Special Tokens",
+        "Concept - Loss Masking and Sequence Packing",
+        "Concept - Supervised Fine-Tuning (SFT)",
+        "Concept - Benchmark Contamination",
+        "Concept - Byte-Pair Encoding"
+      ]
+    },
+    {
+      "title": "Snippet - LoRA Linear Layer from Scratch",
+      "type": "snippet",
+      "level": "advanced",
+      "scope": "A minimal PyTorch implementation of a LoRA-wrapped Linear layer showing init, forward, scaling, and merge/unmerge. IN: the ~40-line mechanism that teaches why LoRA works and why it has no serving cost. OUT: HF peft usage (the QLoRA snippet) and the full training loop (link to 02 training loop).",
+      "key_points": [
+        "Implement LoRALinear(nn.Module) wrapping a frozen nn.Linear: A = nn.Parameter(randn(r,in)*sigma), B = nn.Parameter(zeros(out,r)), scaling = alpha/r; forward returns F.linear(x, W) + (dropout(x) @ A.T @ B.T) * scaling.",
+        "Freeze the base with W.requires_grad_(False) and print the trainable param count to show only r*(in+out) params are optimized (~0.2%).",
+        "B=0 init so the wrapped layer's output equals the base at step 0 — assert output equality before any training as the correctness check.",
+        "merge(): W += (B @ A) * scaling then route only through the base -> zero inference overhead; unmerge() reverses it, demonstrating why LoRA is free at serving time.",
+        "Header block: dependencies (torch version), what it does, and expected output (param-count line plus before/after-merge output equality within fp tolerance).",
+        "Why-written-this-way: B-zero identity start; scaling kept separate from the optimizer LR; dropout on the INPUT to A per the paper; the merge showcases the serving-cost story."
+      ],
+      "links": [
+        "Deep Dive - LoRA",
+        "Snippet - QLoRA Fine-Tune Configuration",
+        "Gotchas - LoRA Fine-Tuning",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - The Training Loop"
+      ]
+    },
+    {
+      "title": "Snippet - QLoRA Fine-Tune Configuration",
+      "type": "snippet",
+      "level": "core",
+      "scope": "A runnable, real QLoRA setup using HF transformers + bitsandbytes + peft + TRL, with every load-bearing flag annotated. IN: the config that actually matters (BitsAndBytesConfig, LoraConfig, SFTTrainer/TrainingArguments). OUT: dataset preparation (link to playbook) and the NF4/paged-optimizer mechanism (link to QLoRA concept).",
+      "key_points": [
+        "BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type='nf4', bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_use_double_quant=True) — annotate each flag against the QLoRA mechanism.",
+        "prepare_model_for_kbit_training(model) to enable gradient checkpointing and input grads — directly ties to the 'no gradients flow' LoRA gotcha.",
+        "LoraConfig(r=16, lora_alpha=32, target_modules='all-linear', lora_dropout=0.05, task_type='CAUSAL_LM').",
+        "TrainingArguments/SFTTrainer: learning_rate=2e-4, warmup_ratio=0.03, num_train_epochs=1-3, bf16=True, gradient_accumulation_steps, optim='paged_adamw_8bit' (the paged optimizer, ties to the QLoRA concept).",
+        "Dependencies + versions: transformers, peft, bitsandbytes, trl, accelerate; note the bitsandbytes CUDA/Windows install caveats.",
+        "Saving: model.save_pretrained saves only the adapter; merge via merge_and_unload AFTER dequantizing the base. Why-written-this-way: paged optimizer for OOM safety, all-linear targets, alpha=2r, bf16 compute despite 4-bit storage, double-quant on."
+      ],
+      "links": [
+        "Concept - QLoRA",
+        "Deep Dive - LoRA",
+        "Reference - Fine-Tuning Hyperparameters",
+        "Gotchas - LoRA Fine-Tuning",
+        "Playbook - Preparing a Fine-Tuning Dataset",
+        "Breakdown - Unsloth",
+        "Concept - Mixed Precision Training",
+        "Concept - Post-Training Quantization Formats"
+      ]
+    },
+    {
+      "title": "Breakdown - Unsloth",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "How the Unsloth library makes LoRA/QLoRA fine-tuning roughly 2x faster and 50-70% lighter on VRAM with zero accuracy loss. IN: the specific engineering tricks (manual backward, fused Triton kernels, chunked cross-entropy). OUT: the LoRA/QLoRA mechanism itself (link to concepts) and general kernel engineering (owned by 08 - link).",
+      "key_points": [
+        "Headline (as of 2024-2025): ~2x faster training, up to 70-80% less VRAM, and reference-exact loss curves (0% accuracy degradation) on single-GPU LoRA/QLoRA.",
+        "Manual autograd: hand-written backward passes for the LoRA path avoid materializing intermediate tensors that HF autograd retains, recomputing cheaply instead of storing.",
+        "Custom Triton kernels: fused RoPE, RMSNorm, SwiGLU, and cross-entropy — the memory hogs of LLM training — replace the eager PyTorch ops.",
+        "Chunked cross-entropy: the [batch*seq, vocab] logits tensor is enormous (e.g. 128k vocab); computing loss in chunks avoids ever materializing it, the single biggest activation-memory win (ties to memory math in 08).",
+        "Smart gradient checkpointing that offloads activations to CPU and avoids redundant upcast copies.",
+        "What to steal: fuse norm/RoPE/CE kernels, never materialize full-vocab logits, and hand-write the backward for the hot low-rank path. Limits: single-GPU focus (multi-GPU is later/paid) and it must chase fast-moving model architectures."
+      ],
+      "links": [
+        "Concept - QLoRA",
+        "Deep Dive - LoRA",
+        "Snippet - QLoRA Fine-Tune Configuration",
+        "Reference - Fine-Tuning Hyperparameters",
+        "Deep Dive - FlashAttention",
+        "Concept - GPU Memory Hierarchy",
+        "Concept - Tensor Cores",
+        "Concept - The Roofline Model",
+        "Reference - Memory Math for Transformers",
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Concept - RMSNorm and LayerNorm",
+        "Concept - Softmax",
+        "Concept - Entropy and Cross-Entropy"
+      ]
+    },
+    {
+      "title": "Lore - LoRA Folklore and Hard-Won Defaults",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The accumulated tribal knowledge of LoRA fine-tuning: the defaults everyone quietly converged on and the incidents behind them, each labeled by evidence status. IN: war stories and folklore. OUT: the clean mechanism (link to Deep Dive) and the formal scaling result (link to rsLoRA).",
+      "key_points": [
+        "'Apply to all linear layers': the paper's q,v-only default left quality on the table; QLoRA plus community experiments (Raschka's LoRA-from-scratch series) established all-linear as the real default. Evidence: well-sourced.",
+        "The alpha=2r cargo cult: people copy alpha=32,r=16 without knowing alpha/r is an update scale; the origin is the original repo's examples, not theory. Evidence: folklore, well-sourced.",
+        "'Rank does not matter past 16' was an artifact of the alpha/r scaling collapse, not a truth — corrected by rsLoRA (link). Evidence: verified.",
+        "The QLoRA democratization moment (2023): 'fine-tune a 65B on one 48GB card' triggered the r/LocalLLaMA fine-tuning explosion, Guanaco, and the axolotl/Unsloth tooling wave. Evidence: verified history.",
+        "Learning-rate folklore: LoRA wants ~10x the full-FT LR; too-low LR is the silent under-training failure that gets misread as 'LoRA can't learn this'.",
+        "'My fine-tune got dumber': narrow SFT nuking instruction-following, with the replay-data fix rediscovered repeatedly; and merge-precision horror stories where merged QLoRA models shipped worse than the adapter until dequantize-then-merge became lore. Evidence: well-sourced folklore.",
+        "The 3-epoch superstition: inherited from small-dataset defaults, often wrong — one epoch is frequently right for large data."
+      ],
+      "links": [
+        "Deep Dive - LoRA",
+        "Concept - rsLoRA and the Rank-Alpha Scaling Trap",
+        "Concept - QLoRA",
+        "Concept - Why LoRA Underperforms Full Fine-Tuning",
+        "Concept - Catastrophic Forgetting",
+        "Reference - Fine-Tuning Hyperparameters",
+        "Breakdown - Unsloth",
+        "Concept - Supervised Fine-Tuning (SFT)",
+        "Concept - Floating Point for Deep Learning",
+        "Reference - Where Real AI Knowledge Lives"
+      ]
+    }
+  ]
+}

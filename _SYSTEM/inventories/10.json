@@ -1,0 +1,569 @@
+{
+  "domain": "10 - Agents",
+  "slug": "agents",
+  "notes": [
+    {
+      "title": "Concept - What Is an LLM Agent",
+      "type": "concept",
+      "level": "surface",
+      "scope": "Defines the LLM agent and the autonomy spectrum from single prompt to fully autonomous loop, and settles the agent-vs-workflow distinction. IN: what makes something an agent, the component anatomy, when you should NOT build one. OUT: the loop internals (link Deep Dive - The Agent Loop) and tool mechanics (link Concept - Tool Use and Function Calling).",
+      "key_points": [
+        "Anthropic's operative definition (Building Effective Agents, Dec 2024): workflows = LLMs orchestrated through predefined code paths; agents = LLM dynamically directs its own process and tool usage; the line is who controls the control flow",
+        "Agent anatomy: model + tool set + a loop + a termination condition + accumulated context/memory; strip any one and it is not an agent",
+        "The autonomy ladder: single call -> prompt chain -> router -> tool-use loop -> autonomous multi-step agent; each rung trades predictability for flexibility",
+        "The reliability tax: autonomy compounds per-step error (foreshadow p^n from Concept - Long-Horizon Agency and Error Compounding); a workflow that works is almost always cheaper, faster, and more debuggable",
+        "Decision heuristic: use an agent only when the task is open-ended and the steps cannot be hardcoded in advance; otherwise use a fixed workflow",
+        "Historical archetype: AutoGPT/BabyAGI (2023) as the first viral autonomous agents and cautionary tale (link Lore - The AutoGPT Explosion)"
+      ],
+      "links": ["Deep Dive - The Agent Loop", "Concept - Tool Use and Function Calling", "Pattern - Agentic Workflow Building Blocks", "Lore - The AutoGPT Explosion", "Concept - Chain-of-Thought and Why It Works", "Concept - Cost Engineering for LLM Applications"]
+    },
+    {
+      "title": "Reference - Agent Framework Landscape",
+      "type": "reference",
+      "level": "surface",
+      "scope": "A lookup matrix of the major agent frameworks/SDKs and their design paradigms as of 2026, for orientation and shortlisting. IN: what each framework is and its control model. OUT: the actual choose-one decision logic (link Decision - Choosing an Agent Framework).",
+      "key_points": [
+        "Rows: LangGraph (graph/state-machine, low-level control, durable execution), OpenAI Agents SDK (Swarm successor, handoffs + guardrails), Anthropic Claude Agent SDK, CrewAI (role-based crews), AutoGen/AG2 (conversational multi-agent), LlamaIndex Workflows (event-driven), Hugging Face smolagents (code-as-action), Pydantic AI (type-safe outputs), DSPy (compile/optimize prompts), Google ADK",
+        "Columns: control paradigm, multi-agent support, streaming, human-in-the-loop, state/checkpoint persistence, provider lock-in, primary language, best-fit use case",
+        "Code-as-action distinction: smolagents/CodeAct emit Python instead of JSON tool calls; fewer round-trips, but requires a sandbox (link Checklist - Sandboxing an Agent)",
+        "DSPy is orthogonal: it optimizes prompts/weights rather than being a runtime loop; can wrap the others",
+        "Volatility warning: this table churns quarterly (Swarm->Agents SDK, HTTP+SSE->Streamable HTTP); date-stamp every row (as of 2026) and note deprecations",
+        "The raw-API baseline row: for a simple tool loop you often need no framework at all (link Playbook - Building a Tool-Use Agent from Scratch)"
+      ],
+      "links": ["Decision - Choosing an Agent Framework", "Playbook - Building a Tool-Use Agent from Scratch", "Concept - Model Context Protocol (MCP)", "Checklist - Sandboxing an Agent", "Reference - Model Genealogy", "Concept - Cost Engineering for LLM Applications"]
+    },
+    {
+      "title": "Deep Dive - The Agent Loop",
+      "type": "deep-dive",
+      "level": "core",
+      "scope": "The full walkthrough of the agent control loop from the ReAct lineage to modern native-tool-calling agents. IN: the observe-think-act cycle, control/termination logic, context accumulation, and evolution of the loop. OUT: the atomic ReAct technique itself (link Concept - The ReAct Pattern) and tool-call wire formats (link Concept - Tool Use and Function Calling).",
+      "key_points": [
+        "The loop: receive goal -> model emits reasoning + action (tool call or final answer) -> harness executes tool -> append observation as a tool message -> repeat until a stop condition; a diagram (Mermaid) tracing one full iteration is required",
+        "Termination logic: model stops by emitting no tool call / a final message; guard rails are max_iterations (typical 10-50) and a token/time budget; who owns the stop decision is the central design choice",
+        "Context accumulation: the transcript grows every turn (system/user/assistant/tool roles); tokens and cost scale with history (link Concept - Context Engineering for Agents, Concept - KV Cache)",
+        "Evolution: text-parsed ReAct (2022) -> native structured function calling -> parallel tool calls -> interleaved extended-thinking + tool use; each removed a class of parsing failure",
+        "Failure modes: infinite/oscillating loops, premature giving-up, context overflow mid-task, unhandled tool errors that the model does not notice",
+        "Prefix stability matters for economics: reordering messages busts prompt caching (link Concept - Prompt Caching); append-only transcripts preserve cache hits",
+        "The loop is model-agnostic scaffolding, but frontier models increasingly internalize parts of it (link Concept - Trained vs Prompted Agents)"
+      ],
+      "links": ["Concept - The ReAct Pattern", "Concept - Tool Use and Function Calling", "Concept - Context Engineering for Agents", "Concept - Agent Memory Systems", "Gotchas - Agents in Production", "Concept - KV Cache", "Concept - Prompt Caching", "Concept - Chain-of-Thought and Why It Works", "Concept - Trained vs Prompted Agents", "Concept - LLM Observability and Tracing"]
+    },
+    {
+      "title": "Concept - Tool Use and Function Calling",
+      "type": "concept",
+      "level": "core",
+      "scope": "How an LLM invokes external functions: schemas in, structured calls out, results back in the loop. IN: the request/response mechanics, wire formats, tool-choice control, and why tool definitions dominate quality. OUT: the MCP standard (link Concept - Model Context Protocol (MCP)), robust parsing code (link Snippet - A Minimal ReAct Loop), and the pitfalls aggregate (link Gotchas - Tool Use and Function Calling).",
+      "key_points": [
+        "Mechanism: developer supplies tool schemas (JSON Schema for parameters); model emits a structured call (name + argument object); harness executes and returns a tool/tool_result message keyed by call id",
+        "Wire formats differ: OpenAI tools/tool_calls array, Anthropic tool_use/tool_result content blocks; both are JSON but the framing and ids differ (link Reference - Agent Framework Landscape)",
+        "Under the hood the decoder is constrained/grammar-guided to emit schema-valid JSON (link Concept - Constrained Decoding); models are post-trained on tool-call traces to do this natively",
+        "tool_choice control: auto (model decides), required/any (must call something), or a named tool (force one); forcing is the fix for a model that narrates instead of acting",
+        "Parallel tool calls: modern models emit several calls in one turn for independent actions; the harness must fan out and return all results before the next turn",
+        "The model only sees names, descriptions, and param descriptions -- not your code; description quality and enum-over-freestring design determine tool-selection accuracy (link Checklist - Agent Tool Definition Review)",
+        "Selection degrades as tool count grows (historically past ~20-40 tools); mitigations: retrieval over tools, namespacing, sub-agents",
+        "Failure modes: hallucinated tool names, malformed/typed-wrong args, ignoring available tools, oversized results eating context"
+      ],
+      "links": ["Concept - Model Context Protocol (MCP)", "Deep Dive - The Agent Loop", "Concept - Constrained Decoding", "Checklist - Agent Tool Definition Review", "Gotchas - Tool Use and Function Calling", "Snippet - A Minimal ReAct Loop", "Playbook - Reliable Structured Output", "Concept - Supervised Fine-Tuning (SFT)"]
+    },
+    {
+      "title": "Concept - Model Context Protocol (MCP)",
+      "type": "concept",
+      "level": "core",
+      "scope": "The open protocol standardizing how applications expose tools, data, and prompts to LLMs. IN: the client/server architecture, the primitive set, transports, and the M+N integration argument. OUT: writing a server (link Snippet - Building an MCP Server) and injection/exfiltration risk theory (link Concept - Prompt Injection, Concept - The Lethal Trifecta for Agents).",
+      "key_points": [
+        "Origin and pitch: Anthropic open-sourced MCP (Nov 2024) as an open standard; the USB-C-for-AI framing; adopted by OpenAI and Google DeepMind through 2025",
+        "Architecture: host application embeds an MCP client that speaks JSON-RPC 2.0 to one or more MCP servers; clean separation of the LLM app from integrations",
+        "Primitives: Tools (model-controlled functions), Resources (application-controlled data/context), Prompts (user-controlled templates), plus Sampling (server requests an LLM completion from the client), Roots, and Elicitation",
+        "Transports: stdio for local servers; Streamable HTTP (2025 spec) which replaced the older HTTP+SSE transport for remote servers",
+        "The economic argument: M hosts x N integrations collapses to M+N; a shared server ecosystem instead of bespoke glue per app",
+        "Security surface: tool descriptions are attacker-controlled text fed to the model (tool poisoning, rug-pull updates), over-permissioned servers, confused-deputy exfiltration (link Concept - The Lethal Trifecta for Agents)",
+        "Tool docstrings/descriptions are the model-facing contract, so a badly documented MCP tool is a badly performing one (link Checklist - Agent Tool Definition Review)"
+      ],
+      "links": ["Concept - Tool Use and Function Calling", "Snippet - Building an MCP Server", "Concept - The Lethal Trifecta for Agents", "Concept - Prompt Injection", "Checklist - Agent Tool Definition Review", "Gotchas - Agents in Production", "Concept - Cost Engineering for LLM Applications"]
+    },
+    {
+      "title": "Concept - The ReAct Pattern",
+      "type": "concept",
+      "level": "core",
+      "scope": "The seminal reasoning-and-acting technique that interleaves thought, action, and observation. IN: the mechanism, why interleaving beats CoT-only and act-only, and the prompt format. OUT: the general loop scaffolding (link Deep Dive - The Agent Loop) and tree search over reasoning (link Concept - Search and Backtracking in Agents).",
+      "key_points": [
+        "ReAct (Yao et al. 2022, Synergizing Reasoning and Acting): the model alternates Thought -> Action -> Observation traces in a single generation stream",
+        "Why it works: reasoning traces decompose the task and track progress; actions ground the reasoning in external observations, sharply reducing the hallucination that plagues CoT-only agents",
+        "Empirical contrast: on HotpotQA, Fever, ALFWorld, and WebShop, ReAct beats both act-only (no planning) and CoT-only (no grounding, hallucinates facts)",
+        "Original implementation used few-shot exemplars with hand-written thought/action strings and brittle text parsing; modern practice replaces the Action line with native tool calling (link Concept - Tool Use and Function Calling)",
+        "The thought tokens are a cheap scratchpad but a double-edged one: reasoning can also rationalize and entrench a wrong action, causing action loops",
+        "Failure modes: repeating the same failing action, looping between two states, thoughts that justify rather than diagnose",
+        "Reflexion (link Concept - Reflection and Self-Correction) extends ReAct by adding an inter-episode verbal-feedback memory"
+      ],
+      "links": ["Deep Dive - The Agent Loop", "Concept - Tool Use and Function Calling", "Concept - Chain-of-Thought and Why It Works", "Concept - Reflection and Self-Correction", "Concept - Search and Backtracking in Agents", "Snippet - A Minimal ReAct Loop", "Concept - Task Decomposition and Planning"]
+    },
+    {
+      "title": "Concept - Task Decomposition and Planning",
+      "type": "concept",
+      "level": "core",
+      "scope": "How agents break a goal into subtasks and sequence them: plan-first vs interleaved, and the named planning methods. IN: decomposition strategies, DAG planners, replanning. OUT: search/backtracking over plans (link Concept - Search and Backtracking in Agents) and multi-agent decomposition (link Pattern - Orchestrator-Worker Agents).",
+      "key_points": [
+        "Two regimes: plan-then-execute (produce a full plan upfront, then run it) vs interleaved (ReAct-style, decide next action each turn); upfront plans are cheaper in LLM calls but brittle to surprises",
+        "Named methods: Least-to-Most prompting, Plan-and-Solve, decomposed prompting; ReWOO (Reasoning WithOut Observation) plans all tool calls upfront to cut token cost; LLMCompiler builds a task DAG and executes independent nodes in parallel (~1.8-3.7x latency speedup)",
+        "Router-style planning: HuggingGPT-style planners that select which tool/model handles each subtask",
+        "Hierarchical planning: a high-level plan whose steps are themselves decomposed on demand",
+        "Replanning: detecting that the plan no longer fits reality and regenerating; the key robustness lever for long tasks",
+        "Failure modes: over-planning (elaborate plans that die on contact with the environment), plans that ignore observed failures, dependency errors when parallelizing",
+        "When planning helps: tasks with clear stable structure; when it hurts: highly reactive/uncertain environments where interleaved wins"
+      ],
+      "links": ["Concept - The ReAct Pattern", "Deep Dive - The Agent Loop", "Concept - Search and Backtracking in Agents", "Pattern - Orchestrator-Worker Agents", "Pattern - Agentic Workflow Building Blocks", "Concept - Chain-of-Thought and Why It Works", "Concept - Multi-Agent Orchestration"]
+    },
+    {
+      "title": "Pattern - Agentic Workflow Building Blocks",
+      "type": "pattern",
+      "level": "core",
+      "scope": "The reusable composition patterns for LLM systems short of full autonomy, per Anthropic's taxonomy. IN: augmented LLM, prompt chaining, routing, parallelization, evaluator-optimizer, and when to reach for each. OUT: the dynamic orchestrator-worker blueprint (link Pattern - Orchestrator-Worker Agents) and the autonomous loop (link Deep Dive - The Agent Loop).",
+      "key_points": [
+        "Source taxonomy: Anthropic 'Building Effective Agents' (Dec 2024): augmented LLM (retrieval + tools + memory) as the base unit, then five composition patterns",
+        "Prompt chaining: decompose into fixed sequential LLM steps with optional gates between them; use when the task splits cleanly into stable subtasks",
+        "Routing: a classifier LLM dispatches inputs to specialized downstream handlers; use for heterogeneous inputs with distinct handling",
+        "Parallelization: sectioning (split into independent subtasks run concurrently) and voting (run the same task N times and aggregate); trades tokens for latency/reliability",
+        "Evaluator-optimizer: one LLM generates, another critiques against criteria, loop until acceptance; only helps when the evaluator has real signal (link Concept - Reflection and Self-Correction)",
+        "A diagram per pattern is required; each pattern names >=2 real uses",
+        "Design rule of thumb: prefer the most constrained pattern that works; escalate to an autonomous agent only when the control flow genuinely cannot be predetermined (link Concept - What Is an LLM Agent)"
+      ],
+      "links": ["Concept - What Is an LLM Agent", "Deep Dive - The Agent Loop", "Pattern - Orchestrator-Worker Agents", "Concept - Reflection and Self-Correction", "Concept - Task Decomposition and Planning", "Deep Dive - RAG Architectures", "Concept - Cost Engineering for LLM Applications"]
+    },
+    {
+      "title": "Playbook - Building a Tool-Use Agent from Scratch",
+      "type": "playbook",
+      "level": "core",
+      "scope": "End-to-end procedure to build a working tool-use agent on the raw model API with no framework. IN: defining tools, the loop, dispatch, error handling, termination, and tracing. OUT: framework-specific setup (link Reference - Agent Framework Landscape) and sandboxing hardening (link Checklist - Sandboxing an Agent).",
+      "key_points": [
+        "Prereqs: a model API with tool calling, 1-3 real tools, and a task that needs >1 step",
+        "Steps in order: (1) write tool schemas + handlers, (2) system prompt stating role and stopping rule, (3) the loop: call model -> if tool_calls, dispatch each and append tool results keyed by id -> else return final, (4) add max_iterations + token budget, (5) wrap handlers so exceptions return as tool-result error strings the model can read, (6) log every turn",
+        "Expected observation per step and what deviation means (e.g., model never calls the tool -> description or tool_choice problem)",
+        "Verification: run a task requiring two dependent tool calls; inspect the trace for correct id matching and a clean stop",
+        "When-it-goes-wrong branch table: infinite loop -> cap iterations + detect repeated calls; malformed args -> validate and echo the error back; stalls waiting -> a tool_result is missing for an emitted call; premature stop -> tighten the stopping instruction",
+        "Ties directly to Snippet - A Minimal ReAct Loop as the concrete code",
+        "Observability hook: emit structured spans per tool call for later debugging (link Concept - LLM Observability and Tracing)"
+      ],
+      "links": ["Concept - Tool Use and Function Calling", "Snippet - A Minimal ReAct Loop", "Deep Dive - The Agent Loop", "Checklist - Agent Tool Definition Review", "Gotchas - Tool Use and Function Calling", "Concept - LLM Observability and Tracing", "Playbook - Reliable Structured Output"]
+    },
+    {
+      "title": "Snippet - A Minimal ReAct Loop",
+      "type": "snippet",
+      "level": "core",
+      "scope": "A complete, runnable ~50-line tool-use agent loop in Python demonstrating the core mechanics. IN: tool definition, the loop, tool-call dispatch, id matching, and safe error handling. OUT: framework abstractions and MCP (link Snippet - Building an MCP Server).",
+      "key_points": [
+        "Complete runnable file: imports, one or two toy tools (e.g., a calculator and a web-search stub), schema definitions, and the loop against a real SDK (anthropic or openai)",
+        "Header block: dependencies with versions (e.g., anthropic>=0.40 or openai>=1.40), how to set the API key, and the expected multi-turn trace output",
+        "Demonstrate the three load-bearing details: a max_iterations guard, appending each tool_result with its matching tool_use_id/tool_call_id, and returning handler exceptions as tool-result error text rather than raising",
+        "Show the stop condition: loop exits when the model returns a message with no tool calls",
+        "Keep it framework-free so the mechanics are visible; comments only where the SDK shape is non-obvious",
+        "Why-it-is-written-this-way section covers: id matching (mismatches error the API), error-as-observation (lets the model self-correct), and the iteration cap (prevents runaway cost)"
+      ],
+      "links": ["Deep Dive - The Agent Loop", "Concept - Tool Use and Function Calling", "Concept - The ReAct Pattern", "Playbook - Building a Tool-Use Agent from Scratch", "Gotchas - Tool Use and Function Calling"]
+    },
+    {
+      "title": "Checklist - Agent Tool Definition Review",
+      "type": "checklist",
+      "level": "core",
+      "scope": "A pre-flight review for any tool exposed to an agent, since the model acts only on the schema it sees. IN: naming, descriptions, parameter design, return shape, and safety gating of a single tool. OUT: sandboxing the runtime (link Checklist - Sandboxing an Agent) and the wider production pitfalls (link Gotchas - Agents in Production).",
+      "key_points": [
+        "Naming: verb-noun, unambiguous, non-overlapping with sibling tools so the model does not confuse them",
+        "Description states both when to use AND when not to use the tool, with a short example invocation",
+        "Every parameter has a description with units/format; prefer enums over free strings; required-vs-optional is set correctly and defaults are documented",
+        "Returns are concise and structured, and token-budgeted -- a tool that returns 10k tokens of JSON will crowd out the transcript",
+        "Errors return actionable, model-readable messages (what to do next), never raw stack traces",
+        "Side effects and idempotency are declared; destructive/irreversible actions are gated behind confirmation or a human-in-the-loop step",
+        "Token cost of the schema itself is measured (many tools multiply system-prompt size)",
+        "Why-these-items ties each to a real failure: vague description -> wrong tool picked; unhelpful error text -> agent loops; verbose return -> context blowout; ungated destructive op -> data loss"
+      ],
+      "links": ["Concept - Tool Use and Function Calling", "Concept - Model Context Protocol (MCP)", "Gotchas - Tool Use and Function Calling", "Checklist - Sandboxing an Agent", "Playbook - Building a Tool-Use Agent from Scratch", "Playbook - Reliable Structured Output"]
+    },
+    {
+      "title": "Decision - Choosing an Agent Framework",
+      "type": "decision",
+      "level": "core",
+      "scope": "The choose-one decision among raw API and the major agent frameworks, with the constraints that flip it. IN: decision flow and tradeoff matrix across control, velocity, and lock-in. OUT: the descriptive per-framework feature list (link Reference - Agent Framework Landscape) and single-vs-multi-agent topology (link Decision - Single-Agent vs Multi-Agent).",
+      "key_points": [
+        "Decision flow (Mermaid): first ask whether you need a framework at all -- a simple tool loop is often best on the raw provider SDK; escalate only when a real need appears",
+        "Branch by need: explicit state/graph control and durable execution -> LangGraph; heavy multi-agent conversation -> AutoGen/CrewAI; type-safe validated outputs -> Pydantic AI; prompt/weight optimization -> DSPy; provider-native handoffs -> OpenAI Agents SDK / Claude Agent SDK",
+        "Tradeoff matrix columns: control granularity, time-to-first-agent, debuggability, streaming + human-in-the-loop support, state persistence/checkpointing, and vendor lock-in",
+        "Details that flip the default: need to pause/resume or replay runs (durable execution favors LangGraph/Temporal-style); need code-as-action (smolagents) with a sandbox; regulatory need for full trace control (thin raw-API stack)",
+        "Default for 2026: start on the raw provider SDK for a single-tool-loop agent; adopt LangGraph when you genuinely need explicit state, branching, and checkpoints",
+        "Anti-pattern: adopting a heavy multi-agent framework before proving a single agent cannot do the job (link Decision - Single-Agent vs Multi-Agent)"
+      ],
+      "links": ["Reference - Agent Framework Landscape", "Decision - Single-Agent vs Multi-Agent", "Playbook - Building a Tool-Use Agent from Scratch", "Concept - Multi-Agent Orchestration", "Concept - LLM Observability and Tracing", "Concept - Cost Engineering for LLM Applications"]
+    },
+    {
+      "title": "Concept - Agent Memory Systems",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "How agents persist and retrieve information beyond the context window: the memory taxonomy and the retrieval/writing mechanisms. IN: short vs long-term, episodic/semantic/procedural memory, scoring and self-editing memory. OUT: vector index internals (link Concept - HNSW, Concept - Embedding Models) and transcript compaction (link Concept - Context Engineering for Agents).",
+      "key_points": [
+        "Taxonomy: short-term/working memory = the context window; long-term = an external store; by content type: episodic (past interactions), semantic (facts about the world/user), procedural (learned skills/how-to)",
+        "Generative Agents (Park et al. 2023): a memory stream scored by retrieval = recency (exponential decay) + importance (LLM-rated) + relevance (embedding similarity); plus periodic reflection that synthesizes higher-level memories",
+        "MemGPT / Letta (Packer et al. 2023): OS-inspired virtual context -- a limited main context plus external storage, with the model self-editing memory via function calls and paging data in/out",
+        "Write policy is the hard part: deciding what is worth storing, deduping, and reconciling contradictions; naive 'embed everything' produces low-signal recall",
+        "Retrieval of memories reuses RAG machinery (link Concept - Embedding Models, Concept - HNSW, Concept - Rerankers) but the query is agent-generated, not user-typed",
+        "Failure modes: memory bloat, stale/contradictory memories surfacing, retrieval misses on paraphrase, and over-writing that erases still-relevant facts",
+        "Distinction from context engineering: memory is the durable external store; context engineering is managing what currently sits in the window (link Concept - Context Engineering for Agents)"
+      ],
+      "links": ["Concept - Context Engineering for Agents", "Concept - Embedding Models", "Concept - HNSW", "Concept - Rerankers", "Deep Dive - The Agent Loop", "Deep Dive - RAG Architectures", "Concept - Context Rot", "Concept - Prompt Caching"]
+    },
+    {
+      "title": "Concept - Multi-Agent Orchestration",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "How multiple LLM agents are coordinated: topologies, communication, and when multi beats single. IN: orchestrator/hierarchical/debate topologies, message passing, cost and coordination tradeoffs. OUT: the concrete orchestrator-worker blueprint (link Pattern - Orchestrator-Worker Agents) and the go/no-go choice (link Decision - Single-Agent vs Multi-Agent).",
+      "key_points": [
+        "Topologies: single orchestrator + worker subagents, hierarchical trees, sequential pipelines, group chat/debate, and free-form networks",
+        "Communication mechanisms: a shared scratchpad/blackboard, explicit message passing, and handoffs (OpenAI Swarm/Agents SDK transfer semantics)",
+        "When multi-agent helps: parallelizable, separable subtasks and context isolation (each subagent gets a clean window); Anthropic reported multi-agent research beating single-agent by ~90% on an internal eval",
+        "The cost multiplier: Anthropic measured ~15x the tokens of a chat interaction, and token volume explained ~80% of performance variance -- multi-agent buys capability by spending tokens",
+        "When it hurts: coordination overhead, error propagation across agents, diffusion of responsibility, and write-conflicts when agents edit shared state (Cognition's 'Don't Build Multi-Agents', 2025)",
+        "Research lineage: multi-agent debate (Du et al. 2023), CAMEL role-play, Society-of-Mind style ensembles",
+        "Evaluation is harder: non-determinism and long trajectories make multi-agent runs hard to score reproducibly (link Concept - Agent Evaluation Challenges)"
+      ],
+      "links": ["Pattern - Orchestrator-Worker Agents", "Decision - Single-Agent vs Multi-Agent", "Breakdown - Anthropic's Multi-Agent Research System", "Concept - Context Engineering for Agents", "Concept - Agent Evaluation Challenges", "Concept - Cost Engineering for LLM Applications", "Concept - Task Decomposition and Planning"]
+    },
+    {
+      "title": "Gotchas - Agents in Production",
+      "type": "gotchas",
+      "level": "advanced",
+      "scope": "The aggregated production failure modes of autonomous agents, ordered by how much pain they cause. IN: loops, cost/context blowups, silent failures, injection-driven exfiltration, latency, and irreversibility. OUT: tool-call-specific bugs (link Gotchas - Tool Use and Function Calling) and injection taxonomy (link Concept - Prompt Injection).",
+      "key_points": [
+        "Infinite/oscillating tool loops: symptom repeated identical calls; cause the model rationalizing a failing action; fix iteration caps + loop detection + returning richer error observations",
+        "Context window overflow mid-task: cause unbounded transcript growth; fix compaction, sub-agent isolation, scratchpad offload (link Concept - Context Engineering for Agents)",
+        "Cost blowup: per-turn token growth multiplied by turns and (for multi-agent) ~15x fan-out; detection = per-run token/cost budgets and alerts (link Concept - Cost Engineering for LLM Applications)",
+        "Silent tool failures: the tool errored but the model did not notice and proceeds on a false premise; fix explicit error signaling and post-conditions",
+        "Prompt-injection-driven exfiltration from web/tool/email content -- the lethal trifecta (link Concept - The Lethal Trifecta for Agents, Concept - Prompt Injection)",
+        "Latency compounding: N sequential model calls stack end-to-end; mitigate with parallelization and speculative steps",
+        "Over-eager destructive actions with no rollback; goal drift on long runs (fix: recitation of the goal/todo each turn); non-determinism making evals flaky",
+        "Detection backbone: trace-level observability on every tool call is the single highest-leverage investment (link Concept - LLM Observability and Tracing)"
+      ],
+      "links": ["Gotchas - Tool Use and Function Calling", "Concept - Context Engineering for Agents", "Concept - The Lethal Trifecta for Agents", "Concept - Prompt Injection", "Concept - LLM Observability and Tracing", "Concept - Cost Engineering for LLM Applications", "Concept - Long-Horizon Agency and Error Compounding", "Checklist - Sandboxing an Agent"]
+    },
+    {
+      "title": "Gotchas - Tool Use and Function Calling",
+      "type": "gotchas",
+      "level": "advanced",
+      "scope": "The specific pitfalls of the tool-calling interface, ordered by frequency and pain. IN: schema/argument bugs, selection degradation, id and parallel-call bugs, result-formatting traps. OUT: broader production/agent-lifecycle failures (link Gotchas - Agents in Production) and defining tools well (link Checklist - Agent Tool Definition Review).",
+      "key_points": [
+        "Malformed or wrongly-typed arguments (string '5' vs int 5, missing required field); cause weak schema/description; fix strict validation + constrained decoding (link Concept - Constrained Decoding)",
+        "Tool-selection degradation with too many tools: past a few dozen the model picks wrong; fix namespacing, retrieval-over-tools, or sub-agents",
+        "Ambiguous/overlapping descriptions -> wrong tool chosen; fix disambiguating 'use when / do not use when' language",
+        "tool_call_id / tool_use_id mismatches: a returned result not keyed to its call errors the API or confuses the model",
+        "Parallel tool calls with hidden data dependencies executed out of order; fix declaring dependencies or forcing sequential calls",
+        "Oversized tool results eating the context window; fix truncation/summarization and pagination of tool output",
+        "Missing tool result -> the model stalls waiting; the model narrating an action instead of emitting a call -> fix with tool_choice forcing",
+        "Injection via attacker-controlled tool descriptions/results (link Concept - The Lethal Trifecta for Agents)"
+      ],
+      "links": ["Concept - Tool Use and Function Calling", "Checklist - Agent Tool Definition Review", "Gotchas - Agents in Production", "Concept - Constrained Decoding", "Concept - The Lethal Trifecta for Agents", "Concept - Model Context Protocol (MCP)", "Playbook - Reliable Structured Output"]
+    },
+    {
+      "title": "Concept - Reflection and Self-Correction",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "How agents critique and revise their own outputs, and the sharp limit on when this actually helps. IN: Reflexion, Self-Refine, tool-augmented critique, and the internal-vs-external-signal boundary. OUT: the evaluator-optimizer workflow shape (link Pattern - Agentic Workflow Building Blocks) and RL-trained self-correction (link Concept - Trained vs Prompted Agents).",
+      "key_points": [
+        "Reflexion (Shinn et al. 2023): after a failed episode the agent writes a verbal self-reflection into memory and retries; improves ALFWorld/HumanEval by learning across attempts without weight updates",
+        "Self-Refine (Madaan et al. 2023): single-episode iterative self-feedback and revision",
+        "CRITIC and tool-augmented correction: the model verifies claims with external tools (search, code execution) before revising",
+        "The critical limit: Huang et al. 2023 ('LLMs Cannot Self-Correct Reasoning Yet') show that without an external signal, self-correction of reasoning can leave quality flat or worse -- the model cannot reliably find its own reasoning errors",
+        "So reflection pays off when there is a ground-truth oracle: unit tests, a compiler, a checker, or retrieved evidence; it degrades when purely introspective",
+        "Failure modes: reflections that rationalize the original answer, oscillation between two answers, and the token/latency cost of extra passes",
+        "Practical corollary: wire a verifier into the loop rather than trusting the model to grade itself (link Concept - GRPO and RL with Verifiable Rewards for the trained analogue)"
+      ],
+      "links": ["Concept - The ReAct Pattern", "Pattern - Agentic Workflow Building Blocks", "Concept - GRPO and RL with Verifiable Rewards", "Concept - Trained vs Prompted Agents", "Concept - Chain-of-Thought and Why It Works", "Breakdown - SWE-bench and SWE-agent", "Concept - Long-Horizon Agency and Error Compounding"]
+    },
+    {
+      "title": "Concept - Context Engineering for Agents",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Managing what sits in an agent's context window across a long run, distinct from durable memory. IN: compaction, scratchpad/filesystem offload, sub-agent isolation, cache-friendly layout, just-in-time loading. OUT: the general context-rot mechanism (link Concept - Context Rot) and the external memory store (link Concept - Agent Memory Systems).",
+      "key_points": [
+        "The core problem: agent transcripts grow every turn, so quality degrades from context rot and lost-in-the-middle while cost scales with history length (link Concept - Context Rot)",
+        "Compaction: summarizing old turns to reclaim window; the risk is over-compaction dropping a fact the agent later needs",
+        "Offload to the environment: write notes/plans to a scratchpad or filesystem and re-read on demand instead of carrying everything in-context (Anthropic effective-context-engineering, 2025; Manus lessons)",
+        "Sub-agent context isolation: workers return distilled summaries, not their full trace, keeping the orchestrator window clean (link Pattern - Orchestrator-Worker Agents)",
+        "Cache-friendly layout: keep a stable append-only prefix so prompt caching / KV reuse stays hot; reordering or editing early messages busts the cache (link Concept - Prompt Caching, Concept - KV Cache)",
+        "Just-in-time retrieval: pull only the currently relevant history/documents into the window (link Deep Dive - RAG Architectures)",
+        "Tool-result hygiene: truncate/paginate large outputs before they enter the window",
+        "Failure modes: over-compaction amnesia, cache invalidation from reordering, and irrelevant history drowning the signal"
+      ],
+      "links": ["Concept - Context Rot", "Concept - Agent Memory Systems", "Concept - Prompt Caching", "Concept - KV Cache", "Pattern - Orchestrator-Worker Agents", "Deep Dive - RAG Architectures", "Lore - Agent Prompt-Engineering Folklore", "Concept - Long-Horizon Agency and Error Compounding"]
+    },
+    {
+      "title": "Concept - Computer Use and GUI Grounding",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Agents that operate a computer or browser through screenshots and mouse/keyboard actions. IN: the action space, the pixel-to-coordinate grounding problem, and grounding techniques. OUT: VLM architecture internals (link Concept - VLM Architectures) and browser-side retrieval (link Deep Dive - RAG Architectures).",
+      "key_points": [
+        "Setup: the agent observes screenshots and emits GUI actions -- click(x,y), type, scroll, keypress -- in a perceive-act loop; Anthropic Computer Use (Oct 2024) and OpenAI Operator/CUA (2025) are the reference systems",
+        "The grounding problem: mapping rendered pixels to a correct click coordinate is the bottleneck; small errors cause misclicks and cascade",
+        "Grounding techniques: Set-of-Marks prompting (overlay numbered labels on UI elements so the model names an element instead of guessing coordinates); the accessibility/DOM tree as a cheaper, more reliable action target when available; pure-vision grounding when it is not",
+        "Benchmarks: OSWorld (real desktop tasks), WebArena/VisualWebArena, ScreenSpot (grounding accuracy), WebVoyager; report metrics with dates",
+        "Numbers: early Claude computer use scored roughly the mid-teens on OSWorld vs ~72% human (late 2024), improving through 2025-26 but still far below human reliability",
+        "Failure modes: coordinate drift, misclicks, inability to perceive hover/transient states, and screenshot-loop latency making each step slow and expensive",
+        "Non-obvious: prefer the accessibility tree over vision whenever exposed; vision grounding is both the capability frontier and the main error source"
+      ],
+      "links": ["Concept - VLM Architectures", "Concept - Vision Transformers", "Deep Dive - The Agent Loop", "Reference - Agent Benchmarks", "Concept - Long-Horizon Agency and Error Compounding", "Checklist - Sandboxing an Agent", "Gotchas - Agents in Production"]
+    },
+    {
+      "title": "Pattern - Orchestrator-Worker Agents",
+      "type": "pattern",
+      "level": "advanced",
+      "scope": "The reusable design where a lead agent dynamically decomposes a task and spawns worker subagents, then synthesizes. IN: structure, context isolation, synthesis, cost forces, and known uses. OUT: the broader topology survey (link Concept - Multi-Agent Orchestration) and the specific Anthropic system (link Breakdown - Anthropic's Multi-Agent Research System).",
+      "key_points": [
+        "Problem/solution: for open-ended tasks whose subtasks cannot be predetermined, a lead/orchestrator LLM decides at runtime how many workers to spawn and what each does, then merges results (contrast with static parallelization in Pattern - Agentic Workflow Building Blocks)",
+        "Structure (diagram required): orchestrator -> N workers with isolated contexts -> workers return distilled findings -> orchestrator synthesizes; effectively map-reduce over LLM calls",
+        "Context isolation is the key benefit: each worker gets a clean window on its subtask, sidestepping the single-agent context-rot ceiling",
+        "Implementation notes: the orchestrator prompt must specify how to delegate and how much effort to allocate (spawn count scaled to complexity); workers must return summaries, not full traces",
+        "Known uses: Anthropic's multi-agent research system, deep-research agents (OpenAI/Google 2025), large-scale document map-reduce",
+        "Tradeoffs / when NOT to use: heavy token cost (~15x), coordination and duplicated-work failures, and it breaks down when subtasks share mutable state or must write to a common artifact (favor single-agent then)",
+        "Pairs with a synthesis/evaluator step to reconcile conflicting worker outputs (link Concept - Reflection and Self-Correction)"
+      ],
+      "links": ["Concept - Multi-Agent Orchestration", "Breakdown - Anthropic's Multi-Agent Research System", "Decision - Single-Agent vs Multi-Agent", "Pattern - Agentic Workflow Building Blocks", "Concept - Context Engineering for Agents", "Concept - Task Decomposition and Planning", "Concept - Cost Engineering for LLM Applications"]
+    },
+    {
+      "title": "Decision - Single-Agent vs Multi-Agent",
+      "type": "decision",
+      "level": "advanced",
+      "scope": "When to split a task across multiple agents versus keeping one agent, with the tradeoffs that flip it. IN: decomposability test, read-vs-write distinction, cost/coordination matrix. OUT: how to wire the orchestration once chosen (link Concept - Multi-Agent Orchestration, Pattern - Orchestrator-Worker Agents).",
+      "key_points": [
+        "Decision flow (Mermaid): is the task decomposable into subtasks with separable context and few write-dependencies? read-heavy parallel research favors multi; write-heavy shared-artifact work favors single",
+        "Tradeoff matrix: single-agent (simpler, cheaper, coherent shared context, but context-window-bound and serial) vs multi-agent (parallel, context isolation, but ~15x tokens, coordination failures, harder to evaluate)",
+        "The pivotal evidence pair: Anthropic's multi-agent research win (~90% over single on a research eval, 2025) for parallel read/breadth tasks vs Cognition's 'Don't Build Multi-Agents' (2025) arguing shared context and fragile coordination make multi-agent worse for coherent build/write tasks",
+        "The write-conflict problem: multiple agents editing shared state produce inconsistent results no synthesizer can cleanly merge",
+        "Default (2026): a single agent plus strong context engineering until you hit demonstrable, independent parallelism; do not reach for multi-agent to paper over a weak single-agent design",
+        "Cost gate: multi-agent must justify a several-fold token bill with a matching capability gain (link Concept - Cost Engineering for LLM Applications)"
+      ],
+      "links": ["Concept - Multi-Agent Orchestration", "Pattern - Orchestrator-Worker Agents", "Breakdown - Anthropic's Multi-Agent Research System", "Concept - Context Engineering for Agents", "Concept - Cost Engineering for LLM Applications", "Decision - Choosing an Agent Framework"]
+    },
+    {
+      "title": "Checklist - Sandboxing an Agent",
+      "type": "checklist",
+      "level": "advanced",
+      "scope": "A pre-flight hardening list before granting an agent real tool access to systems, files, network, or credentials. IN: isolation, egress control, least privilege, approval gates, audit, kill switch. OUT: the injection theory itself (link Concept - Prompt Injection) and the exfiltration failure pattern (link Concept - The Lethal Trifecta for Agents).",
+      "key_points": [
+        "Run in an isolated container/microVM (gVisor, Firecracker) rather than on the host; no host filesystem mounts, read-only where possible",
+        "Network egress on an allowlist -- the single most important control for preventing data exfiltration (link Concept - The Lethal Trifecta for Agents)",
+        "No ambient credentials/secrets in the environment; use short-lived scoped tokens and least-privilege identities per tool",
+        "Per-tool permission gating with human approval for destructive, irreversible, or exfil-capable actions",
+        "Resource limits: CPU/memory/wallclock/token budgets and rate limits on external calls to cap blast radius and cost",
+        "Treat every tool output (web page, file, email, MCP tool result) as untrusted input that may carry injection",
+        "Audit-log every tool call with arguments and results; provide a kill switch to halt a running agent",
+        "Why-these-items ties each to a real incident class: agent running rm -rf, secrets leaked via a web/search tool, and injection-to-exfiltration through untrusted content"
+      ],
+      "links": ["Concept - The Lethal Trifecta for Agents", "Concept - Prompt Injection", "Gotchas - Agents in Production", "Checklist - Agent Tool Definition Review", "Concept - Computer Use and GUI Grounding", "Concept - Model Context Protocol (MCP)"]
+    },
+    {
+      "title": "Reference - Agent Benchmarks",
+      "type": "reference",
+      "level": "advanced",
+      "scope": "A lookup matrix of the benchmarks used to measure agent capability, with what each tests and its flaws. IN: coding, web, computer-use, and tool-agent-user benchmarks with metrics and approximate SOTA (as of 2026). OUT: general eval methodology and statistics (link Deep Dive - Designing an Eval Harness, Concept - Statistical Rigor in Model Evaluation) and why agent eval is intrinsically hard (link Concept - Agent Evaluation Challenges).",
+      "key_points": [
+        "Coding: SWE-bench (2,294 real GitHub issues), SWE-bench Verified (500 human-filtered), SWE-bench Multimodal; metric = % resolved by hidden tests (link Breakdown - SWE-bench and SWE-agent)",
+        "Web/browsing: WebArena, VisualWebArena, WebVoyager, BrowseComp (OpenAI 2025, hard retrieval-style browsing); metric = task success rate",
+        "General assistant: GAIA (Meta 2023, three difficulty levels of real multi-step tasks), AgentBench (multi-environment)",
+        "Tool-agent-user: tau-bench and tau2-bench (retail/airline, user-simulator in the loop) with the pass^k reliability metric = succeeding k independent times, not just once",
+        "Computer use: OSWorld (desktop), plus grounding sets like ScreenSpot; ML engineering: MLE-bench; security: Cybench; terminals: Terminal-Bench",
+        "Columns: domain, task count, metric (pass@1 vs pass^k), what it actually measures, known flaws/contamination, approximate top score (date-stamped as of 2026)",
+        "Footnote the metrics: pass@1 vs pass^k vs resolved-rate are not comparable; contamination is pervasive because many task sources predate model training cutoffs (link Concept - Benchmark Contamination)"
+      ],
+      "links": ["Concept - Agent Evaluation Challenges", "Breakdown - SWE-bench and SWE-agent", "Deep Dive - Designing an Eval Harness", "Concept - Statistical Rigor in Model Evaluation", "Concept - Benchmark Contamination", "Concept - Computer Use and GUI Grounding", "Concept - LLM-as-Judge"]
+    },
+    {
+      "title": "Snippet - Building an MCP Server",
+      "type": "snippet",
+      "level": "advanced",
+      "scope": "A complete, runnable minimal MCP server exposing a tool and a resource over stdio, plus how a client connects. IN: server definition, tool/resource registration, transport, and the docstring-as-contract detail. OUT: the protocol concepts (link Concept - Model Context Protocol (MCP)) and security hardening (link Checklist - Sandboxing an Agent).",
+      "key_points": [
+        "Runnable Python using the official MCP SDK (FastMCP): define one tool and one resource, run over stdio",
+        "Header block: dependencies with versions (mcp / modelcontextprotocol python-sdk), how to register the server in a host (e.g., Claude Desktop config), and expected behavior when the tool is called",
+        "Show that the tool's docstring/description becomes the model-facing contract -- the single highest-leverage line in the file (link Checklist - Agent Tool Definition Review)",
+        "Demonstrate a Resource (application-controlled data) alongside the Tool (model-controlled action) to make the primitive distinction concrete",
+        "Use typed function signatures so the SDK derives the JSON Schema automatically; return structured, concise results",
+        "Why-it-is-written-this-way: stdio for local dev vs Streamable HTTP for remote, typed args for schema generation, and error handling that returns model-readable messages",
+        "Note the trust boundary: a server's tool descriptions are attacker-controlled text if the server is third-party (link Concept - The Lethal Trifecta for Agents)"
+      ],
+      "links": ["Concept - Model Context Protocol (MCP)", "Concept - Tool Use and Function Calling", "Checklist - Agent Tool Definition Review", "Checklist - Sandboxing an Agent", "Concept - The Lethal Trifecta for Agents"]
+    },
+    {
+      "title": "Breakdown - SWE-bench and SWE-agent",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "How the SWE-bench benchmark is constructed and how SWE-agent's Agent-Computer Interface unlocked coding-agent performance. IN: benchmark construction, the ACI insight, headline numbers, and flaws. OUT: the full benchmark catalog (link Reference - Agent Benchmarks) and a shipped product agent (link Breakdown - Claude Code).",
+      "key_points": [
+        "SWE-bench (Jimenez et al. 2023): 2,294 real issue+PR pairs from 12 popular Python repos; the agent must produce a patch that passes the PR's hidden tests; SWE-bench Verified (500, OpenAI 2024) is the human-filtered subset that removed under-specified/broken tasks",
+        "Headline trajectory: 2023 retrieval baselines ~2%; SWE-agent ~12%; by 2025-26 top agents reach 60-70%+ on Verified (date-stamped, as of 2026)",
+        "SWE-agent (Yang et al. 2024) key insight -- the Agent-Computer Interface: a purpose-built command set (open/scroll/search/edit files) with feedback on every action, including linting on edit; the ACI mattered more than raw model strength",
+        "The clever parts: design the interface for the model not the human, give feedback after every action, and use test-passing as a verifiable reward (RLVR-adjacent, link Concept - GRPO and RL with Verifiable Rewards)",
+        "What is dated/flawed: Python-only, tests-pass does not equal correct-fix, localization vs editing conflation, and contamination since issues predate training cutoffs (link Concept - Benchmark Contamination)",
+        "What to steal: invest in the tool/interface layer; wire verifiable checks into the loop; treat retrieval/localization as a first-class subproblem",
+        "Ties to the Devin controversy over how SWE-bench scores are reported (link Lore - The Devin Demo and the SWE-bench Reality Gap)"
+      ],
+      "links": ["Reference - Agent Benchmarks", "Breakdown - Claude Code", "Concept - GRPO and RL with Verifiable Rewards", "Concept - Benchmark Contamination", "Concept - Agent Evaluation Challenges", "Lore - The Devin Demo and the SWE-bench Reality Gap", "Concept - Reflection and Self-Correction"]
+    },
+    {
+      "title": "Concept - Agent Evaluation Challenges",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Why evaluating agents is uniquely hard compared to single-turn model eval, framed from the agent side. IN: outcome-vs-trajectory, non-determinism/variance, reproducibility, cost/latency as metrics, judging trajectories. OUT: general statistics and harness design (link Concept - Statistical Rigor in Model Evaluation, Deep Dive - Designing an Eval Harness) and the benchmark list (link Reference - Agent Benchmarks).",
+      "key_points": [
+        "Outcome vs trajectory: a task can succeed while the path was unsafe, wasteful, or lucky; agent eval must score both the end state and the process",
+        "Non-determinism: the same task yields different trajectories run-to-run, producing high variance; single-seed scores are misleading, motivating pass^k reliability metrics (succeed k times) as in tau-bench",
+        "Environment reproducibility: agents touch live tools/web/state that drift, so a benchmark can silently change under you; sandboxed frozen environments are required for fair comparison",
+        "Cost and latency are first-class metrics, not footnotes -- an agent that solves a task at 15x tokens or 10x latency is a different product",
+        "Judging trajectories with an LLM inherits position/verbosity/self-preference biases (link Concept - LLM-as-Judge) and is harder over long multi-step traces",
+        "Long horizon breaks attribution: when a 30-step run fails, which step caused it is often ambiguous (link Concept - Long-Horizon Agency and Error Compounding)",
+        "Contamination and reward hacking: benchmark tasks leak into training and agents learn to game the metric (link Concept - Benchmark Contamination, Concept - Reward Hacking); METR-style time-horizon eval is an emerging alternative framing"
+      ],
+      "links": ["Reference - Agent Benchmarks", "Concept - Statistical Rigor in Model Evaluation", "Deep Dive - Designing an Eval Harness", "Concept - LLM-as-Judge", "Concept - Benchmark Contamination", "Concept - Reward Hacking", "Concept - Long-Horizon Agency and Error Compounding", "Concept - Multi-Agent Orchestration"]
+    },
+    {
+      "title": "Concept - Long-Horizon Agency and Error Compounding",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Why agent success decays over long task horizons and what breaks or beats the decay. IN: the p^n compounding math, METR time-horizon measurement, correlated errors, and recovery. OUT: reflection mechanics (link Concept - Reflection and Self-Correction) and eval methodology (link Concept - Agent Evaluation Challenges).",
+      "key_points": [
+        "The compounding math: with per-step success probability p and independent steps, an n-step task succeeds with ~p^n; p=0.95, n=20 gives ~0.36 -- exponential decay is why long autonomous runs fail",
+        "This is the mechanism behind the AutoGPT-era failures: 2023 models had per-step p too low for the horizons users attempted (link Lore - The AutoGPT Explosion)",
+        "METR (2025) 'Measuring AI Ability to Complete Long Tasks': define an agent's 50%-success task-length horizon; frontier horizon roughly doubling every ~7 months, reaching the order of hours by 2026",
+        "The independence assumption is wrong in both directions: correlated errors (one wrong belief poisons many steps) worsen decay, while detect-and-recover capability breaks the naive p^n and dominates",
+        "Practical corollary: an agent with slightly lower p but strong error-detection and recovery beats a higher-p agent that cannot notice it is off-track",
+        "Mitigations: checkpoints and verification between steps, decomposition into shorter verifiable subtasks, human-in-the-loop gates, and reducing per-step error (better tools/prompts)",
+        "The failure signature: the 'death spiral' where an agent that goes off-track compounds the error instead of recovering (link Gotchas - Agents in Production)"
+      ],
+      "links": ["Concept - Reflection and Self-Correction", "Concept - Agent Evaluation Challenges", "Lore - The AutoGPT Explosion", "Gotchas - Agents in Production", "Concept - Task Decomposition and Planning", "Concept - Trained vs Prompted Agents", "Concept - The Emergent Abilities Debate"]
+    },
+    {
+      "title": "Concept - Search and Backtracking in Agents",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Explicit deliberate search over reasoning/action trajectories, beyond greedy ReAct, and why most production agents avoid it. IN: Tree of Thoughts, LATS/MCTS-for-agents, value functions, and the cost argument. OUT: linear planning (link Concept - Task Decomposition and Planning) and RL-internalized search (link Concept - Trained vs Prompted Agents, Concept - GRPO and RL with Verifiable Rewards).",
+      "key_points": [
+        "Motivation: greedy ReAct commits to one path; deliberate search explores alternatives and backtracks from dead ends",
+        "Tree of Thoughts (Yao et al. 2023): frame reasoning as a tree, expand candidate thoughts, evaluate states with a value/self-eval, search via BFS/DFS",
+        "Language Agent Tree Search / LATS (Zhou et al. 2023): MCTS over ReAct nodes combining acting, a learned/self value estimate, and Reflexion-style feedback; RAP (Reasoning via Planning) is a related planner",
+        "Mechanism mapping: state = the agent trajectory so far, expansion = candidate next actions, evaluation = self-eval or environment reward, backtracking = abandon low-value branches",
+        "Why production mostly skips it: explicit search multiplies LLM calls (often 10-100x), exploding cost and latency; a strong single path plus reflection is usually the better tradeoff",
+        "The frontier shift: reasoning models (o-series, DeepSeek-R1) internalize search into a long chain-of-thought via RL, getting search-like benefits without an external tree (link Concept - GRPO and RL with Verifiable Rewards)",
+        "Failure mode: search guided by a bad value function just burns tokens exploring worthless branches"
+      ],
+      "links": ["Concept - Task Decomposition and Planning", "Concept - The ReAct Pattern", "Concept - Trained vs Prompted Agents", "Concept - GRPO and RL with Verifiable Rewards", "Concept - Reflection and Self-Correction", "Concept - Chain-of-Thought and Why It Works", "Concept - Cost Engineering for LLM Applications"]
+    },
+    {
+      "title": "Concept - Trained vs Prompted Agents",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The paradigm shift from prompt-scaffolded agents on frozen models to models RL-trained end-to-end for agentic behavior, framed from the agent-architecture side. IN: why scaffolding hits a ceiling, what end-to-end training changes, and environment design. OUT: the RL training mechanics themselves (link Concept - GRPO and RL with Verifiable Rewards, Deep Dive - RLHF End to End), owned by Post-Training.",
+      "key_points": [
+        "The old paradigm: a frozen base model plus clever prompting/scaffolding (ReAct prompts, tool descriptions, orchestration); the new paradigm: RL-train the model directly on agentic tasks with verifiable rewards",
+        "Why the shift: scaffolding hits a ceiling because the base model was never optimized to use tools, recover from errors, or manage a long horizon; training teaches those behaviors into the weights",
+        "Evidence: o-series and Claude tool-use training, DeepSeek-R1's RL recipe; agents trained on SWE-gym / tau-bench-style environments; the mechanics live in Post-Training (link Concept - GRPO and RL with Verifiable Rewards)",
+        "Environment design becomes the work: define an agentic task distribution and a verifiable reward (tests pass, task-user satisfied), then RL against it -- the reward is the hard part (link Concept - Reward Hacking)",
+        "Consequence for architecture: the scaffold gets thinner as models improve -- Anthropic and Cognition both observe that heavy orchestration should shrink as the model absorbs agentic skill (link Breakdown - Claude Code)",
+        "Ownership boundary: this note frames the agent-domain implications; the PPO/GRPO/RLVR internals are Post-Training's",
+        "Open question: how much agentic capability can be scaffolded vs must be trained -- the moving line that determines framework value"
+      ],
+      "links": ["Concept - GRPO and RL with Verifiable Rewards", "Deep Dive - RLHF End to End", "Concept - Reward Hacking", "Breakdown - Claude Code", "Concept - Search and Backtracking in Agents", "Concept - Long-Horizon Agency and Error Compounding", "Breakdown - SWE-bench and SWE-agent"]
+    },
+    {
+      "title": "Breakdown - Anthropic's Multi-Agent Research System",
+      "type": "breakdown",
+      "level": "frontier",
+      "scope": "How Anthropic's production multi-agent research system works and what its engineering write-up teaches about orchestrator-worker design. IN: architecture, the token/performance numbers, the clever prompt-engineering decisions, and the hard parts. OUT: the reusable pattern in the abstract (link Pattern - Orchestrator-Worker Agents) and the single-vs-multi decision (link Decision - Single-Agent vs Multi-Agent).",
+      "key_points": [
+        "Source: Anthropic engineering blog 'How we built our multi-agent research system' (June 2025); a lead Claude orchestrator spawns parallel subagent researchers with isolated contexts and synthesizes their findings",
+        "Headline numbers: multi-agent beat single-agent by ~90% on an internal research eval; used ~15x the tokens of a chat interaction; token usage explained ~80% of performance variance across configurations",
+        "Clever parts: parallel subagents for breadth/coverage, per-subagent context isolation, an explicit orchestrator prompt teaching it how to delegate, and effort scaling (spawn subagent count proportional to query complexity)",
+        "Prompt-engineering lessons: teach the orchestrator to decompose and set clear subagent objectives; iterate prompts against evals because small wording changes shift delegation behavior",
+        "Hard parts / what they got wrong: subagents duplicating work, coordination overhead, evaluation difficulty under non-determinism, and the raw cost of the token multiplier",
+        "The contrast case: Cognition's 'Don't Build Multi-Agents' argues the opposite for write-heavy coherent tasks; both can be right by task type (link Decision - Single-Agent vs Multi-Agent)",
+        "What to steal: orchestrator-worker for breadth/research tasks, context isolation, and treating token budget as a capability dial"
+      ],
+      "links": ["Pattern - Orchestrator-Worker Agents", "Decision - Single-Agent vs Multi-Agent", "Concept - Multi-Agent Orchestration", "Concept - Context Engineering for Agents", "Concept - Cost Engineering for LLM Applications", "Concept - Agent Evaluation Challenges", "Deep Dive - RAG Architectures"]
+    },
+    {
+      "title": "Breakdown - Claude Code",
+      "type": "breakdown",
+      "level": "unicorn",
+      "scope": "How Anthropic's terminal coding agent is architected, as a real-world instance of a thin-scaffold model-first agent. IN: the tool set, permission system, memory/subagents, and the design philosophy. OUT: the SWE-bench benchmark mechanics (link Breakdown - SWE-bench and SWE-agent) and generic sandboxing steps (link Checklist - Sandboxing an Agent).",
+      "key_points": [
+        "What it is: Anthropic's CLI coding agent (2025) -- a single main agent loop wrapping a real model with a curated tool set, running in the user's terminal/repo",
+        "Tool set: file navigation via Grep/Glob (deliberately search-based, not embedding-RAG for code), Read/Edit/Write, Bash, WebFetch, a Task tool that spawns isolated subagents, and TodoWrite for long-task tracking",
+        "Permission system: allow/ask/deny per tool and per pattern, with human approval gates for destructive or out-of-scope actions -- security as UX, not just sandbox",
+        "Context handling: CLAUDE.md project memory files, context compaction on long sessions, and subagents with isolated windows to keep the main context clean (link Concept - Context Engineering for Agents)",
+        "Design philosophy: a deliberately thin/unopinionated scaffold -- give the model excellent tools and let it drive, rather than hardcoding complex orchestration; this reflects the trained-agent thesis (link Concept - Trained vs Prompted Agents)",
+        "The recitation trick made product: a live todo list re-surfaces the goal each turn to fight long-horizon drift (link Lore - Agent Prompt-Engineering Folklore)",
+        "What to steal: search-over-embeddings for code, permission gating, todo recitation, and thin scaffold + strong tools; limits: large-repo context bounds, cost, and over-eager edits",
+        "Evidence status: based on Anthropic's public materials and the observable tool surface of the product"
+      ],
+      "links": ["Breakdown - SWE-bench and SWE-agent", "Concept - Context Engineering for Agents", "Concept - Trained vs Prompted Agents", "Lore - Agent Prompt-Engineering Folklore", "Checklist - Sandboxing an Agent", "Concept - Model Context Protocol (MCP)", "Concept - Tool Use and Function Calling", "Checklist - Agent Tool Definition Review"]
+    },
+    {
+      "title": "Lore - The AutoGPT Explosion",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The March-April 2023 viral rise of AutoGPT/BabyAGI and why the first wave of autonomous agents mostly failed. IN: the story, the technical reasons for failure, and the durable lesson. OUT: the compounding math in full (link Concept - Long-Horizon Agency and Error Compounding) and modern loop design (link Deep Dive - The Agent Loop).",
+      "key_points": [
+        "What happened: AutoGPT (Toran Bruce Richards) and BabyAGI (Yohei Nakajima) went viral in spring 2023; AutoGPT became one of the fastest repos to 100k+ GitHub stars; the pitch was fully autonomous GPT-4 agents that pursue a goal unsupervised; the ChaosGPT stunt amplified the hype",
+        "Why they mostly failed: GPT-4's per-step reliability was too low for the long horizons users attempted, so errors compounded (p^n, link Concept - Long-Horizon Agency and Error Compounding); naive vector-dump 'memory' gave poor recall; agents fell into infinite loops, hallucinated task completion, and burned real API money getting stuck",
+        "The lesson (mechanical): autonomy needs a per-step reliability the 2023 base models did not have; scaffolding cannot rescue a model whose step-error is too high; memory needs a write/retrieval policy, not just an embedding dump",
+        "The legacy: AutoGPT seeded the entire agent-framework wave and set expectations that models only grew into over the following two years",
+        "Partial vindication: the same architecture works far better on 2025-26 models because per-step p rose and horizons lengthened (link Concept - Trained vs Prompted Agents)",
+        "Evidence status: well-documented and reproducible -- the repos, issues, and demos are public"
+      ],
+      "links": ["Concept - Long-Horizon Agency and Error Compounding", "Deep Dive - The Agent Loop", "Concept - Agent Memory Systems", "Concept - What Is an LLM Agent", "Concept - Trained vs Prompted Agents", "Reference - Model Genealogy"]
+    },
+    {
+      "title": "Lore - The Devin Demo and the SWE-bench Reality Gap",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The March 2024 Devin launch, its SWE-bench claim, and the public teardown that exposed the demo-vs-reality gap. IN: the story, the specific critiques, and the lesson about reading agent numbers. OUT: how SWE-bench is actually built (link Breakdown - SWE-bench and SWE-agent) and eval-methodology rigor (link Concept - Agent Evaluation Challenges).",
+      "key_points": [
+        "What happened: Cognition unveiled Devin (March 2024) as 'the first AI software engineer', claiming ~13.86% on SWE-bench unassisted (beating prior published numbers) alongside a polished autonomous-coding demo; the launch drove a multibillion-dollar valuation narrative",
+        "The teardown: Carl Brown's 'Internet of Bugs' video 'Debunking Devin' (April 2024) dissected the flagship Upwork demo -- the task Devin performed did not match the task described, several 'fixes' addressed bugs Devin itself introduced, and the timeline was edited to look smoother than the real run",
+        "The lesson: agent launch demos are heavily cherry-picked; a benchmark headline needs its protocol (assisted vs unassisted, Verified subset, pass@k) before it means anything; 'resolved' on SWE-bench is not the same as 'correct and maintainable' (link Concept - Agent Evaluation Challenges)",
+        "Broader pattern: the demo-scrutiny cycle repeats with each splashy agent launch; treat a single curated demo as an upper bound, never an expectation",
+        "Aftermath: Devin's later general availability drew mixed real-world reviews, consistent with the gap the teardown predicted",
+        "Evidence status: the demo, the teardown video, and Cognition's responses are all public; specific intent is contested, the discrepancies are documented"
+      ],
+      "links": ["Breakdown - SWE-bench and SWE-agent", "Concept - Agent Evaluation Challenges", "Reference - Agent Benchmarks", "Concept - Benchmark Contamination", "Concept - Long-Horizon Agency and Error Compounding", "Lore - The AutoGPT Explosion"]
+    },
+    {
+      "title": "Lore - Agent Prompt-Engineering Folklore",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The tribal prompting tricks practitioners use to make agents reliable, labeled by whether they are mechanism or cargo cult. IN: recitation, budget signals, format choices, error-as-observation, and the reflection tax. OUT: the underlying context-rot mechanism (link Concept - Context Rot) and the formal loop (link Deep Dive - The Agent Loop).",
+      "key_points": [
+        "Recitation (well-grounded): re-stating the goal or a todo list each turn combats goal drift and lost-in-the-middle over long runs; productized as todo tracking in coding agents (link Concept - Context Rot)",
+        "Think-before-acting (grounded): forcing a short reasoning scratchpad before a tool call improves action selection, echoing why ReAct beats act-only (link Concept - The ReAct Pattern)",
+        "Budget signals (folklore, weakly sourced): telling the agent 'you have N turns left' to induce urgency/wrap-up; sometimes helps, often ignored",
+        "Format lore: XML-tag tool formatting tends to work well with Claude while JSON schemas suit others; partly training-distribution artifact, partly parser-robustness",
+        "Error-as-observation (grounded): returning tool exceptions as readable tool results instead of raising lets the model recover instead of crashing the loop",
+        "tool_choice forcing (grounded): forcing a call breaks a model that narrates an action instead of emitting it",
+        "The reflection tax (grounded caution): over-reflection burns tokens and can entrench errors, matching the self-correction limit (link Concept - Reflection and Self-Correction)",
+        "Persona/persistence framing ('do not stop until done') and end-of-turn hygiene: mixed evidence; some is genuine, some cargo cult -- the note's job is to separate them",
+        "Evidence status: a mix of mechanistically grounded tricks and labeled folklore drawn from Anthropic/Manus/aider/cursor practitioner writing"
+      ],
+      "links": ["Concept - Context Rot", "Concept - The ReAct Pattern", "Concept - Reflection and Self-Correction", "Concept - Context Engineering for Agents", "Deep Dive - The Agent Loop", "Breakdown - Claude Code", "Concept - Chain-of-Thought and Why It Works"]
+    },
+    {
+      "title": "Concept - The Lethal Trifecta for Agents",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "The agent-architecture failure pattern where private-data access, untrusted content, and exfiltration ability combine into data theft, and the defenses. IN: the mechanism, real incidents, and agent-side mitigations. OUT: prompt-injection taxonomy and jailbreak theory (link Concept - Prompt Injection, Concept - Jailbreak Taxonomy), owned by Safety.",
+      "key_points": [
+        "The trifecta (Simon Willison, 2025): an agent that simultaneously (1) can access private/sensitive data, (2) is exposed to untrusted content, and (3) can exfiltrate/communicate externally is a data breach waiting to trigger",
+        "Mechanism: injection embedded in untrusted content (a web page, email, file, or MCP tool description) hijacks the agent's instructions; if the same agent can both read secrets and send data out, injection converts directly to exfiltration (link Concept - Prompt Injection)",
+        "Real incidents: EchoLeak zero-click data exfiltration in Microsoft 365 Copilot (CVE-2025); the GitHub MCP exploit (Invariant Labs, 2025) where a malicious issue makes the agent leak private-repo contents; Slack AI and ChatGPT-connector exfiltration classes",
+        "Defense 1 -- break the trifecta: remove one leg, e.g., no external egress while untrusted content is in context, or no private-data access on untrusted-input paths (link Checklist - Sandboxing an Agent)",
+        "Defense 2 -- architectural isolation: the dual-LLM/quarantine pattern (a privileged planner never sees raw untrusted text) and Google's CaMeL (2025) capability-based control separating a trusted planner from tainted data",
+        "Defense 3 -- human approval for exfil-capable actions and data-provenance/tainting so untrusted-derived content cannot reach egress unchecked",
+        "Ownership boundary: injection/jailbreak taxonomy is Safety's; this note owns the agent-side failure pattern and the practical defenses",
+        "Non-obvious: adding a single 'harmless' tool (e.g., outbound web fetch) can complete the trifecta and turn a safe agent dangerous"
+      ],
+      "links": ["Concept - Prompt Injection", "Concept - Jailbreak Taxonomy", "Checklist - Sandboxing an Agent", "Concept - Model Context Protocol (MCP)", "Gotchas - Agents in Production", "Concept - Tool Use and Function Calling", "Concept - Refusal Mechanics"]
+    }
+  ]
+}

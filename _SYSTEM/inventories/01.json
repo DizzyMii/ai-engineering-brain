@@ -1,0 +1,535 @@
+{
+  "domain": "01 - Foundations",
+  "slug": "foundations",
+  "notes": [
+    {
+      "title": "Concept - Vector Norms and Distances",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The measuring sticks of deep learning: the Lp vector norms, matrix norms, and the distance/similarity metrics built from them. IN: L1/L2/Linf/Lp norms, Frobenius/spectral/nuclear matrix norms, dot products, cosine similarity and how it relates to L2. OUT: the counterintuitive behavior of these distances in high dimensions (link to Concept - The Geometry of High-Dimensional Spaces) and how embedding models are trained to shape them (link to Embedding Models).",
+      "key_points": [
+        "Lp norm ||x||_p = (sum |x_i|^p)^(1/p); L2 (Euclidean) is rotation-invariant, L1 (Manhattan) has corners on the axes which is why an L1 penalty induces exact sparsity while L2 only shrinks, Linf = max|x_i|",
+        "Cosine similarity = (a.b)/(||a|| ||b||); for unit vectors cos = 1 - 0.5||a-b||^2, so cosine and L2 agree only after normalization; cosine deliberately discards magnitude, which is wrong when magnitude carries signal",
+        "Matrix norms: Frobenius ||W||_F = sqrt(sum w_ij^2) (entrywise L2, = sqrt(sum sigma_i^2)); spectral norm = largest singular value = the Lipschitz constant / max gain of the linear map; nuclear norm = sum of singular values = convex surrogate for rank (link Concept - Singular Value Decomposition)",
+        "Where each shows up: L2 in weight decay and gradient clipping (clip by global L2 norm), cosine in retrieval and embedding search, spectral norm in Lipschitz control and spectral normalization for GAN stability, Frobenius in low-rank approximation error (Eckart-Young)",
+        "Numerical care: naive ||x|| = sqrt(sum x_i^2) overflows when any x_i is large; scale by max first (the hypot trick); dot products accumulate rounding error over the reduction (link Gotchas - Numerical Stability)",
+        "Failure modes: cosine on un-normalized embeddings silently ranks by magnitude; L2 distances lose contrast in high dimension (link Concept - The Geometry of High-Dimensional Spaces); train/inference norm mismatch (e.g. forgetting to L2-normalize at query time) quietly wrecks recall"
+      ],
+      "links": [
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - Singular Value Decomposition",
+        "Concept - The Geometry of High-Dimensional Spaces",
+        "Concept - Floating Point for Deep Learning",
+        "Embedding Models",
+        "Hybrid Search and Reciprocal Rank Fusion",
+        "Adam and AdamW"
+      ]
+    },
+    {
+      "title": "Concept - Matrix Multiplication as the Atom of Deep Learning",
+      "type": "concept",
+      "level": "core",
+      "scope": "Why matmul (GEMM) is the single operation every deep net reduces to, and the cost model that follows from it. IN: linear layers/attention/convolution as GEMMs, FLOP counting, arithmetic intensity, memory layout and strides, chain-ordering, accumulation precision. OUT: how GPUs actually tile and execute the GEMM (link to Tensor Cores, Deep Dive - FlashAttention) and the roofline model itself (link to The Roofline Model).",
+      "key_points": [
+        "Every dense layer is Y = XW; a forward pass is a chain of GEMMs; attention is two batched matmuls (QK^T then softmax-weighted V, link Attention Mechanism); convolution is lowered to matmul via im2col so even CNNs are GEMM underneath",
+        "FLOP count: an (m x k)(k x n) matmul is 2mnk FLOPs (mnk multiply-adds); the '6ND' rule of thumb for transformers is ~6 FLOPs per parameter per token (2 forward + 4 backward), the number every compute budget is built on (link Scaling Laws)",
+        "Arithmetic intensity = FLOPs / bytes moved; a big square GEMM is compute-bound and can hit tensor-core peak, but skinny/batch-1 GEMV (decode-time matmuls) is memory-bound and runs at a small fraction of peak (link The Roofline Model, GPU Memory Hierarchy)",
+        "Memory layout matters: row-major vs column-major, strides, and contiguity decide whether a matmul is fast; hardware wants M/N/K as multiples of 8/16/128 to fill tensor cores; a transpose or non-contiguous slice can silently force a copy",
+        "Associativity is a cost lever, not a math change: (AB)C vs A(BC) differ hugely in FLOPs; a low-rank update Wx=(UV)x should be computed U(Vx) to save compute and memory (this is exactly why LoRA is cheap, link LoRA)",
+        "Accumulation precision: a matmul sums k products, and error grows ~ sqrt(k)*eps; this is why tensor cores take bf16/fp16 inputs but accumulate in fp32 (link Concept - Floating Point for Deep Learning, Gotchas - Numerical Stability)",
+        "Failure modes: silent shape/stride bugs that broadcast wrong, non-contiguous tensors quietly 10x slower, mixed-dtype matmuls upcasting unexpectedly"
+      ],
+      "links": [
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Singular Value Decomposition",
+        "Gotchas - Numerical Stability",
+        "The Roofline Model",
+        "Tensor Cores",
+        "GPU Memory Hierarchy",
+        "Deep Dive - FlashAttention",
+        "Attention Mechanism",
+        "Scaling Laws",
+        "LoRA"
+      ]
+    },
+    {
+      "title": "Concept - Entropy and Cross-Entropy",
+      "type": "concept",
+      "level": "core",
+      "scope": "The information-theoretic quantities that define almost every training loss and evaluation metric in language modeling. IN: Shannon entropy, cross-entropy, their coding interpretation, the cross-entropy = entropy + KL identity, perplexity and bits-per-byte. OUT: the softmax operation and the loss layer as implemented in a training step (link to Softmax), and tokenizer construction (link to Byte-Pair Encoding).",
+      "key_points": [
+        "Entropy H(p) = -sum p log p = expected surprisal = the optimal average code length for symbols drawn from p (Shannon source coding); bits if log base 2, nats if natural log; uniform maximizes entropy, a point mass has zero",
+        "Cross-entropy H(p,q) = -sum p log q = the average code length when you encode data from p using a code optimized for q; the master identity H(p,q) = H(p) + D_KL(p||q) >= H(p), so cross-entropy is minimized exactly when q = p (link Concept - KL Divergence)",
+        "LM training minimizes cross-entropy between one-hot targets and the predicted next-token distribution, which is identical to negative log-likelihood / MLE (link Concept - Maximum Likelihood Estimation); the gradient w.r.t. logits is the clean form softmax(z) - onehot (link Softmax)",
+        "Perplexity = exp(cross-entropy in nats) = effective branching factor (a model at 20 ppl is as uncertain as a fair 20-sided die); bits-per-byte and bits-per-character renormalize so results are comparable across tokenizers",
+        "The tokenizer trap: cross-entropy and perplexity are per-token, so a model with a bigger/greedier tokenizer looks better at equal knowledge; only bits-per-byte lets you compare across tokenizers (link Byte-Pair Encoding) - a mistake made in real leaderboard comparisons",
+        "Numerics: always compute cross-entropy from logits via log-softmax (log-sum-exp), never by exponentiating to probabilities then taking log, or log(0) = -inf blows up (link Snippet - The Log-Sum-Exp Trick)",
+        "Label smoothing replaces the one-hot target with (1-eps)*onehot + eps/K: raises the achievable loss floor, prevents logits diverging to infinity, and improves calibration"
+      ],
+      "links": [
+        "Concept - KL Divergence",
+        "Concept - Maximum Likelihood Estimation",
+        "Snippet - The Log-Sum-Exp Trick",
+        "Gotchas - Numerical Stability",
+        "Concept - Floating Point for Deep Learning",
+        "Softmax",
+        "Byte-Pair Encoding",
+        "Scaling Laws"
+      ]
+    },
+    {
+      "title": "Concept - KL Divergence",
+      "type": "concept",
+      "level": "core",
+      "scope": "The asymmetric 'distance' between probability distributions that underpins RLHF penalties, variational objectives, and distillation. IN: the definition and Gibbs inequality, forward vs reverse KL and mode-covering/seeking behavior, relation to cross-entropy and MLE, low-variance estimators. OUT: the exact KL-control engineering inside PPO (link to RLHF End to End) and the DPO objective derivation (link to Direct Preference Optimization (DPO)).",
+      "key_points": [
+        "D_KL(p||q) = sum p log(p/q) >= 0 by Gibbs inequality, zero iff p = q; it is NOT symmetric, NOT a metric (no triangle inequality), and can be infinite when q puts zero mass where p does not",
+        "Asymmetry drives real behavior: forward KL D(p||q) is mode-covering / zero-avoiding (it is what MLE minimizes, so the model must cover all data modes), while reverse KL D(q||p) is mode-seeking / zero-forcing (used in variational inference and RLHF, and the reason RLHF policies can collapse onto a narrow mode)",
+        "Cross-entropy = entropy + KL, so minimizing cross-entropy loss = minimizing forward KL from data to model = MLE (link Concept - Entropy and Cross-Entropy, Concept - Maximum Likelihood Estimation)",
+        "Where it shows up: the RLHF KL penalty keeps the policy near the reference model (link RLHF End to End, Reward Models); DPO is an implicitly KL-constrained objective solved in closed form (link Direct Preference Optimization (DPO)); the ELBO/VAE and diffusion variational bound are KL terms (link Diffusion Models); distillation matches soft targets by KL (link Knowledge Distillation)",
+        "Estimating KL from samples is subtle: the naive log-ratio estimator is unbiased but high-variance and can go negative on a batch; Schulman's k3 estimator (r - 1 - log r, where r = q/p) is unbiased, always non-negative, and much lower variance - it is what PPO implementations actually log",
+        "Numerics: q -> 0 makes the ratio explode; clamp or mix with a floor; reverse KL's zero-forcing is a feature (sharpen) or a bug (mode collapse) depending on the task",
+        "Non-obvious: the 'KL' number reported during RLHF is an estimate with its own bias/variance, so a rising reported KL can be estimator noise rather than real policy drift"
+      ],
+      "links": [
+        "Concept - Entropy and Cross-Entropy",
+        "Concept - Maximum Likelihood Estimation",
+        "Concept - Convexity and the Loss Landscape",
+        "RLHF End to End",
+        "Direct Preference Optimization (DPO)",
+        "Reward Models",
+        "Knowledge Distillation",
+        "Diffusion Models"
+      ]
+    },
+    {
+      "title": "Concept - Floating Point for Deep Learning",
+      "type": "concept",
+      "level": "core",
+      "scope": "How real numbers are actually represented on the hardware that trains and serves models, and why the format choice governs training stability. IN: IEEE-754 sign/exponent/mantissa layout, the range-vs-precision tradeoff, fp32/tf32/fp16/bf16/fp8 as used in DL, machine epsilon, why bf16 won for training. OUT: the format lookup table (link to Reference - Floating Point Formats), the subnormal/edge arcana (link to Concept - Subnormal Numbers and Gradual Underflow), and the practical mixed-precision recipe (link to Mixed Precision Training).",
+      "key_points": [
+        "Layout: value = (-1)^sign * 1.mantissa * 2^(exponent-bias); the exponent bits set dynamic range, the mantissa bits set relative precision (machine epsilon ~ 2^-mantissabits); fp32 = 1/8/23, fp16 = 1/5/10, bf16 = 1/8/7",
+        "The core tradeoff: bf16 keeps fp32's 8-bit exponent (so the same ~1e38 range, activations rarely overflow/underflow) but has only 7 mantissa bits (~2-3 decimal digits); fp16 has more precision (10 mantissa bits) but a tiny range (max 65504) that forces loss scaling (link Lore - Loss Scaling and the fp16 Underflow Crisis)",
+        "Precision is relative, not absolute: the gap between representable numbers scales with magnitude, so adding a small number to a large one loses the small one entirely (swamping) - the reason running sums and variances need care (link Gotchas - Numerical Stability)",
+        "The DL format zoo: tf32 (19 bits, 8 exp / 10 mantissa) on tensor cores; fp8 e4m3 (more precision, for weights/activations) vs e5m2 (more range, for gradients) with per-tensor scaling; the 2024-2026 push to fp4/mxfp block formats (as of 2026)",
+        "Accumulation stays high precision: tensor cores multiply in bf16/fp16 but accumulate the sum in fp32, because summing many low-precision products would lose the tail (link Concept - Matrix Multiplication as the Atom of Deep Learning, Tensor Cores)",
+        "Failure modes: overflow -> inf, underflow -> 0, precision loss in reductions/softmax/layernorm (keep these in fp32), and NaN poisoning; detect with finite-value asserts and anomaly mode",
+        "Non-obvious: bf16 was designed so fp32 -> bf16 is just truncating the low 16 bits, making conversion and mixed storage trivial (link Breakdown - bfloat16)"
+      ],
+      "links": [
+        "Reference - Floating Point Formats",
+        "Breakdown - bfloat16",
+        "Concept - Subnormal Numbers and Gradual Underflow",
+        "Gotchas - Numerical Stability",
+        "Lore - Loss Scaling and the fp16 Underflow Crisis",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Mixed Precision Training",
+        "Tensor Cores",
+        "Post-Training Quantization Formats"
+      ]
+    },
+    {
+      "title": "Concept - Maximum Likelihood Estimation",
+      "type": "concept",
+      "level": "core",
+      "scope": "The estimation principle that silently defines nearly every loss function in deep learning. IN: the MLE principle and log-likelihood, why every standard loss is an NLL under some noise model, the MLE = cross-entropy = forward-KL identity, MLE's statistical properties, and MAP vs MLE. OUT: the specific pretraining objective and packing engineering (link to Anatomy of a Pretraining Run) and full Bayesian inference beyond MAP.",
+      "key_points": [
+        "MLE chooses theta maximizing the likelihood product prod p(x_i|theta), equivalently minimizing the negative log-likelihood -sum log p(x_i|theta); the log turns products into sums (numerically and gradient-friendly)",
+        "Every standard loss is an NLL under an assumed noise model: MSE = NLL of a fixed-variance Gaussian, cross-entropy = NLL of a categorical, L1 = NLL of a Laplace, binary cross-entropy = NLL of a Bernoulli - the choice of loss silently encodes a distributional assumption about your data",
+        "MLE = minimizing forward KL(data || model) = cross-entropy minimization, which is why next-token pretraining is 'just' MLE (link Concept - Entropy and Cross-Entropy, Concept - KL Divergence, Anatomy of a Pretraining Run)",
+        "Properties: MLE is consistent (converges to true theta as N grows), asymptotically efficient (attains the Cramer-Rao lower bound), and asymptotically normal with covariance = inverse Fisher information; Fisher information is the expected curvature of the log-likelihood = expected Hessian (link Concept - The Hessian Spectrum in Deep Learning)",
+        "MAP = MLE + a log-prior term: an L2 penalty is a Gaussian prior, an L1 penalty is a Laplace prior, so weight decay is literally MAP estimation under a Gaussian prior (link Adam and AdamW)",
+        "Failure modes: MLE overfits / memorizes with finite data, is not calibrated out of the box, and diverges for linearly separable data (logits run to infinity) - remedied by priors, early stopping, and label smoothing",
+        "Non-obvious: the plain MLE of variance is biased (divides by N, not N-1), and the model 'believes' its assumed noise model even when it is wrong, which is why an L2 loss on heavy-tailed targets underperforms"
+      ],
+      "links": [
+        "Concept - Entropy and Cross-Entropy",
+        "Concept - KL Divergence",
+        "Concept - The Hessian Spectrum in Deep Learning",
+        "Concept - The Condition Number",
+        "Anatomy of a Pretraining Run",
+        "Softmax",
+        "Adam and AdamW",
+        "Gradient Boosting",
+        "Diffusion Models"
+      ]
+    },
+    {
+      "title": "Concept - Hypothesis Testing and p-values",
+      "type": "concept",
+      "level": "core",
+      "scope": "The statistical machinery for deciding whether an observed difference is real or noise, and the interpretation traps that make it easy to fool yourself. IN: null-hypothesis significance testing, what a p-value does and does not mean, type I/II error and power, confidence intervals, the common tests (paired t, bootstrap, permutation), multiple comparisons. OUT: applying this specifically to model evaluation and eval-harness design (link to Statistical Rigor in Model Evaluation), and causal inference (owned by 17).",
+      "key_points": [
+        "A p-value = P(a test statistic this extreme or more | the null is true). It is NOT the probability the null is true, NOT the effect size, and NOT the probability the result replicates - these three misreadings cause most bad conclusions",
+        "The framework: a test statistic under a null distribution, an alpha (type I / false-positive rate) fixed in advance, type II error beta (a miss), and power = 1 - beta; you trade these against sample size and effect size",
+        "Power/sample-size: required N grows like sigma^2 / delta^2 (variance over squared effect size), so underpowered experiments both miss real effects and, when they do hit significance, overestimate the effect (the winner's curse / Type M error)",
+        "Confidence intervals: the (1-alpha) CI is exactly the set of null values you would not reject; its correct reading is coverage over repeated experiments, not '95% probability the true value is in this interval'",
+        "Choosing a test: paired t-test or Wilcoxon when the same items are scored by both systems (pairing cancels item-difficulty variance and is dramatically more powerful), McNemar for paired win/loss, bootstrap CI for arbitrary metrics, permutation test for an exact null under exchangeability",
+        "Multiple comparisons inflate false positives: testing 20 metrics at alpha=0.05 expects ~1 spurious hit; correct with Bonferroni (conservative) or Benjamini-Hochberg FDR; beware the garden of forking paths / p-hacking from unregistered analysis choices",
+        "Non-obvious: statistical significance is not practical significance - with a large enough N every trivial difference is 'significant', so always report an effect size and CI, not just a p-value (link Playbook - Running a Statistically Valid Experiment)"
+      ],
+      "links": [
+        "Playbook - Running a Statistically Valid Experiment",
+        "Concept - Maximum Likelihood Estimation",
+        "Statistical Rigor in Model Evaluation",
+        "Designing an Eval Harness",
+        "LLM-as-Judge",
+        "Benchmark Contamination",
+        "The Emergent Abilities Debate"
+      ]
+    },
+    {
+      "title": "Reference - Floating Point Formats",
+      "type": "reference",
+      "level": "core",
+      "scope": "A mid-task lookup table for every floating-point format used in modern DL: bit layout, dynamic range, precision limits, and memory cost. IN: fp64/fp32/tf32/fp16/bf16/fp8(e4m3,e5m2)/fp4/mxfp comparison rows with exact constants. OUT: the mechanism and why-it-matters narrative (link to Concept - Floating Point for Deep Learning) and integer quantization formats INT8/INT4 (link to Post-Training Quantization Formats).",
+      "key_points": [
+        "Master table, one row per format with columns: sign/exponent/mantissa bits, exponent bias, max finite value, min normal, min subnormal, machine epsilon (2^-mantissa), approx decimal digits, bytes per value",
+        "Anchor constants to get right: fp32 max ~3.4e38, eps ~1.19e-7, ~7.2 digits; fp16 max = 65504, min normal ~6.1e-5, min subnormal ~6e-8, eps ~9.8e-4, ~3.3 digits; bf16 max ~3.4e38, eps ~7.8e-3, ~2-3 digits; fp8 e4m3 max = 448, fp8 e5m2 max = 57344",
+        "Exact-integer range (where consecutive integers are all representable): fp16 up to 2048, bf16 up to 256, fp32 up to 2^24 = 16,777,216 - the reason large index/count tensors need int or fp32",
+        "Rounding: round-to-nearest-even is the IEEE default; note stochastic rounding as the low-precision-training alternative that removes systematic bias in weight updates",
+        "Scaling metadata: typical loss-scale ranges for fp16/fp8, and per-tensor vs per-block scaling (mxfp uses a shared scale per block of 32 elements) - the extra bytes that make low precision usable",
+        "Memory cost per value: fp32 = 4 bytes, bf16/fp16 = 2, fp8 = 1, fp4 = 0.5; cross-reference the parameter/optimizer/activation accounting (link Memory Math for Transformers)",
+        "Date-stamp the low-precision rows (as of 2026): fp8 mainstream on Hopper, fp4/mxfp arriving on Blackwell-class hardware"
+      ],
+      "links": [
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Subnormal Numbers and Gradual Underflow",
+        "Memory Math for Transformers",
+        "Post-Training Quantization Formats",
+        "Tensor Cores",
+        "Mixed Precision Training"
+      ]
+    },
+    {
+      "title": "Snippet - The Log-Sum-Exp Trick",
+      "type": "snippet",
+      "level": "core",
+      "scope": "Runnable code for the single most important numerical-stability technique in ML: computing log-sum-exp, log-softmax, and cross-entropy-from-logits without overflow. IN: the max-subtraction identity, why it is exact, and its use in softmax/cross-entropy/logistic loss. OUT: the softmax operation's role in attention and output layers (link to Softmax) and sampling from logits (link to Sampling and Decoding Parameters).",
+      "key_points": [
+        "The problem to demonstrate in code: exp(x) overflows to inf around x ~ 88 in fp32 and x ~ 11 in fp16, so a naive softmax or logsumexp on real logits returns inf/NaN; underflow to 0 then feeds log(0) = -inf",
+        "The identity: LSE(x) = m + log sum_i exp(x_i - m) with m = max_i x_i; it is algebraically exact (factor e^m out of the sum) and keeps the largest term at exp(0) = 1 with all others <= 1, so nothing overflows",
+        "Derived: log_softmax(x)_i = x_i - LSE(x), and cross-entropy from logits = -(x_target - LSE(x)); the code should show you never form probabilities and then take their log",
+        "Show a side-by-side: naive vs stable on a vector containing a large logit (e.g. 1000), demonstrating the naive version returns NaN while the stable version matches torch.logsumexp / F.log_softmax to machine precision",
+        "Extend to softplus(x) = log(1+exp(x)) via the branchless form max(x,0) + log1p(exp(-|x|)) for logistic loss; note the same log-space discipline powers the HMM forward algorithm and mixture models",
+        "Why written this way: subtract the max (not the mean) so the shift is guaranteed to prevent overflow, use log1p/expm1 for the small-argument regimes, keep everything in log-space end to end, and accumulate the sum in fp32 even under bf16"
+      ],
+      "links": [
+        "Concept - Entropy and Cross-Entropy",
+        "Gotchas - Numerical Stability",
+        "Concept - Floating Point for Deep Learning",
+        "Softmax",
+        "Sampling and Decoding Parameters",
+        "Attention Mechanism"
+      ]
+    },
+    {
+      "title": "Concept - Singular Value Decomposition",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The decomposition that explains low-rank structure, PCA, spectral norms, and why LoRA works. IN: the SVD A = U Sigma V^T, its geometric meaning, Eckart-Young low-rank approximation, relation to eigendecomposition/PCA, and DL applications. OUT: the practical choose-a-factorization decision (link to Decision - Choosing a Matrix Factorization) and ANN index quantization internals (link to HNSW).",
+      "key_points": [
+        "A = U Sigma V^T with U, V orthonormal and Sigma diagonal of singular values sigma_1 >= sigma_2 >= ... >= 0; columns of V are input principal directions, columns of U are output directions, sigmas are the gains; every matrix has an SVD (unlike eigendecomposition, which needs squareness/diagonalizability)",
+        "Geometry: any linear map factors as rotation -> axis-aligned scaling -> rotation; the singular values are the semi-axis lengths of the ellipsoid you get by mapping the unit sphere",
+        "Eckart-Young: the best rank-k approximation in both Frobenius and spectral norm is truncating to the top-k singular triplets; the error equals sigma_(k+1) in spectral norm and sqrt(sum_(i>k) sigma_i^2) in Frobenius - this theorem is the foundation of all low-rank compression",
+        "Relations: sigma_i(A) = sqrt(lambda_i(A^T A)); PCA is the SVD of centered data (or eig of the covariance); spectral norm = sigma_max, nuclear norm = sum sigma_i (convex surrogate for rank), condition number = sigma_max/sigma_min (link Concept - The Condition Number)",
+        "DL uses: LoRA's update Delta_W = BA is a rank-r matrix, and SVD-based initialization (PiSSA) seeds it from the top singular directions (link LoRA); weight matrices develop heavy-tailed singular spectra during training; whitening, spectral normalization, and activation low-rank structure all read off the SVD",
+        "Compute: full SVD is O(mn min(m,n)); randomized SVD (Halko-Martinsson-Tropp) gets the top-k in O(mnk) and is what you use at scale; numerical rank = count of sigma_i above a tolerance ~ sigma_max * eps",
+        "Failure modes: near-equal singular values give ill-defined (unstable) singular subspaces; the sign/rotation ambiguity of U,V columns; forgetting to center before PCA"
+      ],
+      "links": [
+        "Concept - The Condition Number",
+        "Decision - Choosing a Matrix Factorization",
+        "Concept - Vector Norms and Distances",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - The Geometry of High-Dimensional Spaces",
+        "LoRA",
+        "Embedding Models",
+        "HNSW",
+        "Post-Training Quantization Formats"
+      ]
+    },
+    {
+      "title": "Concept - The Condition Number",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The one number that governs both how much numerical error a linear problem amplifies and how fast gradient descent converges on it. IN: kappa = sigma_max/sigma_min, its dual role in numerical stability and optimization convergence, sources of ill-conditioning in DL, and preconditioning. OUT: the empirical Hessian spectrum of real nets (link to Concept - The Hessian Spectrum in Deep Learning) and specific optimizer engineering (link to Adam and AdamW).",
+      "key_points": [
+        "kappa(A) = sigma_max/sigma_min = ||A|| ||A^-1||; it bounds worst-case relative error amplification when solving Ax=b (relative error in x <= kappa * relative error in inputs), so log10(kappa) is roughly the number of decimal digits you lose",
+        "Numerical consequence: a near-singular matrix (large kappa) makes inversion and solves unstable; the rule of thumb is that kappa ~ 1/eps means the answer is noise (fp32 dies around kappa ~ 1e7), which is why you never explicitly invert - you solve via a factorization (link Decision - Choosing a Matrix Factorization)",
+        "Optimization consequence: for a quadratic loss with Hessian H, gradient descent converges at rate ((kappa-1)/(kappa+1))^t where kappa = kappa(H); an ill-conditioned loss makes GD zig-zag across a narrow valley; momentum improves the rate to ~sqrt(kappa) and Newton's method makes kappa effectively 1 (link Concept - Convexity and the Loss Landscape)",
+        "This is why we normalize and precondition: LayerNorm/RMSNorm, Adam's per-coordinate second-moment scaling (a diagonal preconditioner), whitening, and muP all reduce the effective condition number of the optimization (link Adam and AdamW, RMSNorm and LayerNorm)",
+        "Sources of ill-conditioning in nets: correlated inputs/features, parameters living on wildly different scales, deep function compositions, and the exploding/vanishing gradient regime (link Backpropagation)",
+        "Estimation without a full SVD: power iteration for sigma_max, inverse/Lanczos iteration for sigma_min, so you can monitor conditioning cheaply during training",
+        "Non-obvious: the 'condition number of the loss' (the Hessian's kappa) predicts trainability better than raw depth - many training tricks are really conditioning fixes in disguise"
+      ],
+      "links": [
+        "Concept - Singular Value Decomposition",
+        "Concept - Convexity and the Loss Landscape",
+        "Concept - The Hessian Spectrum in Deep Learning",
+        "Concept - Floating Point for Deep Learning",
+        "Decision - Choosing a Matrix Factorization",
+        "Adam and AdamW",
+        "RMSNorm and LayerNorm",
+        "Backpropagation",
+        "Scaling Laws"
+      ]
+    },
+    {
+      "title": "Concept - Convexity and the Loss Landscape",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Why deep learning optimizes a non-convex loss yet reliably finds good solutions - the geometry of critical points that makes SGD work. IN: convexity and its optimization guarantees, why DL losses are non-convex, the dominance of saddle points over local minima in high dimension, and why SGD noise helps. OUT: the empirical Hessian eigenspectrum (link to Concept - The Hessian Spectrum in Deep Learning) and the training-dynamics phenomena of grokking/double descent (owned by 18).",
+      "key_points": [
+        "A convex function satisfies f(lambda x + (1-lambda) y) <= lambda f(x) + (1-lambda) f(y); convexity guarantees every local minimum is global and there are no saddle traps; strong convexity additionally gives a unique minimum and linear convergence tied to the condition number (link Concept - The Condition Number)",
+        "DL losses are non-convex (nonlinear layer compositions, plus permutation symmetry gives exponentially many equivalent minima) yet are reliably trainable - this is the central empirical surprise the note must explain",
+        "High-dimensional critical-point geometry: at a random critical point the probability that all Hessian eigenvalues share a sign vanishes, so saddle points exponentially outnumber true local minima (Dauphin et al. 2014; Bray-Dean spin-glass theory); the things that slow you down are saddles, which noise escapes, not bad minima",
+        "SGD's gradient noise helps escape saddle plateaus and biases the solution toward flatter minima (implicit regularization); the flat-vs-sharp-minima generalization link (Hochreiter-Schmidhuber; Keskar et al. large-batch finds sharp minima) is real but contested",
+        "Loss barriers and mode connectivity: distinct minima are joined by near-constant-loss curves (Garipov et al.; Draxler et al.), and after accounting for permutation symmetry they are often linearly connected (Git Re-Basin, Entezari et al.) - which is what makes model merging possible (link Knowledge Distillation)",
+        "Practical upshot: stop worrying about local minima, start worrying about conditioning, saddle-induced plateaus (loss flat then suddenly drops), and large-batch sharpness; warmup and LR schedules manage this (link The Training Loop)",
+        "Failure modes: long saddle plateaus mistaken for convergence, sharp minima from oversized batches, symmetry-induced degeneracies that stall training"
+      ],
+      "links": [
+        "Concept - The Condition Number",
+        "Concept - The Hessian Spectrum in Deep Learning",
+        "Concept - Maximum Likelihood Estimation",
+        "Backpropagation",
+        "Adam and AdamW",
+        "The Training Loop",
+        "Grokking",
+        "Double Descent",
+        "Knowledge Distillation"
+      ]
+    },
+    {
+      "title": "Gotchas - Numerical Stability",
+      "type": "gotchas",
+      "level": "advanced",
+      "scope": "The aggregated numerical failure catalog for deep learning: the ways floating-point arithmetic silently corrupts a computation and how to catch each early. IN: overflow/underflow in exp and softmax, catastrophic cancellation, unstable variance/normalization, log(0), division by near-zero, accumulation error, NaN propagation. OUT: the runnable stable-softmax fix (link to Snippet - The Log-Sum-Exp Trick) and format-specific constants (link to Reference - Floating Point Formats).",
+      "key_points": [
+        "Softmax/exp overflow: exp of a large logit overflows to inf, giving a NaN loss a few steps in; Fix: subtract the row max before exponentiating (link Snippet - The Log-Sum-Exp Trick); Detection: assert finite logits and watch for the first NaN via anomaly mode",
+        "Catastrophic cancellation in variance: the one-pass formula Var = E[x^2] - (E[x])^2 subtracts two nearly equal large numbers and can return a negative variance or lose all precision when the mean dominates; Fix: Welford's online algorithm or a two-pass mean-then-variance; Detection: guard against negative variance before sqrt",
+        "log(0) and log of negatives: cross-entropy on a clamped-to-zero probability, or sqrt of a slightly-negative variance in a norm layer, produces -inf/NaN; Fix: work in log-space and add an epsilon inside the sqrt; Detection: check inputs to log/sqrt",
+        "Division by near-zero in normalization: 1/sqrt(var + eps) is sensitive to whether eps is inside or outside the sqrt; too small an eps in LayerNorm/RMSNorm blows up on low-variance activations; Fix/Detection: standard eps ~1e-5 to 1e-6, and monitor activation norms (link RMSNorm and LayerNorm)",
+        "fp16 overflow/underflow: activations above 65504 overflow and gradients below ~6e-8 flush to zero and stop learning; Fix: loss scaling or bf16 (link Lore - Loss Scaling and the fp16 Underflow Crisis, Mixed Precision Training); Detection: track the gradient-inf counter that dynamic loss scaling maintains",
+        "Summation error and non-associativity: floating-point addition is not associative, so large reductions lose precision and vary with order; Fix: accumulate in fp32, use pairwise/tree or Kahan summation; Detection: compare against a high-precision reference (link Lore - The Nondeterminism of Floating-Point Reductions)",
+        "NaN/Inf propagation: a single NaN poisons every downstream value and every gradient; Fix/Detection: torch.autograd.set_detect_anomaly, finite-value hooks, and bisecting the forward pass to find the producing op",
+        "Mixed-precision reductions: means, sums, softmax, and the loss must run in fp32 even in a bf16 model, or the reduction tail is lost"
+      ],
+      "links": [
+        "Snippet - The Log-Sum-Exp Trick",
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Subnormal Numbers and Gradual Underflow",
+        "Lore - The Nondeterminism of Floating-Point Reductions",
+        "Lore - Loss Scaling and the fp16 Underflow Crisis",
+        "RMSNorm and LayerNorm",
+        "Mixed Precision Training",
+        "Softmax",
+        "Backpropagation"
+      ]
+    },
+    {
+      "title": "Breakdown - bfloat16",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "The 16-bit float format that quietly made large-model training practical, reverse-engineered as a design artifact. IN: bfloat16's origin at Google Brain, the 8-exponent/7-mantissa decision, why it beat fp16 for training, the truncation-conversion property, and its hardware lineage. OUT: the general floating-point mechanism (link to Concept - Floating Point for Deep Learning) and the practical mixed-precision recipe (link to Mixed Precision Training).",
+      "key_points": [
+        "Identity card: 16-bit, 1 sign / 8 exponent / 7 mantissa, bias 127; same exponent range as fp32 (max ~3.4e38) but ~3 fewer mantissa bits than fp16, giving only ~2-3 decimal digits of precision - a deliberately lopsided format",
+        "Origin: designed at Google Brain and deployed on TPUs (~2018); the name is 'brain floating point'; the motivation was fp16's constant overflow/underflow pain in training, which forced fragile loss-scaling tuning (link Lore - Loss Scaling and the fp16 Underflow Crisis)",
+        "The clever part - range over precision: DL training tolerates coarse precision (gradients are already noisy from SGD) but not clipped range, because activations and gradients span many orders of magnitude; bf16 spends its bit budget on the exponent to keep that range",
+        "The clever part - truncation conversion: fp32 -> bf16 is just dropping the low 16 mantissa bits (optionally round-to-nearest-even), so bf16 is literally a prefix of fp32; conversion is nearly free and mixed fp32/bf16 storage is simple hardware",
+        "Accumulation still fp32: bf16 feeds the multiplier but the MAC accumulates in fp32 (tensor cores / TPU MXU), and master weights are often kept in fp32 or updated with stochastic rounding to avoid swamping small updates (link Concept - Matrix Multiplication as the Atom of Deep Learning, Tensor Cores)",
+        "What it got wrong / what's dated: 7 mantissa bits are sometimes too coarse for small weight updates (needs stochastic rounding or fp32 master weights), and it spawned the fp8/fp4 lineage that reintroduces per-tensor scaling at even lower precision (link Reference - Floating Point Formats, Post-Training Quantization Formats)",
+        "What to steal: match the numeric format to the error tolerance of the specific computation rather than to a general-purpose ideal - the design lesson that recurs in every quantization scheme since"
+      ],
+      "links": [
+        "Concept - Floating Point for Deep Learning",
+        "Reference - Floating Point Formats",
+        "Concept - Subnormal Numbers and Gradual Underflow",
+        "Lore - Loss Scaling and the fp16 Underflow Crisis",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Mixed Precision Training",
+        "Tensor Cores",
+        "Post-Training Quantization Formats",
+        "GPU Memory Hierarchy",
+        "Model Genealogy"
+      ]
+    },
+    {
+      "title": "Decision - Choosing a Matrix Factorization",
+      "type": "decision",
+      "level": "advanced",
+      "scope": "How to pick among LU, Cholesky, QR, eigendecomposition, and SVD for a numerical task, trading cost against stability. IN: the decision logic by problem type (solve, least-squares, sampling, orthogonalization, low-rank, PCA) with FLOP costs and stability notes. OUT: the internals of SVD itself (link to Concept - Singular Value Decomposition) and condition-number theory (link to Concept - The Condition Number).",
+      "key_points": [
+        "Decision flow: symmetric positive-definite matrix? -> Cholesky (twice as fast as LU). General square solve? -> LU with partial pivoting. Least-squares or orthogonalization? -> QR. Eigenvalues/PCA on a symmetric matrix? -> eigendecomposition. Rank, rectangular, or need maximum stability? -> SVD",
+        "Cost table with leading constants: Cholesky ~n^3/3, LU ~2n^3/3, QR (Householder) ~2n^3, eig/SVD ~O(n^3) with a larger constant plus iteration; randomized/truncated SVD ~O(mnk) when you only need the top-k",
+        "Stability: forming the normal equations A^T A squares the condition number (kappa^2) and can destroy accuracy, so solve least-squares via QR or SVD, never via A^T A; Cholesky silently fails or is unstable if the matrix is not clearly SPD",
+        "ML/DL uses: Cholesky for multivariate Gaussian sampling, Gaussian processes, and natural-gradient/K-FAC solves; QR for orthogonalization inside Muon/Shampoo and Gram-Schmidt; SVD for LoRA initialization, whitening, spectral norm, and PCA; eig for PCA via covariance, spectral clustering, and PageRank",
+        "The details that flip the decision: if positive-definiteness is uncertain use QR/SVD not Cholesky; if you only need a few directions use randomized/truncated methods; if you must backprop through the decomposition, note that SVD/eig have gradient singularities at repeated/degenerate values (link Gotchas - Numerical Stability, Concept - The Condition Number)",
+        "The universal rule: never explicitly invert a matrix - factor once and solve, which is both faster and far more numerically stable"
+      ],
+      "links": [
+        "Concept - Singular Value Decomposition",
+        "Concept - The Condition Number",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Gotchas - Numerical Stability",
+        "LoRA",
+        "Adam and AdamW",
+        "Gradient Boosting",
+        "Embedding Models"
+      ]
+    },
+    {
+      "title": "Playbook - Running a Statistically Valid Experiment",
+      "type": "playbook",
+      "level": "advanced",
+      "scope": "The end-to-end procedure for a sound experiment or A/B comparison, from hypothesis to reported effect size, that resists p-hacking and underpowered noise. IN: pre-registration, power/sample-size, test selection, peeking guards, multiplicity correction, effect-size + CI reporting. OUT: model-eval-specific harness statistics and benchmark design (link to Statistical Rigor in Model Evaluation, Designing an Eval Harness) and causal/observational inference (owned by 17).",
+      "key_points": [
+        "Step 1 - pre-register: write down the hypothesis, the primary metric, and the decision threshold before looking at any data; this is the single strongest guard against the garden of forking paths (link Concept - Hypothesis Testing and p-values)",
+        "Step 2 - power analysis: estimate the smallest effect worth detecting and the metric's variance, then compute N for ~0.8 power at your alpha via N ~ (z_alpha + z_beta)^2 * sigma^2 / delta^2; deviation: if N is infeasible, reduce variance by pairing/blocking (score both systems on the identical items)",
+        "Step 3 - choose the test: paired t or Wilcoxon for paired continuous scores, McNemar for paired win/loss, bootstrap CI for arbitrary or non-normal metrics, permutation test for an exact null; check the assumption each test makes and expect to justify it",
+        "Step 4 - run without peeking: naive repeated interim looks inflate the false-positive rate far above alpha, so either fix N in advance or use alpha-spending / always-valid sequential CIs; deviation 'it looked significant so we stopped' invalidates the p-value",
+        "Step 5 - correct for multiplicity: when testing many metrics or models, apply Bonferroni (strict) or Benjamini-Hochberg FDR; deviation: an uncorrected sweep of 20 metrics expects ~1 spurious 'win'",
+        "Step 6 - report properly: give the effect size with a confidence interval, the N, the test, and its assumptions; distinguish statistical from practical significance",
+        "Verification: reproduce with a different seed/split, sanity-check CI width against your N, and include a negative-control comparison that should show no effect",
+        "When it goes wrong: significant but tiny effect => overpowered/trivial; wide CI spanning zero => inconclusive, not 'no difference'; unstable result across seeds => you measured noise"
+      ],
+      "links": [
+        "Concept - Hypothesis Testing and p-values",
+        "Statistical Rigor in Model Evaluation",
+        "Designing an Eval Harness",
+        "LLM-as-Judge",
+        "Benchmark Contamination",
+        "Deep Learning vs Gradient Boosting for Tabular Data"
+      ]
+    },
+    {
+      "title": "Concept - The Geometry of High-Dimensional Spaces",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The counterintuitive geometry that governs embeddings, retrieval, and quantization once dimension is large. IN: concentration of measure, distance concentration, near-orthogonality of random vectors, the volume-in-the-shell effect, Johnson-Lindenstrauss, and the practical consequences. OUT: how embedding models are trained to fight these effects (link to Embedding Models) and ANN index mechanics (link to HNSW).",
+      "key_points": [
+        "Concentration of measure: in d dimensions almost all the mass of a standard Gaussian sits in a thin shell at radius ~sqrt(d) (the 'empty middle'), and two random vectors have dot product ~N(0, 1/d), so they are nearly orthogonal and nearly equidistant - distance contrast between nearest and farthest neighbor vanishes (Beyer et al., 'When Is Nearest Neighbor Meaningful?')",
+        "The curse side: because L2 distances concentrate, raw kNN loses discriminative power and 'hubness' emerges (a few points become everyone's neighbor); this is why normalized cosine often beats raw L2 for embedding search (link Concept - Vector Norms and Distances, Embedding Models)",
+        "The blessing side - Johnson-Lindenstrauss: a random linear projection to O(log n / eps^2) dimensions preserves all pairwise distances within (1 +/- eps); this underlies LSH, random features, sketching, and cheap dimensionality reduction (link Deduplication at Scale)",
+        "Exponential capacity: a d-dimensional space holds ~exp(cd) almost-orthogonal directions, so a model can pack far more features than it has neurons - the geometric basis of superposition and of why matryoshka embeddings can truncate dimensions gracefully (link Superposition)",
+        "Volume concentrates: the unit ball's volume -> 0 as d grows and mass flees to the boundary shell, so uniform sampling and grid methods break; intrinsic dimension of real embeddings is usually far below the nominal dimension",
+        "Practical consequences: product quantization and graph indexes exploit this low intrinsic structure (link HNSW, Post-Training Quantization Formats); whitening/isotropy of an embedding space materially changes retrieval quality",
+        "Non-obvious: 'similarity' in high dimension is usually dominated by a handful of directions, so anisotropy and a few dominant components can quietly determine your nearest neighbors"
+      ],
+      "links": [
+        "Concept - Vector Norms and Distances",
+        "Concept - Singular Value Decomposition",
+        "Embedding Models",
+        "HNSW",
+        "Hybrid Search and Reciprocal Rank Fusion",
+        "Superposition",
+        "Deduplication at Scale",
+        "CLIP and Contrastive Vision-Language Training"
+      ]
+    },
+    {
+      "title": "Concept - The Hessian Spectrum in Deep Learning",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "What the second-derivative structure of a neural net loss actually looks like, and what its eigenspectrum reveals about training. IN: the loss Hessian as an object, the bulk-plus-outliers empirical spectrum, sharpness and edge-of-stability, and how to compute spectral quantities without materializing the Hessian. OUT: the classical convexity/saddle theory (link to Concept - Convexity and the Loss Landscape) and second-order optimizer engineering (owned by 04).",
+      "key_points": [
+        "The Hessian H = grad^2 L is symmetric; its eigenvalues are curvatures, and its condition number lambda_max/lambda_min governs gradient-descent speed (link Concept - The Condition Number); it is mostly PSD near a minimum but has negative eigenvalues at saddles (link Concept - Convexity and the Loss Landscape)",
+        "Empirical spectrum (Sagun et al. 2017; Papyan 2018; Ghorbani et al. 2019): a dense bulk piled up near zero (a huge nearly-flat/degenerate subspace from overparameterization) plus a few large positive outliers, and the number of outliers tends to match the number of classes / the logit structure",
+        "Sharpness lambda_max and generalization: large-batch training finds sharper minima (Keskar et al.), and Sharpness-Aware Minimization (SAM) explicitly minimizes lambda_max; the flat-minima-generalize-better claim is influential but contested (link Double Descent, Grokking)",
+        "Edge of Stability (Cohen et al. 2021): full-batch GD with step eta drives lambda_max up to ~2/eta ('progressive sharpening') and then hovers there in a mild instability, violating the classical descent-lemma assumption that curvature stays below 2/eta",
+        "Computing without forming H (d^2 is impossibly large): Hessian-vector products via double backprop (Pearlmutter's trick), Lanczos for top eigenvalues, Hutchinson's estimator for the trace, and Gauss-Newton/K-FAC approximations used by second-order methods (link Backpropagation, Adam and AdamW)",
+        "Near a minimum the Fisher information ~ Gauss-Newton ~ Hessian (link Concept - Maximum Likelihood Estimation), which is why natural gradient, Shampoo, and Muon precondition by curvature and why muP transfers hyperparameters (link Scaling Laws)",
+        "Non-obvious: the near-zero bulk means most parameter directions barely move the loss, connecting directly to lottery tickets, prunability, and why a low-rank LoRA update is often sufficient (link LoRA)"
+      ],
+      "links": [
+        "Concept - The Condition Number",
+        "Concept - Convexity and the Loss Landscape",
+        "Concept - Maximum Likelihood Estimation",
+        "Concept - Singular Value Decomposition",
+        "Backpropagation",
+        "Adam and AdamW",
+        "Grokking",
+        "Double Descent",
+        "LoRA",
+        "Scaling Laws"
+      ]
+    },
+    {
+      "title": "Lore - The Nondeterminism of Floating-Point Reductions",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "Why identical code on identical hardware does not reproduce bit-for-bit, told through the mechanics and the war stories. IN: floating-point non-associativity, GPU atomicAdd ordering, nondeterministic cuDNN kernels, TF32 and fast-math surprises, and the real cost of forcing determinism. OUT: the general numerical-pitfall catalog (link to Gotchas - Numerical Stability) and format constants (link to Reference - Floating Point Formats).",
+      "key_points": [
+        "Root cause: floating-point addition is not associative ((a+b)+c != a+(b+c) under rounding), so a parallel reduction that sums in a scheduler-dependent order yields different rounding and therefore different bits, even on byte-identical inputs run twice",
+        "GPU specifics: atomicAdd accumulates in nondeterministic order (scatter, gradient accumulation, embedding-bag backward, some conv backward kernels), and cuDNN's benchmark mode can pick a different algorithm per launch; cross-device all-reduce order adds another layer (link All-Reduce and Collective Operations)",
+        "War stories: 'we changed the batch size and the loss curve moved' (different reduction tree), 'we cannot reproduce the paper's number past 3 decimals', and two runs diverging from a bit-identical checkpoint - all classic and all explained by reduction order, not bugs",
+        "Silent-change footguns: Ampere defaulting matmuls to TF32 quietly shifted results by ~1e-3 and surprised people comparing to older runs; -ffast-math / -Ofast let the compiler reassociate and flush subnormals, which can change stability outright (link Concept - Subnormal Numbers and Gradual Underflow)",
+        "Forcing determinism has a price: torch.use_deterministic_algorithms(True), CUBLAS_WORKSPACE_CONFIG, and cudnn.deterministic cost throughput and some ops simply have no deterministic kernel; setting a seed alone does NOT make CUDA reductions deterministic",
+        "Why it usually does not matter but sometimes does: this jitter is orders of magnitude below SGD's own noise so training is robust to it, but debugging, regression tests, eval reproducibility, and security audits can genuinely require bitwise determinism (link Statistical Rigor in Model Evaluation, LLM Observability and Tracing)",
+        "Evidence status: the mechanism and the PyTorch/NVIDIA reproducibility documentation are solid and verified; the specific run anecdotes are well-attested engineering folklore, labeled as such"
+      ],
+      "links": [
+        "Gotchas - Numerical Stability",
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Subnormal Numbers and Gradual Underflow",
+        "All-Reduce and Collective Operations",
+        "Mixed Precision Training",
+        "Statistical Rigor in Model Evaluation",
+        "LLM Observability and Tracing",
+        "The OPT-175B Logbook"
+      ]
+    },
+    {
+      "title": "Concept - Subnormal Numbers and Gradual Underflow",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "The arcane corners of IEEE-754 that bite deep learning: subnormals, the flush-to-zero performance cliff, signed zero, and NaN semantics. IN: subnormal encoding and gradual underflow, DAZ/FTZ flags and their cost, machine-epsilon vs smallest-representable confusion, signed zero and NaN/Inf behavior, and how these silently affect training. OUT: the general format table (link to Reference - Floating Point Formats) and the core float mechanism (link to Concept - Floating Point for Deep Learning).",
+      "key_points": [
+        "Subnormals: when the exponent field is all zeros, the implicit leading 1 becomes 0, giving values below the smallest normal down to ~1.4e-45 (fp32) or ~6e-8 (fp16); this is 'gradual underflow', Kahan's deliberate design to preserve relative accuracy near zero instead of a hard cliff to 0",
+        "The epsilon confusion to kill: machine epsilon (2^-mantissa, the gap near 1.0) is NOT the smallest representable number (which is far smaller via the exponent and subnormals) - conflating them causes wrong tolerance choices",
+        "The performance cliff: many CPUs and some GPUs process subnormals in slow microcode, causing 10-100x slowdowns wherever they appear (long known in audio DSP and physics sims), which is why frameworks and hardware often enable FTZ (flush-to-zero) and DAZ (denormals-are-zero) for speed",
+        "The DL bite: with FTZ enabled, tiny gradients and activations flush to exactly 0 and silently stop contributing - especially in fp16, whose subnormal band is precisely where dying gradients live, a hidden reason low-precision training stalls (link Lore - Loss Scaling and the fp16 Underflow Crisis)",
+        "Signed zero and specials: +0 and -0 compare equal but 1/+0 = +inf while 1/-0 = -inf; NaN != NaN (which breaks naive sorting, dedup, and argmax), NaN carries a payload, and Inf arithmetic has its own rules (inf - inf = NaN)",
+        "Handling: detect with isfinite; know that FTZ/DAZ is a per-thread mode on CPU but effectively fixed on GPU; keep reductions/softmax/loss in fp32 where the subnormal range still matters (link Gotchas - Numerical Stability)",
+        "Non-obvious: gradual underflow is a deliberate accuracy-preserving design that most FLOPS-hungry ML hardware throws away for speed - a real precision-vs-performance tradeoff almost nobody sees until a model quietly stops learning"
+      ],
+      "links": [
+        "Concept - Floating Point for Deep Learning",
+        "Reference - Floating Point Formats",
+        "Gotchas - Numerical Stability",
+        "Lore - Loss Scaling and the fp16 Underflow Crisis",
+        "Lore - The Nondeterminism of Floating-Point Reductions",
+        "Mixed Precision Training",
+        "Tensor Cores",
+        "Backpropagation"
+      ]
+    },
+    {
+      "title": "Lore - Loss Scaling and the fp16 Underflow Crisis",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The history and numerical why of low-precision training's near-death experience: fp16's narrow range killing gradients, the invention of loss scaling, and the bf16 rescue. IN: the fp16 underflow/overflow crisis, static and dynamic loss scaling, fp32 master weights, and how bf16/fp8 reshaped the practice. OUT: the modern mixed-precision recipe as practiced today (link to Mixed Precision Training) and format constants (link to Reference - Floating Point Formats).",
+      "key_points": [
+        "The crisis: fp16's smallest normal is ~6.1e-5 (subnormals extend to ~6e-8), and deep-net gradients routinely fall below that and flush to 0, so the model stops learning; simultaneously activations can exceed fp16's max of 65504 and overflow to inf - fp16's mere 5 exponent bits are the whole problem (link Concept - Floating Point for Deep Learning, Concept - Subnormal Numbers and Gradual Underflow)",
+        "Static loss scaling: multiply the loss by a constant S (typically 2^10 to 2^16) before backprop so the whole gradient distribution shifts up into fp16's representable band, then unscale before the optimizer step; S must be large enough to save small gradients but small enough to avoid overflowing large ones",
+        "Dynamic loss scaling (Micikevicius et al. 2017, 'Mixed Precision Training'): start S high, halve it whenever an inf/NaN gradient appears, and double it after N stable steps; this self-tuning loop is what made fp16 training robust and shipped as NVIDIA Apex then torch AMP",
+        "fp32 master weights: even with scaled gradients, the update w -= lr*g underflows when |lr*g| is below eps*|w| (the update is swamped by the weight), so you keep an fp32 master copy of the weights, or use stochastic rounding, to accumulate tiny updates (link Concept - Matrix Multiplication as the Atom of Deep Learning)",
+        "The bf16 rescue: bf16's fp32-range 8-bit exponent mostly eliminates the need for loss scaling, which is why training pivoted to bf16 on A100/TPU-class hardware; fp8 then brought scaling back in a per-tensor/per-block form at even lower precision (link Breakdown - bfloat16, Post-Training Quantization Formats)",
+        "War stories: early large-model fp16 runs (Megatron/BERT/GPT-era) diverging to NaN without scaling, the 'loss goes to NaN at step X' from an overflow spike, and the precision struggles logged in real large runs (link The OPT-175B Logbook); practitioners cargo-culted S = 2^15 for years",
+        "Evidence status: the mechanism and the Micikevicius et al. paper are solidly sourced; specific run-divergence anecdotes are labeled engineering folklore"
+      ],
+      "links": [
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Subnormal Numbers and Gradual Underflow",
+        "Breakdown - bfloat16",
+        "Reference - Floating Point Formats",
+        "Gotchas - Numerical Stability",
+        "Mixed Precision Training",
+        "Post-Training Quantization Formats",
+        "The OPT-175B Logbook",
+        "Tensor Cores"
+      ]
+    }
+  ]
+}

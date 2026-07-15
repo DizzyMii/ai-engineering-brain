@@ -1,0 +1,473 @@
+{
+  "domain": "19 - Ecosystem & History",
+  "slug": "ecosystem-history",
+  "notes": [
+    {
+      "title": "Deep Dive - From Perceptron to ChatGPT",
+      "type": "deep-dive",
+      "level": "surface",
+      "scope": "The narrative timeline of the field from the 1958 perceptron through the ChatGPT era and reasoning models, hitting every paradigm shift and both AI winters. IN: the eras, the people, the enabling conditions (data + compute + algorithms) that flipped each phase. OUT: the mechanisms themselves (link to their owning domains) and model family trees (link to Reference - Model Genealogy).",
+      "key_points": [
+        "Perceptron (Rosenblatt 1958); Minsky and Papert 1969 XOR/linear-separability critique that helped trigger the first AI winter (~1974-1980, Lighthill report cuts UK funding)",
+        "Backprop popularized (Rumelhart, Hinton, Williams 1986); LeCun's LeNet-5 (1989/1998) on MNIST and check reading; connectionism revival then the second winter (~1987-1993, expert-system and LISP-machine collapse)",
+        "The three conditions converging ~2012: large labeled data (ImageNet 2009, Deng and Fei-Fei), commodity GPU compute, and deep nets; AlexNet 2012 as the ignition (link to Lore - The AlexNet Moment is folded here)",
+        "The CV interregnum: VGG, GoogLeNet, ResNet (He et al. 2015, 152 layers, residual connections solving degradation)",
+        "The NLP arc: word2vec (Mikolov 2013), seq2seq (Sutskever 2014), additive attention (Bahdanau 2014), the Transformer (Vaswani et al. 2017)",
+        "The pretraining era: ELMo, GPT-1, BERT (Devlin 2018); GPT-2 (2019, staged-release weights controversy); GPT-3 (2020, 175B, in-context learning as the surprise)",
+        "The alignment turn: InstructGPT/RLHF (2022), ChatGPT (Nov 30 2022, ~100M users in 2 months), GPT-4 (Mar 2023)",
+        "The reasoning turn (2024-2025): OpenAI o1/o3 inference-time compute, DeepSeek-R1, open-weights closing the gap",
+        "The meta-pattern: every winter followed overpromising and a funding correction; every spring followed a compute or data unlock, not a single algorithm",
+        "Mandatory Mermaid timeline diagram of eras with the inflection dates; Evolution section on what each era replaced and what is now replacing the current one"
+      ],
+      "links": [
+        "Reference - Model Genealogy",
+        "Reference - The AI Lab Landscape",
+        "Lore - The Attention Is All You Need Origin Story",
+        "Deep Dive - The Transformer",
+        "Concept - Scaling Laws",
+        "Deep Dive - RLHF End to End",
+        "Concept - The Emergent Abilities Debate",
+        "Concept - Vision Transformers"
+      ]
+    },
+    {
+      "title": "Reference - Where Real AI Knowledge Lives",
+      "type": "reference",
+      "level": "surface",
+      "scope": "A curated lookup of where genuine, current AI-engineering knowledge actually resides: which papers, lab reports, blogs, people, repos, and communities, and what each is good for. IN: named sources with their specialty and a signal-vs-hype filter. OUT: the technical content itself (link to owning domains) and the sociology of how the field publishes (link to Concept - The Preprint and Social-Media Research Culture).",
+      "key_points": [
+        "Lab technical reports and papers with the highest signal: Llama papers (unusually detailed on data/training), DeepSeek papers (MLA, GRPO, FP8 disclosed), Qwen/Gemma tech reports, Anthropic and OpenAI system/model cards (capability-heavy, architecture-light)",
+        "Engineering blogs that teach mechanism: vLLM, EleutherAI, Hugging Face, PyTorch dev blog, Character.AI (KV-cache economics), Together/Modal; Lilian Weng, Chip Huyen, Sebastian Raschka, Jay Alammar (Illustrated Transformer), Kipply, Horace He",
+        "Primary discovery tools: arXiv cs.CL/cs.LG (listings and Friday cadence), Semantic Scholar and Connected Papers for citation graphs, OpenReview for actual peer reviews, Papers with Code (declining)",
+        "Code as ground truth: nanoGPT (Karpathy), transformers, vLLM/SGLang source, Megatron-LM, GPU MODE community, CUTLASS/Triton examples",
+        "Communities where tribal knowledge leaks: EleutherAI and Nous Discords, r/LocalLLaMA, specific X/Twitter lists, the GPU-poor open-source scene",
+        "People mapped to specialty (as of 2026): Tri Dao (attention kernels), Stas Bekman (training-at-scale ops), Noam Shazeer lineage, Jeremy Howard (fast.ai), so a reader knows whose take to trust on what",
+        "Filtering heuristics: prefer tech reports over press releases, ablations over headline numbers, code over claims; treat benchmark-only announcements as marketing (link to Gotchas - Reading Model Announcements)",
+        "What is overrated: most Medium/LinkedIn tutorials, 'prompt engineering' courses, YouTube explainers that never touch a loss curve; date-stamp the whole note (as of 2026) since sources rot fast"
+      ],
+      "links": [
+        "Concept - The Preprint and Social-Media Research Culture",
+        "Gotchas - Reading Model Announcements",
+        "Reference - The AI Lab Landscape",
+        "Deep Dive - The Transformer",
+        "Breakdown - vLLM",
+        "Reference - Model Genealogy"
+      ]
+    },
+    {
+      "title": "Reference - Model Genealogy",
+      "type": "reference",
+      "level": "core",
+      "scope": "Family trees of the major model lineages and the mechanism of descent: architecture reuse, continued pretraining, distillation, merging, and fine-tune stacking. IN: the lineage graphs and the derivation-type taxonomy that lets you place any new model. OUT: the architecture mechanisms (link to domain 03) and the lab business context (link to Reference - The AI Lab Landscape).",
+      "key_points": [
+        "GPT lineage: GPT-1 -> GPT-2 -> GPT-3 -> GPT-3.5/InstructGPT -> GPT-4 -> GPT-4o -> o1 -> o3; the decoder-only transformer as the shared trunk",
+        "Llama lineage and its Cambrian explosion: Llama 1 (leaked) -> Alpaca/Vicuna/Guanaco (instruction distills) -> Llama 2/3/3.1 (405B)/4; base of the majority of open fine-tunes and merges",
+        "Mistral family: Mistral 7B, Mixtral 8x7B (sparse MoE), Mistral Large, Nemo; the most-merged open base after Llama",
+        "Chinese open lineages: Qwen 1->2->2.5->3 (Alibaba), DeepSeek V1->V2 (MLA)->V3->R1, GLM/Zhipu, Yi (01.AI); Google Gemini/Gemma; Anthropic Claude 1->2->3->3.5->4 (Opus/Sonnet/Haiku tiering), Microsoft Phi (distillation-heavy), Cohere Command, Falcon, MPT",
+        "Derivation TYPES as the real content: architecture reuse, weight-init/continued-pretraining, distillation (student trained on teacher outputs), model merging (SLERP/TIES/DARE), LoRA-adapter stacks",
+        "Tokenizer inheritance as a lineage fingerprint: many models silently reuse GPT-2, Llama, or Qwen tokenizers, betraying ancestry the model card omits (link to Snippet - Tracing Model Lineage via Hugging Face Metadata)",
+        "The distillation-from-closed pattern: ShareGPT/GPT-4 outputs seeding a generation of open instruct models ('GPT-4 in a trench coat'), and the ToS/legal grey zone it lives in",
+        "How to read a family tree: solid edges = weight descent, dashed = data/output descent; cross-link Byte-Pair Encoding, Mixture of Experts Architecture, Knowledge Distillation as the mechanisms behind edges"
+      ],
+      "links": [
+        "Reference - The AI Lab Landscape",
+        "Concept - The Open vs Closed Model Divide",
+        "Snippet - Tracing Model Lineage via Hugging Face Metadata",
+        "Lore - The LLaMA Leak",
+        "Concept - Byte-Pair Encoding",
+        "Concept - Mixture of Experts Architecture",
+        "Concept - Knowledge Distillation",
+        "Concept - Scaling Laws"
+      ]
+    },
+    {
+      "title": "Reference - The AI Lab Landscape",
+      "type": "reference",
+      "level": "core",
+      "scope": "The organizations building frontier and open models: who they are, funding, focus, open/closed posture, flagship models, and key people. IN: the players and their strategic positioning as of 2026. OUT: model mechanisms and detailed genealogy (link to Reference - Model Genealogy).",
+      "key_points": [
+        "Frontier-closed: OpenAI (Microsoft ~$13B in, GPT/o-series, API-platform posture), Anthropic (Amazon + Google backing, Claude, safety-differentiated), Google DeepMind (2023 merger of Brain + DeepMind, Gemini, owns TPUs)",
+        "Open-weight majors: Meta AI/FAIR (Llama, LeCun, commoditize-the-complement play), Mistral (French, Apache 2.0, sovereign-EU), xAI (Musk, Grok, Colossus 100k+ H100 cluster in Memphis)",
+        "Chinese labs: DeepSeek (High-Flyer quant fund), Alibaba Qwen, Zhipu/GLM, Moonshot/Kimi, 01.AI (Yi), Baidu Ernie, MiniMax; increasingly setting the open-weights frontier",
+        "Research and fully-open: EleutherAI (nonprofit, GPT-Neo/Pythia), Allen Institute/AI2 (OLMo, fully-open data+code+logs), BigScience (BLOOM, defunct collaboration)",
+        "Enterprise and niche: Cohere (RAG/enterprise), AI21, Databricks/Mosaic (DBRX), Stability AI (image, near-collapse 2024), Reka, Together/Fireworks (inference)",
+        "The acqui-hire/reverse-acquisition pattern dodging antitrust: Inflection -> Microsoft (2024), Character.AI -> Google (2024), Adept -> Amazon, Windsurf saga; talent as the real asset",
+        "Strategic postures as the organizing lens: platform-API (OpenAI), safety-brand (Anthropic), commoditize-complements (Meta), sovereign/regional (Mistral, Falcon/UAE), efficiency-challenger (DeepSeek)",
+        "Compute as the barrier to entry and the GPU-rich vs GPU-poor divide; date-stamp heavily and flag volatility since the roster churns quarterly"
+      ],
+      "links": [
+        "Reference - Model Genealogy",
+        "Concept - The Open vs Closed Model Divide",
+        "Reference - The AI Hardware Market",
+        "Breakdown - DeepSeek",
+        "Breakdown - Hugging Face",
+        "Reference - Where Real AI Knowledge Lives"
+      ]
+    },
+    {
+      "title": "Reference - Open Weights Licensing",
+      "type": "reference",
+      "level": "core",
+      "scope": "What each major model license actually grants and restricts: commercial use, redistribution, derivatives, output usage, and acceptable-use clauses. IN: a license-by-license comparison matrix and the definitional distinctions. OUT: the strategic open-vs-closed debate (link to Concept - The Open vs Closed Model Divide) and copyright of training data (link to domain 05).",
+      "key_points": [
+        "True OSI-open licenses: Apache 2.0 (Mistral, Qwen, OLMo; includes patent grant, no field-of-use restriction) and MIT (DeepSeek-R1) vs everything else that calls itself 'open'",
+        "Llama Community License dissected: NOT OSI-open; the >700M-MAU clause (blocks hyperscaler competitors), the acceptable-use policy, the 'Built with Llama' attribution requirement, and the (early) ban on using outputs to train non-Llama models",
+        "The RAIL/OpenRAIL family: behavioral-use restrictions (BLOOM's Responsible AI License) as a middle path; Gemma terms; Falcon's move from custom to Apache",
+        "The three-way distinction that trips people up: open weights (weights only) != open source (weights + code + recipe) != open data (also the corpus); fully-open exemplars: OLMo, Pythia, BLOOM",
+        "OSI's Open Source AI Definition (OSAID 1.0, Oct 2024) and why Meta disputes it (the training-data disclosure requirement); the ongoing definitional fight",
+        "Enforceability reality: once weights leak they cannot be recalled (link to Lore - The LLaMA Leak); licenses constrain reputable companies, not torrents",
+        "The checklist a lawyer actually runs: can you commercialize, redistribute, fine-tune, and train other models on outputs; are there user-count, field-of-use, geographic, or naming constraints",
+        "Date-stamp each row; licenses change across model versions (Llama 2 vs 3 vs 4 differ) so pin to the exact release"
+      ],
+      "links": [
+        "Concept - The Open vs Closed Model Divide",
+        "Reference - Model Genealogy",
+        "Lore - The LLaMA Leak",
+        "Checklist - Vetting an Open-Weights Model for Production",
+        "Decision - Which Model Ecosystem to Bet On",
+        "Lore - The BLOOM Training Run"
+      ]
+    },
+    {
+      "title": "Reference - The AI Hardware Market",
+      "type": "reference",
+      "level": "advanced",
+      "scope": "The market structure of AI compute: who makes the chips, who controls the supply chain, pricing, and the geopolitics. IN: business/market structure, supply-chain chokepoints, export controls, and challengers. OUT: GPU microarchitecture, kernels, and roofline math (link to domain 08).",
+      "key_points": [
+        "NVIDIA datacenter dominance (~80-90% training share); the accelerator lineage and rough unit economics: A100 -> H100 (~$25-40k) -> H200 -> GH200 -> B200/GB200 (Blackwell); data-center revenue as the market's center of gravity",
+        "TSMC as the true bottleneck: CoWoS advanced-packaging capacity gates supply more than transistors do; 4nm/3nm nodes; the HBM oligopoly (SK Hynix leading, Samsung, Micron) with HBM3E as the gating resource",
+        "Export controls: Oct 2022 and Oct 2023 US rules, the China-specific throttled parts (A800/H800/H20), the performance-density thresholds and their revisions, and the grey market",
+        "Challengers and why they lag: AMD MI300X/MI325 (ROCm software gap -> link Concept - The CUDA Moat), Intel Gaudi, Cerebras wafer-scale, Groq LPU and SambaNova (attacking inference first), Tenstorrent",
+        "Hyperscaler in-house silicon bypassing NVIDIA: Google TPU v5/v6 Trillium, AWS Trainium/Inferentia, Microsoft Maia, Meta MTIA; vertical integration as the real threat to the moat",
+        "The neocloud tier: CoreWeave, Lambda, Crusoe, Nebius financing GPU-as-a-service against NVIDIA allocation; spot vs reserved H100/hr ($2-8) and the 2023 shortage easing into 2025",
+        "Power as the new binding constraint: GW-scale datacenter buildouts, grid interconnect queues, the shift to quoting compute in megawatts rather than chip counts",
+        "Date-stamp aggressively; cross-link Cost Engineering for LLM Applications and GPU Memory Hierarchy for where market meets engineering"
+      ],
+      "links": [
+        "Concept - The CUDA Moat",
+        "Reference - The AI Lab Landscape",
+        "Breakdown - DeepSeek",
+        "Concept - GPU Memory Hierarchy",
+        "Concept - Tensor Cores",
+        "Concept - Cost Engineering for LLM Applications"
+      ]
+    },
+    {
+      "title": "Concept - The Open vs Closed Model Divide",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The strategic and economic dynamics behind why labs release open weights or keep models closed, and what that does to the ecosystem. IN: the incentives, the game theory, the distillation asymmetry, and the capability-gap trajectory. OUT: license specifics (link to Reference - Open Weights Licensing) and the safety-of-release argument as a safety topic (link to domain 14).",
+      "key_points": [
+        "Meta's 'commoditize your complement' logic (Spolsky framing): open weights devalue rivals' model moat while Meta monetizes the layer above (ads, apps) and recruits via open research; Zuckerberg's stated reasoning",
+        "The closed rationale: capture frontier API revenue, control misuse, recoup training capex, and avoid handing competitors a free distillation target",
+        "The distillation asymmetry that shapes everything: closed frontier models get distilled into open ones (ShareGPT -> Vicuna, R1 distills), while closed labs' ToS ban training on their outputs; open weights cannot enforce the reverse",
+        "The capability gap over time: open weights historically 6-12 months behind frontier; DeepSeek-R1 (Jan 2025) narrowed it to weeks for reasoning; the live open question of whether open ever leads the frontier",
+        "Inference-price collapse as a consequence: open-weight competition plus efficiency drives token prices down roughly 10x/year, compressing closed-model margins",
+        "Sovereign and geopolitical angle: national/regional models as soft power and independence (Mistral EU, Falcon UAE, Chinese open weights); open weights as strategic export",
+        "The reversibility argument: a released weight file cannot be unpublished, which reframes 'open' as an irreversible commitment (hand off the safety debate to domain 14 rather than re-arguing it)",
+        "Non-obvious: open-vs-closed is a release STRATEGY, not an ideology; the same lab does both (OpenAI's gpt-oss, Google's Gemma alongside closed Gemini)"
+      ],
+      "links": [
+        "Reference - Open Weights Licensing",
+        "Reference - Model Genealogy",
+        "Decision - Which Model Ecosystem to Bet On",
+        "Lore - The LLaMA Leak",
+        "Breakdown - DeepSeek",
+        "Concept - Knowledge Distillation",
+        "Concept - Scaling Laws",
+        "Concept - Cost Engineering for LLM Applications"
+      ]
+    },
+    {
+      "title": "Concept - The CUDA Moat",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Why NVIDIA's dominance rests on software and ecosystem lock-in rather than silicon alone, and why challengers struggle to displace it. IN: the moat mechanism (the software stack, switching costs, network effects) and where it is thinnest. OUT: the CUDA programming model and kernel details (link to domain 08) and market-share numbers (link to Reference - The AI Hardware Market).",
+      "key_points": [
+        "The stack that IS the moat: CUDA (2007) plus cuDNN, cuBLAS, NCCL, CUTLASS, TensorRT; 15+ years of hand-optimized libraries every framework silently depends on",
+        "The network effect: researchers publish CUDA kernels, frameworks target CUDA first, non-CUDA hardware gets no kernels, so it stays slow, so no one buys it, so no one writes kernels for it",
+        "AMD ROCm's chronic struggle: HIP as a CUDA source-translation layer, perpetual 'almost there,' missing kernel coverage and bug parity; the George Hotz/tinygrad public saga as evidence of the pain",
+        "Moat-erosion via abstraction: Triton (OpenAI) as PyTorch 2.0's default compiler backend, torch.compile, OpenXLA/MLIR, Mojo; the bet that hardware-agnostic kernels commoditize the ISA",
+        "Why it persists despite 2-3x cheaper alternatives: engineering risk, missing features (FlashAttention landed on ROCm years late), and fleet-reliability doubts at scale",
+        "The training-vs-inference asymmetry: the moat is deepest in training (custom kernels, collectives, tight numerics) and shallowest in inference, which is why Groq/Cerebras/hyperscaler silicon attack inference first",
+        "Hyperscaler bypass: JAX+XLA on TPUs routes around CUDA entirely, proving the moat is porous when one owns the whole stack",
+        "Non-obvious: NVIDIA's real product is the compiler and library ecosystem; a competitor must beat CUDA on developer-hours-to-working-kernel, not on FLOPs/dollar"
+      ],
+      "links": [
+        "Reference - The AI Hardware Market",
+        "Deep Dive - FlashAttention",
+        "Concept - Tensor Cores",
+        "Concept - All-Reduce and Collective Operations",
+        "Concept - GPU Memory Hierarchy",
+        "Breakdown - DeepSeek"
+      ]
+    },
+    {
+      "title": "Concept - The Preprint and Social-Media Research Culture",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "How AI research actually gets communicated and validated: the arXiv-first, Twitter-mediated, blog-post-as-paper culture and the pathologies it creates. IN: the communication dynamics and their failure modes. OUT: the catalog of specific sources (link to Reference - Where Real AI Knowledge Lives) and eval/contamination methodology (link to domain 13).",
+      "key_points": [
+        "The arXiv-first norm: ML effectively abandoned journal peer review; preprints are canonical and conference acceptance is a lagging credential; the 'post Friday, trend Monday' attention cycle",
+        "The conference machine under strain: NeurIPS/ICML/ICLR with 10-15k+ submissions, reviewer overload, desk-reject lotteries, and OpenReview as a transparency counterweight",
+        "X/Twitter as the de facto program committee: virality allocates attention, author threads set the narrative, and the hype incentive rewards the loudest summary over the most careful one (Reddit r/MachineLearning, HN as secondary)",
+        "The technical-report shift: labs replacing papers with system/model cards that omit architecture and compute (the GPT-4 report explicitly withholds them), justified by safety-and-competition; the erosion of reproducibility",
+        "Benchmark-driven publication and its gaming: leaderboard PR, train-on-test contamination (link to domain 13), and the incentive to report the one metric you win",
+        "The fully-open counter-movement as a reaction: EleutherAI, AI2 OLMo, Pythia releasing data + code + logs to restore reproducibility",
+        "Citation and priority dynamics: 'Attention Is All You Need' past 100k+ citations, timestamp-racing, and near-simultaneous independent discovery (DPO-like ideas, RoPE variants) creating priority disputes",
+        "Non-obvious: the incentive structure rewards being first and loud over being right and reproducible; the practitioner's defense is to read code and ablations, not abstracts and threads"
+      ],
+      "links": [
+        "Reference - Where Real AI Knowledge Lives",
+        "Gotchas - Reading Model Announcements",
+        "Concept - Benchmark Contamination",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Lore - The Attention Is All You Need Origin Story",
+        "Reference - The AI Lab Landscape"
+      ]
+    },
+    {
+      "title": "Breakdown - Hugging Face",
+      "type": "breakdown",
+      "level": "core",
+      "scope": "How Hugging Face became the field's default infrastructure: the Hub, the libraries, and the business, treated as an ecosystem system rather than an API tutorial. IN: the platform's structure, its role as neutral distribution layer, the security interventions, and the dependence risk it creates. OUT: library API usage and training mechanics (link to owning domains).",
+      "key_points": [
+        "The origin pivot: a 2016 chatbot app whose transformers library (2018-19) became the universal model interface, the moment that made the company infrastructure",
+        "The Hub as the 'GitHub of ML': git + git-LFS model hosting, 1M+ models (as of 2026), datasets, Spaces (Gradio/Streamlit demos), and model cards as the metadata standard",
+        "The library glue of the ecosystem: transformers, datasets, tokenizers (Rust), accelerate, PEFT, TRL, diffusers; from_pretrained as the field's default entry point",
+        "Safetensors as a real security intervention: replacing pickle/.bin (arbitrary-code-execution on load) with a memory-mapped, code-free format; the supply-chain reasoning behind it",
+        "The business: ~$4.5B valuation (2023 Series D), open-core plus enterprise/Inference Endpoints; neutrality across all labs as the strategic moat",
+        "The Open LLM Leaderboard and its contamination/retirement saga (link to domain 13) as a case study in ecosystem-scale eval pressure",
+        "The single-point-of-dependence risk: from_pretrained phoning home, model provenance and malware scanning, typosquatting, and the fragility of a field routed through one hub",
+        "What to steal: the base_model metadata convention that enables lineage archaeology (link to Snippet - Tracing Model Lineage via Hugging Face Metadata) and neutrality-as-strategy"
+      ],
+      "links": [
+        "Reference - Model Genealogy",
+        "Snippet - Tracing Model Lineage via Hugging Face Metadata",
+        "Reference - The AI Lab Landscape",
+        "Checklist - Vetting an Open-Weights Model for Production",
+        "Concept - Benchmark Contamination",
+        "Deep Dive - LoRA",
+        "Concept - QLoRA",
+        "Reference - Where Real AI Knowledge Lives"
+      ]
+    },
+    {
+      "title": "Breakdown - DeepSeek",
+      "type": "breakdown",
+      "level": "frontier",
+      "scope": "DeepSeek as an organization and the disruptive open-weights releases and market shock it produced. IN: the org story, release cadence, the cost-claim controversy, and the ecosystem/market impact. OUT: the model mechanisms MLA, MoE routing, GRPO, and FP8 training (link to domains 03/04/06).",
+      "key_points": [
+        "Origin: spun out of High-Flyer, a Chinese quantitative hedge fund (Liang Wenfeng), with a GPU stockpile assembled before export controls (~10k A100s per public claims)",
+        "Release cadence: DeepSeek Coder/LLM (2023), V2 (May 2024, MLA + an API price war), V3 (Dec 2024, 671B MoE / 37B active), R1 (Jan 2025, open reasoning model under MIT license)",
+        "The cost claim and its controversy: V3's ~$5.6M final-run figure (2048 H800s, ~2.79M GPU-hours) and the dispute over what it excludes (research iterations, prior runs, hardware capex)",
+        "The market shock: Jan 27 2025 NVIDIA fell ~17% (~$600B market cap, the largest single-day loss in US history); DeepSeek hit #1 on the US App Store; the 'efficiency breaks the compute-moat thesis' narrative",
+        "Open-weights at the reasoning frontier: R1 reached o1-class reasoning at open weights and triggered a distillation wave (R1-distilled Qwen and Llama variants across the Hub)",
+        "The geopolitics: trained on export-throttled H800s, read as 'constraint bred efficiency'; subsequent US government/procurement scrutiny and bans",
+        "The ecosystem lesson (what to steal): publish detailed papers as a challenger's marketing, use price wars as market entry, and treat training efficiency as a moat-buster against incumbents",
+        "Date-stamped 2026; link mechanisms out to their owners rather than re-deriving them"
+      ],
+      "links": [
+        "Reference - The AI Lab Landscape",
+        "Reference - Model Genealogy",
+        "Concept - The Open vs Closed Model Divide",
+        "Reference - The AI Hardware Market",
+        "Concept - Mixture of Experts Architecture",
+        "Concept - GRPO and RL with Verifiable Rewards",
+        "Concept - Mixed Precision Training",
+        "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)"
+      ]
+    },
+    {
+      "title": "Gotchas - Reading Model Announcements",
+      "type": "gotchas",
+      "level": "core",
+      "scope": "The recurring traps in interpreting lab model releases, benchmarks, and marketing. IN: announcement- and benchmark-interpretation pitfalls with symptom/cause/fix/detection. OUT: rigorous eval methodology (link to domain 13) and the catalog of trustworthy sources (link to Reference - Where Real AI Knowledge Lives).",
+      "key_points": [
+        "Cherry-picked benchmarks and missing baselines: labs report the benchmarks they win and omit the strong rival; fix by cross-checking independent arenas (LMArena) and demanding full comparison tables",
+        "'Available' vs actually available: an announcement is not access; waitlists, 'coming weeks,' safety-testing delays, region locks, and the polished demo video that is not the shipped product",
+        "The API model != the paper/benchmark model: silent updates behind an unchanged name, quantized serving, and different system prompts; detect via a pinned eval suite that catches quality drift",
+        "Contamination in reported scores: train-on-test especially among open models chasing leaderboards (link to domain 13); treat model-card numbers as claims, not measurements",
+        "Parameter and context obfuscation: 'up to 1M context' that degrades far earlier, active-vs-total params in MoE quoted to flatter, and undisclosed model sizes",
+        "pass@k and best-of-N framing inflating reasoning/coding scores; hidden temperature, self-consistency, and tool-use in the fine print",
+        "Cost and latency claims measured at unrealistic batch sizes, or excluding reasoning/thinking tokens that dominate real bills",
+        "Arena/ELO gaming: style and length bias, undisclosed anonymous variants tested (the 'mystery model on the leaderboard' pattern), and human-preference numbers reported without confidence intervals or n (link to Statistical Rigor)"
+      ],
+      "links": [
+        "Concept - Benchmark Contamination",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Concept - LLM-as-Judge",
+        "Reference - Where Real AI Knowledge Lives",
+        "Concept - The Preprint and Social-Media Research Culture",
+        "Concept - The Emergent Abilities Debate"
+      ]
+    },
+    {
+      "title": "Decision - Which Model Ecosystem to Bet On",
+      "type": "decision",
+      "level": "advanced",
+      "scope": "For a team standardizing on a foundation-model provider or family, the strategic tradeoffs of which ecosystem to build on. IN: provider/family selection as ecosystem strategy (lock-in, longevity, licensing, geopolitics, capability trajectory). OUT: fine-tuning vs RAG vs prompting (link to domain 12) and serving/cost mechanics (link to domains 07/16).",
+      "key_points": [
+        "The axes of the decision: open-weights self-host vs closed API; frontier capability vs cost vs control/privacy; single-vendor vs abstraction layer (LiteLLM/OpenRouter)",
+        "Lock-in vectors people underestimate: prompts and tools tuned to one model's quirks, fine-tunes bound to a specific base, differing tokenizers/chat templates, and incompatible function-calling schemas",
+        "Counterparty and longevity risk: will the lab and the specific model still exist (Stability's near-collapse, aggressive deprecation timelines, Inflection's pivot)? Read the deprecation policy before committing",
+        "Licensing risk as a gating criterion: Llama's MAU cap, output-usage clauses, geographic/field-of-use limits (link to Reference - Open Weights Licensing)",
+        "Geopolitical and compliance risk: Chinese open weights (DeepSeek/Qwen) raise data-residency optics, procurement bans, and government-use restrictions even when the weights are excellent",
+        "Capability-trajectory bet: you are wagering on a family's improvement rate, and the migration cost when a better model appears is why abstraction layers are the standard hedge",
+        "Decision flow (Mermaid): regulated/private data -> open self-host; hardest reasoning need -> closed frontier API; high-volume cost-sensitive -> cheap open or discounted API; default 80% case -> closed API behind a gateway for optionality",
+        "The hedge as the real answer: build provider-agnostic, keep a private eval suite, and re-shop quarterly because inference prices fall ~10x/year"
+      ],
+      "links": [
+        "Reference - Open Weights Licensing",
+        "Concept - The Open vs Closed Model Divide",
+        "Reference - The AI Lab Landscape",
+        "Decision - Fine-Tuning vs RAG vs Prompting",
+        "Concept - Cost Engineering for LLM Applications",
+        "Checklist - Vetting an Open-Weights Model for Production"
+      ]
+    },
+    {
+      "title": "Snippet - Tracing Model Lineage via Hugging Face Metadata",
+      "type": "snippet",
+      "level": "advanced",
+      "scope": "Runnable code that reconstructs a model's derivation (base model, and whether it is a fine-tune, merge, adapter, quantization, or suspected distillation) from Hugging Face Hub metadata and config artifacts. IN: the archaeology technique and the verify-don't-trust discipline. OUT: the genealogy content itself (link to Reference - Model Genealogy).",
+      "key_points": [
+        "Use huggingface_hub HfApi to read model-card metadata: base_model, base_model_relation (finetune/merge/adapter/quantized), tags, and model-index; imports and a concrete example model shown",
+        "Fall back to config.json when metadata lies or is absent: fingerprint architecture class, hidden_size, num_hidden_layers, and vocab_size against known bases to detect undeclared ancestry",
+        "Tokenizer fingerprinting: hash tokenizer.json / vocab to identify inherited tokenizers (Llama vs GPT-2 vs Qwen) even when base_model is unset, since tokenizer reuse survives fine-tuning",
+        "Detect merges via mergekit metadata or multiple base_model entries; detect LoRA adapters via adapter_config.json with base_model_name_or_path; detect quantizations via quantization_config",
+        "Heuristic (unverifiable) distillation-from-closed flag: training-data mentions (ShareGPT), 'distill' in the name, or GPT-style formatting; explicitly emit these as low-confidence, not fact",
+        "Emit a structured lineage record (base, relation, confidence, evidence); expected output block shown for a real model id",
+        "Why written this way: metadata-first with an artifact-based fallback, because self-reported lineage is often wrong or missing; treat every declared edge as a claim to corroborate with config + tokenizer evidence",
+        "Dependencies pinned (huggingface_hub version) and the note that Hub rate limits and gated repos require a token"
+      ],
+      "links": [
+        "Reference - Model Genealogy",
+        "Breakdown - Hugging Face",
+        "Concept - Byte-Pair Encoding",
+        "Concept - Knowledge Distillation",
+        "Checklist - Vetting an Open-Weights Model for Production"
+      ]
+    },
+    {
+      "title": "Checklist - Vetting an Open-Weights Model for Production",
+      "type": "checklist",
+      "level": "core",
+      "scope": "Pre-adoption verification for taking an open-weights model into production, focused on the provenance, licensing, safety, and ecosystem-fit checks that are unique to this domain. IN: the go/no-go items and the incident behind each. OUT: serving/quantization engineering (link to domain 07) and eval-harness design (link to domain 13).",
+      "key_points": [
+        "License stage: confirm the exact license and acceptable-use policy; verify you may commercialize, redistribute, fine-tune, and train other models on outputs; check MAU/field-of-use/geographic caps (link to Reference - Open Weights Licensing)",
+        "Provenance and supply chain: confirm publisher authenticity, prefer safetensors over pickle (RCE risk), run a malware scan, verify checksums, and pin the download to a specific revision hash",
+        "Lineage stage: identify the true base model, whether it is a distill of a closed model (ToS/legal exposure), and merge quality (link to Snippet - Tracing Model Lineage via Hugging Face Metadata)",
+        "Real-capability stage: verify at least one independent benchmark beyond the model card, check arena rank, and run your own private eval set for contamination (link to domain 13)",
+        "Format and tokenizer fit: confirm the chat template and special tokens, and verify real vs claimed context length before wiring it into prompts",
+        "Safety and compliance stage: base vs instruct behavior, refusal profile, known jailbreaks, watermarking, and a geopolitical/data-residency sign-off for foreign-origin weights",
+        "Operational stage: quantization availability (GGUF/AWQ), vLLM/serving support, VRAM math (link to domain 08), and a maintenance signal (repo activity, deprecation risk)",
+        "Why-these-items section ties each to a real incident: pickle RCE in the wild, contaminated leaderboard models, the Llama MAU clause, and DeepSeek procurement bans"
+      ],
+      "links": [
+        "Reference - Open Weights Licensing",
+        "Snippet - Tracing Model Lineage via Hugging Face Metadata",
+        "Decision - Which Model Ecosystem to Bet On",
+        "Concept - Benchmark Contamination",
+        "Concept - Post-Training Quantization Formats",
+        "Reference - Memory Math for Transformers"
+      ]
+    },
+    {
+      "title": "Lore - The OPT-175B Logbook",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The war story of Meta's OPT-175B training run as chronicled in its public logbook: the loss spikes, hardware failures, and manual interventions that revealed what training a 175B model is really like. IN: the narrative and its operational lessons. OUT: the parallelism, loss-scaling, and stability mechanisms themselves (link to domains 04/08).",
+      "key_points": [
+        "OPT-175B (Zhang et al., Meta AI, May 2022): an open reproduction of GPT-3 released with weights, code, AND the full 'chronicles' logbook, radical transparency for its moment",
+        "The logbook itself: ~100+ pages of daily notes over ~2 months on 992 A100-80GB GPUs, documenting spikes, NaNs, and restarts from checkpoints in real time",
+        "The firefighting reality: dozens of manual restarts, hardware failures (dead GPUs, ECC errors, NCCL hangs) forcing rollbacks; the truth that a frontier run is babysat by a human on-call rotation",
+        "The interventions on divergence: lowering LR, skipping problematic data batches, restoring optimizer state, and adjusting dynamic loss scaling to escape NaNs (link to Mixed Precision Training)",
+        "Distinguishing hardware-induced spikes from data/optimization-induced spikes, and the checkpoint cadence that determines how much work a failure costs",
+        "The compute/carbon honesty: OPT reported roughly 1/7th of GPT-3's estimated carbon, laying the true cost of a frontier run bare",
+        "The lesson, stated mechanically: at scale, pretraining is an operations problem (reliability, checkpointing, on-call) as much as an ML problem; this logbook seeded the modern stability toolkit that BLOOM and later runs formalized",
+        "Evidence status: primary-source, the actual logbook and code are public, making this an unusually well-documented war story rather than folklore"
+      ],
+      "links": [
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Concept - Mixed Precision Training",
+        "Concept - Data Parallelism and ZeRO",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Lore - The BLOOM Training Run",
+        "Reference - The AI Lab Landscape"
+      ]
+    },
+    {
+      "title": "Lore - The LLaMA Leak",
+      "type": "lore",
+      "level": "advanced",
+      "scope": "How LLaMA 1's controlled research release leaked publicly within a week in 2023 and accidentally ignited the open-weights ecosystem. IN: the leak narrative and its downstream consequences. OUT: the model architecture (link to domain 03) and license analysis (link to Reference - Open Weights Licensing).",
+      "key_points": [
+        "LLaMA 1 (Meta, Feb 24 2023): released to approved researchers via a request form under a non-commercial license; 7B/13B/33B/65B, notable for training smaller models on far more tokens (Chinchilla-informed)",
+        "The leak: within about a week the weights were posted via a 4chan/BitTorrent magnet link; a GitHub pull request to Meta's own repo ('save bandwidth, here is a magnet link') became the infamous artifact",
+        "The explosion it enabled: llama.cpp (Gerganov, ggml, CPU and quantized inference on laptops), Stanford Alpaca (52k instructions distilled from text-davinci-003 for ~$600), Vicuna, and the r/LocalLLaMA movement",
+        "Meta's response: rather than litigate, it leaned in, shipping Llama 2 (July 2023) openly with a commercial license, formalizing the very strategy the leak forced",
+        "Second-order effects: the GGUF/quantization ecosystem, consumer-GPU fine-tuning, the 'GPU poor' renaissance, and the normalization of distilling closed models into open ones",
+        "The counterfactual argument: plausibly the single event that democratized LLMs, and a live demonstration that weights cannot be recalled once released (link to Reference - Open Weights Licensing)",
+        "The lesson: an irreversible release plus a permissive-enough tail turns a controlled leak into an ecosystem; openness is a ratchet, not a dial",
+        "Evidence status: verified, the pull request, the torrent, and press coverage are all on the record"
+      ],
+      "links": [
+        "Reference - Model Genealogy",
+        "Concept - The Open vs Closed Model Divide",
+        "Reference - Open Weights Licensing",
+        "Concept - QLoRA",
+        "Concept - Post-Training Quantization Formats",
+        "Concept - Scaling Laws"
+      ]
+    },
+    {
+      "title": "Lore - The Attention Is All You Need Origin Story",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The human and institutional story behind the 2017 Transformer paper: how it was made, named, received, and how its eight authors scattered to seed the LLM startup landscape. IN: the origin folklore and its ecosystem consequences. OUT: the attention mechanism itself (link to domain 03).",
+      "key_points": [
+        "The paper (Vaswani et al., NeurIPS 2017): eight authors under an 'equal contribution' footnote with its own ordering story; it grew out of Google Brain/Translate work on improving seq2seq-plus-attention",
+        "The idea's parentage: Jakob Uszkoreit's push for an attention-only model dropping recurrence, and Noam Shazeer's late, decisive engineering rewrite on tensor2tensor that made it fast",
+        "The title: a Beatles reference ('All You Need Is Love') suggested late; the claim is literally an ablation result (remove recurrence and convolution, keep attention, and it still wins)",
+        "The folklore, labeled as such: a last-days-before-deadline crunch and the 'we did not know it would be this big' recollections, which are well-sourced anecdote rather than documented fact",
+        "The diaspora as the real ecosystem story: none of the eight remain at Google; they founded or led Cohere (Aidan Gomez), Character.AI (Noam Shazeer, re-acqui-hired to Google 2024), Adept (Ashish Vaswani, Niki Parmar), Inceptive (Jakob Uszkoreit), and more",
+        "The reception curve: not an instant sensation; BERT and GPT (2018) proved its generality, and it is now the most-cited ML paper of the era (100k+ citations)",
+        "The lesson, stated mechanically: hardware-friendly simplification (parallelizable, no sequential recurrence) beat cleverer but serial designs, and the talent that wrote it fanned out to build the industry",
+        "Evidence status: authorship, citation counts, and the founder departures are verified; the naming and deadline anecdotes are labeled well-sourced folklore"
+      ],
+      "links": [
+        "Deep Dive - The Transformer",
+        "Concept - Attention Mechanism",
+        "Deep Dive - From Perceptron to ChatGPT",
+        "Reference - The AI Lab Landscape",
+        "Concept - The Preprint and Social-Media Research Culture",
+        "Reference - Model Genealogy"
+      ]
+    },
+    {
+      "title": "Lore - The BLOOM Training Run",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The BigScience BLOOM 176B run as a war story of fully-open, massively-collaborative model training on public compute. IN: the collaboration and training narrative, the engineering firefighting, and the lessons for non-corporate frontier work. OUT: multilingual data and tokenizer mechanics (link to domains 05/04).",
+      "key_points": [
+        "BigScience (2021-2022): a one-year open research collaboration of 1000+ researchers from 60+ countries, organized around the Jean Zay French public supercomputer (grant-funded, not a corporate lab)",
+        "BLOOM 176B (July 2022): 46 natural and 13 programming languages, trained on the transparently documented ROOTS corpus (~1.6TB) with 384 A100-80GB GPUs over ~3.5 months",
+        "Radical openness end to end: a data-governance and consent process, public TensorBoard, and detailed engineering chronicles (Stas Bekman's writeups) that make the run reproducible",
+        "Engineering firefighting echoing OPT: Megatron-DeepSpeed 3D parallelism, hardware failures, throughput tuning, and the earlier '104B failed run' whose instability taught the team what to fix",
+        "The RAIL license: behavioral-use restrictions as a deliberate middle path between fully-open and restricted, a novel governance experiment (link to Reference - Open Weights Licensing)",
+        "Honest carbon accounting: ~25 tons CO2 for training thanks to France's low-carbon nuclear grid, a rare transparent environmental figure",
+        "The lesson: frontier-scale training is achievable outside big tech via public compute plus open collaboration, but the coordination overhead is enormous; a template for sovereign and academic AI",
+        "Evidence status: extensively documented across papers, logs, and blog posts, so verified rather than folklore, and a deliberate contrast to the corporate OPT logbook"
+      ],
+      "links": [
+        "Lore - The OPT-175B Logbook",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Concept - Data Parallelism and ZeRO",
+        "Reference - Open Weights Licensing",
+        "Reference - The AI Lab Landscape"
+      ]
+    }
+  ]
+}

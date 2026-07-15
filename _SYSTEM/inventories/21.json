@@ -1,0 +1,467 @@
+{
+  "domain": "21 - AI Across Business Functions",
+  "slug": "applied-business",
+  "notes": [
+    {
+      "title": "Concept - The Front-Office Back-Office Adoption Split",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The organizing frame for the domain: AI landed fastest in low-liability back-office work (drafting, summarization, code, documentation) and slowest in high-liability front-office work touching customers, money, health, or legal exposure. IN: why the split exists (error tolerance, human-in-loop cost, regulatory surface), which functions sit where, the assist-first pattern. OUT: the cross-function economics abstraction (link to 22 Unit Economics), the failure/blocker taxonomy that explains the slow front-office rollout (link to 23 Pilot-to-Production Gap).",
+      "key_points": [
+        "Framing: the fastest, largest measured deployments are internal-productivity tools where a human reviews output before it has consequences (medical scribe drafts a note a doctor signs; JPMorgan LLM Suite drafts emails 200,000+ employees edit — E2, JPMorgan/CNBC 2025), while customer-facing autonomy lags because an error reaches the customer directly.",
+        "McKinsey estimated ~75% of gen-AI value concentrates in four functions — customer operations, marketing & sales, software engineering, R&D (E1, McKinsey 'Economic Potential of Generative AI' June 2023) — a claim useful as a map of where deployment effort clustered, not as realized value.",
+        "The error-tolerance axis explains ordering: coding assistants and content drafting tolerate a bad suggestion (developer rejects it); a wrong customer-service resolution or a fabricated legal citation creates liability (link Hallucination Liability Incidents, 23).",
+        "Back-office wins are measured in time saved per worker (scribes: 15,791 physician-hours over 63 weeks at Kaiser Permanente — E2, Tierney et al. NEJM Catalyst); front-office wins are measured in deflection/containment and are far more contested (see Support Deflection Economics).",
+        "The dominant real-world deployment shape is assist/copilot, not full automation — even Klarna, the flagship full-automation case, walked back to a human-plus-AI model in 2025 (E2/E3, Siemiatkowski, multiple outlets).",
+        "Non-obvious: 'function' is the wrong unit — AI automates tasks within a function, so a role survives while its task mix shifts (a translator becomes a post-editor, a coder reviews generated diffs); headline 'AI replaces X job' claims almost always overstate by conflating task and role."
+      ],
+      "links": [
+        "Concept - Copilot vs Autopilot Deployment Modes",
+        "Concept - Support Deflection Economics",
+        "Breakdown - Klarna's AI Customer Service Bet",
+        "Concept - AI in Finance Operations",
+        "Decision - Which Business Function to Automate First",
+        "Reference - AI Impact by Business Function",
+        "Concept - The Pilot-to-Production Gap",
+        "Breakdown - GitHub Copilot's Measured Productivity Impact",
+        "Concept - Unit Economics of LLM Products"
+      ]
+    },
+    {
+      "title": "Concept - Copilot vs Autopilot Deployment Modes",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The two dominant shapes AI takes inside a business function: copilot (drafts/suggests, human commits) versus autopilot (acts end-to-end, human audits after or not at all), and why the copilot mode captured almost all measured value through mid-2026 while autopilot remains the contested frontier. IN: the two modes, the liability/error-rate logic that picks between them, the review-cost tradeoff. OUT: the capability trajectory that could shift the balance (link to 24 METR Time Horizons), agent-loop internals (link to 10 The Agent Loop).",
+      "key_points": [
+        "Copilot mode: model produces a draft (note, email, code, contract redline) that a human edits and owns; error cost stays low because a human is the commit gate. This is where the durable measured wins live (scribes, coding assistants, LLM Suite).",
+        "Autopilot mode: model resolves the ticket, sends the outbound email, books the action without per-item human review; error reaches the world directly, so it demands either high reliability or cheap reversibility.",
+        "The economics flip on review cost: autopilot only pays off when per-item human review would cost more than the errors autopilot causes — true for high-volume, low-stakes queries (password resets) and false for nuanced or regulated ones (link Support Deflection Economics).",
+        "Vendors sell autopilot ('digital worker', 'AI employee') because it justifies outcome pricing, but deployments quietly run copilot: even Intercom Fin's 'resolutions' include a human-escalation path, and its counted 'assumed resolutions' overstate true autonomy (E2, practitioner critiques 2026).",
+        "The Capability-Reliability Gap (link, 20) is the core constraint: a mode-2 agent that is 90% capable but 95% reliable still fails ~1 in 20 customer interactions — unacceptable front-office, fine as a copilot suggestion.",
+        "Non-obvious: the profitable move as of 2026 is usually 'autopilot the top 20% most repetitive queries, copilot the rest' — a mode split within one function, not a whole-function bet; treating the choice as all-or-nothing is how Klarna over-rotated."
+      ],
+      "links": [
+        "Concept - The Front-Office Back-Office Adoption Split",
+        "Concept - Support Deflection Economics",
+        "Concept - Vertical AI Agents by Function",
+        "Pattern - Human-in-the-Loop Review Workflow",
+        "Concept - AI SDRs and Sales Automation",
+        "Breakdown - Klarna's AI Customer Service Bet",
+        "Concept - The Capability-Reliability Gap",
+        "Concept - The Evaluation Gap",
+        "Deep Dive - Agentic Coding in Production"
+      ]
+    },
+    {
+      "title": "Concept - Support Deflection Economics",
+      "type": "concept",
+      "level": "core",
+      "scope": "The unit economics of automating customer support: what a human contact costs, what an AI contact costs, and why the headline savings depend entirely on how 'deflection', 'containment', and 'resolution' are defined and measured. IN: cost-per-contact numbers, deflection vs containment vs true resolution, re-contact rate as the honest metric, why Gartner projects rising (not falling) GenAI support cost. OUT: the general LLM cost-per-token mechanics (link to 22 Unit Economics), the vendor folklore around inflated rates (link to Lore - What Vendors Don't Say About Deflection Rates).",
+      "key_points": [
+        "Cost differential is real and large: human-handled tickets run ~$8-12 each, B2B SaaS $25-35 (E2, SaaS Capital 2024 B2B Support Spending Report), while AI-handled contacts run ~$0.50-1.50 depending on complexity — a 10-24x per-contact gap that drives every business case.",
+        "But the denominator is contested: raw deflection can read ~45% while only ~14% reach genuine self-service resolution (E1, industry benchmarks 2026); mature teams that fix knowledge bases and scope query types first reach 55-70% 'true' deflection measured by re-contact rate.",
+        "Three metrics get conflated on purpose: deflection (never reached a human), containment (stayed in the bot channel), and resolution (problem actually solved). A customer who gives up and emails support counts as 'deflected' but is an unsolved, angrier case (E2, Fin transcript critiques 2026).",
+        "Intercom Fin's public numbers — 67-71% resolution across 40M+ conversations at $0.99/resolution (E2, company) — illustrate outcome pricing, but 'assumed resolution' (customer left without asking for more help) inflates the rate versus verified problem-solving.",
+        "Gartner challenged the core assumption, projecting GenAI support cost to rise, not fall, as models, retrieval, and human-escalation overhead add up (E1, Gartner via CX Dive 2024) — deflection savings are not automatic and can invert on complex queues.",
+        "The honest KPI is re-contact rate (did the same customer come back within N days for the same issue), not deflection — optimizing raw deflection rewards abandonment.",
+        "Non-obvious: the marginal contacts AI can't handle are the expensive ones (angry, complex, edge-case), so removing the easy 60% raises the average cost and difficulty of the residual human queue — support cost-per-remaining-ticket goes UP even as total headcount falls."
+      ],
+      "links": [
+        "Concept - The Front-Office Back-Office Adoption Split",
+        "Concept - Copilot vs Autopilot Deployment Modes",
+        "Breakdown - Klarna's AI Customer Service Bet",
+        "Lore - What Vendors Don't Say About Deflection Rates",
+        "Concept - Vertical AI Agents by Function",
+        "Reference - AI Impact by Business Function",
+        "Concept - Unit Economics of LLM Products",
+        "Concept - Token Price Deflation",
+        "Concept - The Evaluation Gap"
+      ]
+    },
+    {
+      "title": "Breakdown - AI Medical Scribes",
+      "type": "breakdown",
+      "level": "core",
+      "scope": "The best-evidenced clinical AI deployment as of 2026: ambient documentation tools (Nuance/Microsoft DAX-Dragon Copilot, Abridge, Nabla, Suki) that listen to a patient visit and draft the clinical note for physician sign-off. IN: measured time-savings and burnout data, the copilot (draft-then-sign) design, vendor scale and funding, quality caveats. OUT: the human-review pattern in the abstract (link to Pattern - Human-in-the-Loop Review Workflow), high-risk regulatory framing (link to 23 EU AI Act for Operators), hallucination liability (link to 23).",
+      "key_points": [
+        "Strongest evidence: Kaiser Permanente / The Permanente Medical Group deployed ambient AI scribes to ~10,000 physicians and reported 15,791 documentation-hours saved over a 63-week evaluation (Oct 2023-Dec 2024) and 2.5M+ ambient uses in year one (E2, single-system study, Tierney et al., NEJM Catalyst 2024-2025).",
+        "The design is deliberately copilot: the AI produces a draft note the clinician reviews, edits, and signs — the physician remains legally and clinically accountable, which is exactly why the deployment scaled where autonomous diagnosis has not.",
+        "Measured secondary outcomes: reduced 'pajama time' (after-hours EHR work) and less in-visit screen time; a patient survey found a majority felt the physician spent more time speaking with them (E2, Permanente).",
+        "Market scale and money: Microsoft's DAX/Dragon Copilot reported ~3M ambient conversations/month across ~600 organizations (E2, Microsoft Mar 2025); Abridge hit a $5.3B valuation on a $300M Series E (a16z), ~$800M+ raised, 150+ health systems (E2, TechCrunch/Sacra 2025); Nabla raised $70M Series C, Suki $70M (E2, 2024-2025).",
+        "Quality caveat that matters: studies find clinicians must edit AI drafts, and research on 'hedging language' modification shows the final signed note diverges from the AI draft — the human edit is load-bearing, not cosmetic (E2, arXiv 2026; medRxiv 2024).",
+        "What it got right: picking documentation (high-burden, low-decision-risk, human-signed) rather than a clinical-decision task was the reason for adoption — the value is clinician time and burnout, not autonomous medicine.",
+        "What to steal: the draft-then-sign contract, measuring time-saved per worker rather than 'accuracy', and choosing the task where a licensed human is already the accountable reviewer."
+      ],
+      "links": [
+        "Concept - The Front-Office Back-Office Adoption Split",
+        "Concept - Copilot vs Autopilot Deployment Modes",
+        "Pattern - Human-in-the-Loop Review Workflow",
+        "Concept - Vertical AI Agents by Function",
+        "Reference - AI Impact by Business Function",
+        "Concept - Support Deflection Economics",
+        "Breakdown - Harvey and AI in Legal Work",
+        "Lore - Hallucination Liability Incidents",
+        "Reference - The EU AI Act for Operators",
+        "Concept - The Pilot-to-Production Gap",
+        "Concept - Moats in the AI Application Layer"
+      ]
+    },
+    {
+      "title": "Breakdown - Khanmigo and AI Tutoring",
+      "type": "breakdown",
+      "level": "core",
+      "scope": "AI in education & training, anchored by Khan Academy's GPT-4-powered Khanmigo tutor/teaching assistant and Duolingo's AI-driven content, with the honest efficacy picture. IN: adoption scale, the tutor+teacher-assistant design, the 2-sigma aspiration vs measured learning-outcome results, cost/access model. OUT: the localization/translation side of Duolingo (link to Concept - Machine Translation and the Localization Industry), the eval-methodology critique (link to 23 The Evaluation Gap).",
+      "key_points": [
+        "Scale: Khanmigo, built on GPT-4 (announced 2023), grew from ~68,000 users in the 2023-24 pilot to 700,000+ in 2024-25 and expanded from ~45 to ~380-450 U.S. district partners (E2, Khan Academy 2024-2025).",
+        "Design: it is explicitly a Socratic copilot — a tutor that guides students without giving answers plus a teacher assistant for lesson planning and grading — chosen over answer-giving precisely to avoid cheating and to keep a human teacher in the loop.",
+        "The aspiration is Bloom's '2 sigma problem' — Bloom (1984) found one-to-one tutoring moved average students ~2 standard deviations (E3, classic education research) — which AI tutoring is pitched to democratize at near-zero marginal cost.",
+        "The measured reality is more sober: Khan Academy's own Nov 2024 efficacy work found significant learning gains across conditions but no statistically significant difference between Khanmigo and control groups on the measured outcomes (E2, single-vendor study) — a candid null result the domain must record honestly.",
+        "Cost/access: Khan Academy is a nonprofit and secured discounted/subsidized model access to keep Khanmigo low-cost for districts (E2), a deliberate contrast with per-seat commercial ed-tech.",
+        "Duolingo pushed AI into content generation ('AI-first' memo, von Ahn 2025) and cut ~10% of contractors in Jan 2024, reallocating content creation to GPT-4 (E2/E3, TechCrunch/Washington Post) — the labor-shift story that education and localization share.",
+        "Non-obvious: the binding constraint on AI tutoring is not tutoring quality but student engagement and motivation — a patient infinite tutor still needs the student to show up, which is why measured outcome lifts lag the intuitive promise."
+      ],
+      "links": [
+        "Concept - The Front-Office Back-Office Adoption Split",
+        "Concept - Copilot vs Autopilot Deployment Modes",
+        "Pattern - Human-in-the-Loop Review Workflow",
+        "Concept - Vertical AI Agents by Function",
+        "Reference - AI Impact by Business Function",
+        "Concept - Machine Translation and the Localization Industry",
+        "Breakdown - AI Medical Scribes",
+        "Concept - The Evaluation Gap",
+        "Concept - The Pilot-to-Production Gap",
+        "Concept - Unit Economics of LLM Products",
+        "Concept - The Capability-Reliability Gap"
+      ]
+    },
+    {
+      "title": "Concept - AI in Marketing and Content",
+      "type": "concept",
+      "level": "core",
+      "scope": "The marketing & content function — the earliest and most commoditized AI adoption — and what the Jasper trajectory taught about defensibility when the underlying model is the product. IN: content generation at scale, the wrapper-commoditization risk, measured usage, the SEO/quality backlash. OUT: cross-function moat theory in the abstract (link to 22 Moats in the AI Application Layer), build-vs-buy for content tooling (link to 22 Build vs Buy vs Wrap).",
+      "key_points": [
+        "Marketing & content was the first mass function: copywriting, ad variants, SEO drafts, and social content are high-volume, low-stakes, human-reviewed — the ideal copilot task, and part of the ~75% McKinsey value cluster (E1, McKinsey 2023).",
+        "The cautionary tale is Jasper: a GPT-3-wrapper copywriting tool that raised $125M at a $1.5B valuation (Oct 2022) then cut its internal valuation ~20% and revised ARR forecasts down ~30% with layoffs by mid-2023 after ChatGPT launched a near-free substitute (E2, reporting 2023).",
+        "The lesson is commoditization: when the model is the product and the model is available directly, a thin wrapper has no moat — value accrued to distribution, workflow integration, and brand/enterprise trust instead (link Moats in the AI Application Layer, 22).",
+        "Measured reality: content generation genuinely raises throughput per marketer, but output quality is bounded by review — unreviewed AI content drove an 'AI slop' backlash and search-engine responses penalizing low-value mass-generated pages (E1/E2, industry 2024-2025).",
+        "Klarna reported large marketing-cost reductions from AI image/content generation alongside its support automation (E2, Klarna 2024) — a same-company data point that generalizes the function's savings claim.",
+        "Non-obvious: the durable marketing win is not 'write the blog post' (commoditized) but personalization and asset variation at scale (thousands of on-brand ad variants) where volume was previously the binding constraint — the value is in the long tail, not the flagship copy."
+      ],
+      "links": [
+        "Concept - The Front-Office Back-Office Adoption Split",
+        "Concept - Copilot vs Autopilot Deployment Modes",
+        "Concept - AI SDRs and Sales Automation",
+        "Concept - Vertical AI Agents by Function",
+        "Concept - Machine Translation and the Localization Industry",
+        "Reference - AI Impact by Business Function",
+        "Concept - Moats in the AI Application Layer",
+        "Concept - Token Price Deflation",
+        "Decision - Build vs Buy vs Wrap",
+        "Breakdown - Frontier Lab Economics"
+      ]
+    },
+    {
+      "title": "Concept - Machine Translation and the Localization Industry",
+      "type": "concept",
+      "level": "core",
+      "scope": "Translation & localization — the function where neural MT and now LLMs most visibly reshaped a labor market, restructuring human translators into post-editors. IN: DeepL vs incumbent quality/economics, the post-editing (MTPE) workflow, measured industry adoption, the contractor-displacement evidence. OUT: the education-content side of the same labor shift (link to Breakdown - Khanmigo and AI Tutoring), the general HITL review pattern (link to Pattern - Human-in-the-Loop Review Workflow).",
+      "key_points": [
+        "DeepL is the anchor case: a specialist neural-MT company that reached a $2B valuation on a $300M raise (Index Ventures, May 2024) with ~$185M revenue in 2024, competing directly against Google/Microsoft translate (E2, TechCrunch/CNBC 2024).",
+        "Quality claim: DeepL states language experts judged its translations ~1.3x more accurate than Google's in blind tests (E2, DeepL claim — vendor benchmark, treat as single-source); an ALC 2024 survey found 82% of language service companies use DeepL vs 46% Google (E2, industry survey).",
+        "The workflow, not the job, changed: professional translation shifted to MT post-editing (MTPE) — the machine drafts, a human translator edits — mirroring the scribe draft-then-sign and coder review-the-diff pattern (link Human-in-the-Loop Review Workflow).",
+        "The displacement is measured, not hypothetical: Duolingo cut ~10% of translation/content contractors in Jan 2024 citing AI (E2/E3, TechCrunch/Washington Post), a concrete labor-market data point for this function.",
+        "Where MT still fails: high-context, brand-voice, legal, and low-resource-language work where an unedited machine draft carries real error cost — the residual human work concentrates in exactly the hard cases (parallels Support Deflection Economics' expensive-residual pattern).",
+        "Non-obvious: LLMs are eroding DeepL's specialist moat — general frontier models now match or beat dedicated MT on many pairs, so a 'best translation model' is a shrinking edge; the defensible layer is workflow, glossary/termbase control, and enterprise integration, not raw translation quality."
+      ],
+      "links": [
+        "Concept - The Front-Office Back-Office Adoption Split",
+        "Concept - Copilot vs Autopilot Deployment Modes",
+        "Breakdown - Khanmigo and AI Tutoring",
+        "Pattern - Human-in-the-Loop Review Workflow",
+        "Reference - AI Impact by Business Function",
+        "Concept - AI in Marketing and Content",
+        "Concept - Token Price Deflation",
+        "Concept - Moats in the AI Application Layer"
+      ]
+    },
+    {
+      "title": "Concept - AI in Finance Operations",
+      "type": "concept",
+      "level": "core",
+      "scope": "AI in finance & back-office operations — internal document-heavy workflows (analysis, drafting, reconciliation, AP/invoice processing) where large enterprises deployed at scale under strict human review. IN: JPMorgan's LLM Suite as the flagship, the back-office copilot pattern, accounts-payable/expense automation, why finance stayed copilot. OUT: the recruiting/HR back-office parallel (link to Breakdown - AI in Recruiting and HR Screening), regulatory framing (link to 23 EU AI Act for Operators).",
+      "key_points": [
+        "Flagship: JPMorgan's LLM Suite reached 200,000+ employees, built on GPT-4, for drafting emails, summarizing documents, and knowledge search, with 450+ AI use cases in production and a stated goal of 1,000 by 2026 (E2, JPMorgan/CNBC/American Banker 2025).",
+        "The deployment is deliberately copilot and internal: it drafts and summarizes for employees to review — a finance firm will not let a model autonomously send client communications or move money, so the value is analyst time saved, not autonomous decisions.",
+        "Document-extraction workflows (SEC filings, contracts, invoices, due-diligence packets) are the core win because they are high-volume, structured-output, and verifiable against source — the retrieval-plus-extraction shape (link Deep Dive - RAG Architectures, 11).",
+        "Accounts-payable/expense automation (invoice capture, coding, matching) is a measured back-office win at fintechs like Ramp and Brex where AI codes and flags transactions for human approval (E1/E2, vendor claims 2024-2026).",
+        "Why finance stayed conservative: error cost is financial and regulated, audit trails are mandatory, and hallucinated numbers are unacceptable — so finance ops is a textbook case of the Capability-Reliability Gap forcing copilot mode (link, 20).",
+        "Non-obvious: the constraint on finance AI is not model capability but data access and governance — the value is gated by whether the model can be trusted with sensitive internal systems, which is a security/compliance problem (link 23), not a model problem, and explains why deployment is internal-first."
+      ],
+      "links": [
+        "Concept - The Front-Office Back-Office Adoption Split",
+        "Concept - Copilot vs Autopilot Deployment Modes",
+        "Pattern - Human-in-the-Loop Review Workflow",
+        "Breakdown - AI in Recruiting and HR Screening",
+        "Reference - AI Impact by Business Function",
+        "Decision - Which Business Function to Automate First",
+        "Concept - The Pilot-to-Production Gap",
+        "Reference - The EU AI Act for Operators",
+        "Concept - Unit Economics of LLM Products"
+      ]
+    },
+    {
+      "title": "Decision - Which Business Function to Automate First",
+      "type": "decision",
+      "level": "core",
+      "scope": "A decision framework for an operator choosing where to deploy AI first, scoring candidate functions by volume, error tolerance, reversibility, review cost, and data readiness. IN: the scoring logic, the assist-before-automate default, worked examples across the domain's functions. OUT: the profitable-use-case selection at portfolio level (link to 24 Picking Profitable AI Use Cases), the ROI-measurement methodology (link to 22 Unit Economics).",
+      "key_points": [
+        "Default answer for the 80% case: automate a high-volume, low-stakes, easily-reversible, human-reviewed task first (support triage, document summarization, content drafting) — the back-office/copilot quadrant (link The Front-Office Back-Office Adoption Split).",
+        "Five scoring axes with real anchors: contact/task volume (does it justify build cost), error tolerance (a wrong scribe draft is edited; a wrong drug interaction is not), reversibility, per-item review cost, and data readiness (is the knowledge base clean — the top failure cause per 23 Pilot-to-Production Gap).",
+        "The trap to avoid: choosing the highest-visibility function (customer-facing support, autonomous SDR) first because it demos well — this is what maximizes liability and is where walk-backs cluster (link Klarna Reversal, AI SDRs).",
+        "Worked ranking: scribe-style documentation and internal analysis (LLM Suite) score high (verifiable, human-signed, huge volume); autonomous outbound sales and unsupervised customer resolution score low (irreversible external actions, brand risk).",
+        "Measure before scaling: run a bounded pilot with a re-contact / edit-rate / error-rate metric, not a vibes demo — the 95% pilot-to-production failure narrative (link 23) is mostly skipped measurement.",
+        "The details that flip the default: a regulated function (hiring, credit, medical decisions) drops down the list regardless of volume because of legal exposure (link EU AI Act for Operators, 23); conversely a function with a clean structured knowledge base and a human already in the approval loop jumps up."
+      ],
+      "links": [
+        "Concept - The Front-Office Back-Office Adoption Split",
+        "Concept - Support Deflection Economics",
+        "Reference - AI Impact by Business Function",
+        "Pattern - Human-in-the-Loop Review Workflow",
+        "Concept - AI in Finance Operations",
+        "Lore - The Klarna Reversal and Support Bot Walk-Backs",
+        "Playbook - Picking Profitable AI Use Cases",
+        "Concept - The Pilot-to-Production Gap",
+        "Reference - The 2026 Navigation Cheatsheet"
+      ]
+    },
+    {
+      "title": "Breakdown - Klarna's AI Customer Service Bet",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "The single most-cited applied-AI case study: Klarna's Feb 2024 OpenAI-powered support assistant, its headline numbers, and the 2025 partial reversal that made it the canonical lesson in over-rotating on full automation. IN: the launch metrics, the economic claim, the 2025 rebalancing, what was really learned. OUT: the deflection-economics mechanics it exemplifies (link to Concept - Support Deflection Economics), the walk-back folklore (link to Lore - The Klarna Reversal and Support Bot Walk-Backs).",
+      "key_points": [
+        "Launch (Feb 2024, OpenAI partnership): in its first month the assistant handled 2.3M conversations — two-thirds of Klarna's support chats — doing the equivalent work of 700 full-time agents (E2, Klarna/OpenAI own claims).",
+        "Headline outcomes claimed: resolution time cut from ~11 minutes to under 2, a 25% drop in repeat inquiries, parity with humans on CSAT, coverage of 23 markets and 35+ languages, and an estimated $40M profit improvement for 2024 (E2, Klarna — single-source, company-estimated).",
+        "The evidence tier matters: every launch number is Klarna's own (E2), and the $40M is an internal estimate, not audited — it was repeated as fact across the press but never independently verified.",
+        "The reversal (May 2025): CEO Sebastian Siemiatkowski publicly said the company 'went too far', that cost-cutting had reduced quality, and that Klarna was rehiring humans for premium/complex support, moving to AI-for-routine + humans-for-judgment (E2/E3, Bloomberg/TechCrunch/multiple outlets — the reversal is multiply-sourced).",
+        "What actually happened: Klarna did not un-deploy the AI; it corrected an over-automation overshoot, keeping AI on high-volume routine queries and reintroducing humans for nuanced/VIP cases — validating a copilot+autopilot split, not AI failure.",
+        "The clever part that endures: the deflection scale (2.3M/month) is genuinely large and the routine-query automation stuck; the mistake was scoping autonomy too broadly and measuring cost-savings without a quality/re-contact guardrail.",
+        "What to steal / avoid: the assistant works; the lesson is to bound autonomy to query types you've measured, keep a quality metric alongside the savings metric, and never announce headcount-equivalence numbers you'll have to walk back."
+      ],
+      "links": [
+        "Concept - Support Deflection Economics",
+        "Concept - The Front-Office Back-Office Adoption Split",
+        "Concept - Copilot vs Autopilot Deployment Modes",
+        "Lore - The Klarna Reversal and Support Bot Walk-Backs",
+        "Lore - What Vendors Don't Say About Deflection Rates",
+        "Concept - Vertical AI Agents by Function",
+        "Reference - AI Impact by Business Function",
+        "Concept - AI in Marketing and Content",
+        "Concept - The Pilot-to-Production Gap",
+        "Concept - The Evaluation Gap",
+        "Concept - Unit Economics of LLM Products"
+      ]
+    },
+    {
+      "title": "Breakdown - Harvey and AI in Legal Work",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "AI in the legal function, anchored by Harvey — the OpenAI-backed legal-AI company deployed across elite law firms — covering measured adoption, the review-mandatory design forced by hallucination liability, and the valuation trajectory. IN: Harvey's firm deployments and scale, the copilot-for-lawyers pattern, funding/valuation, the contamination-of-citations risk. OUT: the specific fake-citation court sanctions (link to 23 Hallucination Liability Incidents), the professional-services vertical parallel (link to Breakdown - AI Medical Scribes).",
+      "key_points": [
+        "Anchor deployments: Allen & Overy rolled Harvey out to ~3,500 lawyers (Feb 2023), and PwC adopted it (Sept 2024) and co-built a tax assistant — elite-firm anchor clients that unlocked Am Law 100 adoption (E2, Harvey/firm announcements).",
+        "Scale claim: Harvey reports processing 700,000+ tasks/day across major firms, positioning it as the most widely deployed enterprise legal AI (E2, company — single-source).",
+        "Valuation trajectory (all E2, announced rounds): ~$3B (Feb 2025, $300M Series D) → ~$5B (June 2025, Series E, Kleiner/Coatue) → ~$8B (Dec 2025, Series F, a16z) → ~$11B (Mar 2026) — a useful marker of investor conviction in the legal vertical, not of realized value.",
+        "The design is strictly copilot: it drafts research memos, contract redlines, and first-pass diligence that a licensed lawyer reviews and owns — because unreviewed legal output carries direct liability (link Hallucination Liability Incidents, 23: the Mata v. Avianca fake-citation sanctions).",
+        "The core risk is confident fabrication of citations and holdings; a Stanford RegLab line of work found even specialized legal AI hallucinated on a meaningful fraction of queries (E2/E3, Dahl/RegLab studies), which is exactly why the human-review gate is non-negotiable in this function.",
+        "Why legal adopted despite the risk: the tasks (research, review, drafting) are high-billable-hour, document-bounded, and already have a senior-review step — the same accountable-reviewer-already-exists logic that made medical scribes work (link Breakdown - AI Medical Scribes).",
+        "What to steal: sell time-per-matter savings under a mandatory-review contract, ground every claim in retrieved source documents with citations (link RAG Architectures, 11), and never position legal AI as replacing the lawyer's sign-off."
+      ],
+      "links": [
+        "Concept - The Front-Office Back-Office Adoption Split",
+        "Concept - Copilot vs Autopilot Deployment Modes",
+        "Pattern - Human-in-the-Loop Review Workflow",
+        "Concept - Vertical AI Agents by Function",
+        "Breakdown - AI Medical Scribes",
+        "Reference - AI Impact by Business Function",
+        "Lore - Hallucination Liability Incidents",
+        "Reference - The EU AI Act for Operators",
+        "Concept - Moats in the AI Application Layer",
+        "Breakdown - Frontier Lab Economics",
+        "Concept - The Capability-Reliability Gap"
+      ]
+    },
+    {
+      "title": "Breakdown - AI in Recruiting and HR Screening",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "AI in HR & recruiting — resume screening, video-interview scoring, and sourcing — the function where AI's oldest and most-documented failure (algorithmic bias) meets active discrimination litigation, making it a cautionary deployment. IN: Amazon's scrapped biased tool, HireVue-style screening, the Workday litigation, why regulation reclassifies this as high-risk. OUT: the discrimination-litigation and EU-AI-Act specifics as blockers (link to 23 EU AI Act for Operators, Hallucination Liability Incidents), the finance back-office parallel (link to Concept - AI in Finance Operations).",
+      "key_points": [
+        "The canonical failure: Amazon built and then scrapped (2018) a resume-screening model that learned to penalize women — it downgraded resumes containing 'women's' and graduates of two all-women's colleges because it trained on a decade of male-skewed hiring data (E3, Reuters/Dastin, widely reported).",
+        "Mechanism of the failure: the model faithfully learned the historical pattern in the training data; bias was in the labels, not a bug — the reason HR is a permanent cautionary tale for supervised AI on human-outcome decisions.",
+        "Active legal exposure: Mobley v. Workday (ongoing, U.S.) advanced discrimination claims against an AI hiring-screening vendor as an agent of employers (E2/E3, court filings) — turning HR AI bias from a PR risk into direct litigation liability.",
+        "Deployed reality: AI screening (resume ranking, chatbots, video-interview scoring à la HireVue) is widely used for top-of-funnel volume, but scoring/ranking humans is exactly the high-stakes, low-reversibility task that should be last on the automation list (link Decision - Which Business Function to Automate First).",
+        "Regulatory reclassification: the EU AI Act designates employment/worker-management AI as 'high-risk', imposing documentation, bias-testing, and human-oversight obligations (E3, regulatory text — link EU AI Act for Operators, 23); NYC Local Law 144 mandates bias audits for automated employment tools.",
+        "The safe deployment shape: AI for administrative HR work (drafting job descriptions, scheduling, summarizing, answering policy questions) is low-risk and productive; AI that ranks or rejects candidates is the regulated, litigable core to avoid or heavily gate.",
+        "Non-obvious: 'debiasing' a screening model is not a solved technical fix — removing protected attributes leaves proxies (zip code, college, hobbies), so the durable answer is human-in-the-loop plus audit, not a cleaner model."
+      ],
+      "links": [
+        "Concept - The Front-Office Back-Office Adoption Split",
+        "Concept - Copilot vs Autopilot Deployment Modes",
+        "Pattern - Human-in-the-Loop Review Workflow",
+        "Concept - AI in Finance Operations",
+        "Reference - AI Impact by Business Function",
+        "Concept - Vertical AI Agents by Function",
+        "Lore - Hallucination Liability Incidents",
+        "Reference - The EU AI Act for Operators",
+        "Gotchas - Enterprise AI Adoption",
+        "Concept - The Evaluation Gap"
+      ]
+    },
+    {
+      "title": "Reference - AI Impact by Business Function",
+      "type": "reference",
+      "level": "advanced",
+      "scope": "The domain's lookup table: for each business function, the flagship deployment(s), the best measured outcome with its evidence tier and date, and the dominant deployment mode. IN: a per-function matrix (support, marketing, sales, legal, healthcare, finance, HR, translation, education) with numbers, sources, and tiers, date-stamped mid-2026. OUT: the narrative behind each row (link to the individual Breakdown/Concept notes), market-sizing dollar claims (link to 22 AI Market Sizing Claims).",
+      "key_points": [
+        "Customer support: Klarna assistant — 2.3M chats/month, work of ~700 agents, ~$40M/yr claimed profit (E2, Klarna 2024, later rebalanced); Intercom Fin 67-71% resolution at $0.99/resolution (E2, 2026); human ticket ~$8-12 vs AI ~$0.50-1.50 (E2, SaaS Capital 2024). Mode: autopilot-for-routine.",
+        "Healthcare documentation: Kaiser Permanente ambient scribes — 15,791 physician-hours saved / 63 weeks, 2.5M+ uses (E2, Tierney et al. NEJM Catalyst); DAX ~3M conversations/month across 600 orgs (E2, Microsoft 2025). Mode: copilot (draft-then-sign).",
+        "Legal: Harvey — 700k tasks/day, A&O 3,500 lawyers, valuation $3B→$11B (Feb 2025→Mar 2026) (E2). Mode: copilot, mandatory review.",
+        "Translation/localization: DeepL $2B valuation, ~$185M revenue 2024, claimed 1.3x Google accuracy (E2); Duolingo cut ~10% contractors 2024 (E2/E3). Mode: MT post-editing.",
+        "Finance ops: JPMorgan LLM Suite — 200,000+ employees, 450+ use cases, 1,000 by 2026 (E2). Mode: internal copilot.",
+        "Marketing/content: Jasper $1.5B→~20% internal cut post-ChatGPT (E2, 2023) — the commoditization marker. Sales: 11x/Artisan AI SDRs, contested ARR and 70-80% churn (E2, TechCrunch 2025). HR: Amazon scrapped biased tool 2018 (E3); Workday litigation ongoing (E2/E3). Education: Khanmigo 700k users, null measured outcome difference (E2, 2024).",
+        "Cross-cutting anchor: McKinsey put ~75% of gen-AI value in customer ops, marketing/sales, software eng, R&D and total annual value at $2.6-4.4T (E1, June 2023) — an estimate, not realized value; every dollar figure in this table is date-stamped and tier-marked because all are fast-moving."
+      ],
+      "links": [
+        "Concept - Support Deflection Economics",
+        "Breakdown - Klarna's AI Customer Service Bet",
+        "Breakdown - AI Medical Scribes",
+        "Concept - The Front-Office Back-Office Adoption Split",
+        "Concept - Vertical AI Agents by Function",
+        "Reference - AI Market Sizing Claims",
+        "Reference - Developer Productivity Studies",
+        "Reference - The 2026 Navigation Cheatsheet"
+      ]
+    },
+    {
+      "title": "Pattern - Human-in-the-Loop Review Workflow",
+      "type": "pattern",
+      "level": "advanced",
+      "scope": "The reusable deployment pattern that recurs in every successful high-stakes AI-in-function case: the model drafts or proposes, a qualified human reviews and commits, and the review step is instrumented as the quality gate. IN: the pattern structure, where the human sits, how to measure edit-rate/override-rate, when to graduate to autopilot. OUT: agent-loop sandboxing internals (link to 10 Gotchas - Agents in Production), eval methodology (link to 23 The Evaluation Gap).",
+      "key_points": [
+        "Problem and solution shape: when AI output has real-world consequences but the model is not reliable enough for autonomy, insert a qualified human as the commit gate — the model drafts, the human owns the result. This is the pattern behind scribes, Harvey, MT post-editing, and LLM Suite.",
+        "Structure: (1) model generates a draft with sources/citations, (2) human reviews with the draft and source side-by-side, (3) human edits and commits, (4) edits are logged as training signal and quality telemetry.",
+        "The key instrument is edit-rate / override-rate: how much humans change the draft is your real quality metric — a rising edit-rate signals model or data drift before customers notice (link The Evaluation Gap, 23).",
+        "Where the human sits determines the economics: per-item review (every scribe note signed) is safe but caps throughput; sampled review (audit 5% of autopilot resolutions) scales but accepts a known error rate — the choice is the copilot-vs-autopilot decision (link, Copilot vs Autopilot Deployment Modes).",
+        "Graduation criterion: move a query type from copilot to autopilot only when measured override-rate on that type falls below your error-cost threshold — data-driven scope expansion, the discipline Klarna skipped (link Klarna Reversal).",
+        "Tradeoffs / when NOT to use: for low-stakes reversible output (draft ad copy, internal search) mandatory review is pure overhead; reserve the pattern for consequential or regulated outputs where an error costs more than the review.",
+        "Known uses: medical scribe draft-then-sign (Kaiser), Harvey lawyer review, DeepL/MTPE translator post-editing, JPMorgan LLM Suite employee editing — four independent functions converging on the same shape."
+      ],
+      "links": [
+        "Concept - Copilot vs Autopilot Deployment Modes",
+        "Concept - Support Deflection Economics",
+        "Breakdown - AI Medical Scribes",
+        "Breakdown - Harvey and AI in Legal Work",
+        "Concept - Vertical AI Agents by Function",
+        "Lore - The Klarna Reversal and Support Bot Walk-Backs",
+        "Concept - The Capability-Reliability Gap",
+        "Concept - The Evaluation Gap",
+        "Gotchas - Enterprise AI Adoption"
+      ]
+    },
+    {
+      "title": "Concept - AI SDRs and Sales Automation",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The sales function's autonomy frontier: 'AI SDR' products (11x's Alice, Artisan's Ava) that promise fully autonomous outbound prospecting, and the 2025 credibility crisis that exposed the gap between marketed autonomy and delivered results. IN: the AI-SDR pitch, the 11x ARR/churn scandal, why autonomous outbound is hard, the copilot sales-tooling that actually works. OUT: outcome-based pricing theory (link to 22 Unit Economics), the general vertical-agent shift (link to Concept - Vertical AI Agents by Function).",
+      "key_points": [
+        "The pitch: AI SDRs (11x 'Alice', Artisan 'Ava') marketed as fully autonomous 'digital workers' that research leads, write, send, and follow up across email/LinkedIn with minimal human input — Artisan's 'Stop Hiring Humans' billboard campaign made it the emblem of the autopilot claim (E2, 2024-2025).",
+        "The credibility crisis: a March 2025 TechCrunch investigation alleged 11x listed non-customers as customers (ZoomInfo and Airtable both denied being clients), counted short trial contracts as annual ARR, and ran ~70-80% churn / ~79% self-reported retention that employees called optimistic (E2, single investigation — reporter-sourced).",
+        "11x had raised a ~$50M Series B led by a16z (Sept 2024) (E2), so the gap between funding narrative and delivered retention became the AI-SDR sector's defining trust problem.",
+        "Why autonomous outbound is hard: an SDR agent's output (a cold email) reaches a prospect directly with no human gate, and a bad send burns the domain reputation and the lead — a low-reversibility external action, the worst-fit for autopilot (link Copilot vs Autopilot Deployment Modes).",
+        "What actually works in sales AI is copilot: conversation intelligence (Gong-style call summarization/coaching), CRM auto-enrichment, and draft-email assistance where a rep reviews before sending — measured productivity gains without the deliverability/brand risk.",
+        "Non-obvious: high churn in AI SDRs isn't just product immaturity — autonomous cold outreach has a structural quality ceiling because volume-without-judgment is exactly what triggers spam filters and prospect fatigue; the technology scales the wrong thing, so 'more autonomous' can mean 'worse pipeline'."
+      ],
+      "links": [
+        "Concept - Copilot vs Autopilot Deployment Modes",
+        "Concept - AI in Marketing and Content",
+        "Concept - Vertical AI Agents by Function",
+        "Lore - What Vendors Don't Say About Deflection Rates",
+        "Reference - AI Impact by Business Function",
+        "Concept - Moats in the AI Application Layer",
+        "Concept - The Pilot-to-Production Gap",
+        "Concept - Unit Economics of LLM Products"
+      ]
+    },
+    {
+      "title": "Concept - Vertical AI Agents by Function",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The 2025-2026 shift from horizontal copilots to full-stack vertical AI agents that own an end-to-end function workflow and are priced on outcomes — Sierra and Decagon in support, Harvey in legal, Abridge in health, 11x in sales. IN: the vertical-agent thesis, outcome pricing as deployed, the defensibility argument, the reliability gate that still bounds them. OUT: outcome-vs-seat pricing theory (link to 22 Unit Economics), the SDR-specific failure (link to Concept - AI SDRs and Sales Automation).",
+      "key_points": [
+        "The thesis: instead of a copilot inside existing software, a vertical agent owns the whole workflow for one function and charges per outcome — Sierra (Bret Taylor) and Decagon in support, Harvey in legal, Abridge in healthcare, 11x/Artisan in sales.",
+        "Outcome pricing as actually deployed: Intercom Fin at $0.99 per resolution (E2), Sierra contracts estimated $150k+/yr and Decagon ~$95k/yr with multi-week deployment (E1, third-party estimates 2026) — pricing on results, not seats, is the vertical-agent business model.",
+        "The defensibility argument: a vertical agent's moat is claimed to be domain data, workflow integration, and the accountable-reviewer relationship (Best-in-KLAS for Abridge; anchor law firms for Harvey), not the base model — a response to the wrapper-commoditization lesson (link Moats in the AI Application Layer, 22).",
+        "The reliability gate still binds: every currently-successful vertical agent runs with a human-review or human-escalation path (scribe sign-off, lawyer review, support escalation) — 'full autonomy' remains marketing, gated by the Capability-Reliability Gap (link, 20).",
+        "Valuation signal (all E2, announced): Harvey $3B→$11B (2025-2026), Abridge $5.3B (2025) — investors are pricing vertical agents as the app-layer winners, though realized retention (see 11x's churn) is far less certain than the funding narrative.",
+        "Non-obvious: outcome pricing quietly transfers reliability risk to the vendor — if the agent under-resolves, the vendor eats it — which is why 'assumed resolution' accounting and generous outcome definitions creep in (link Lore - What Vendors Don't Say About Deflection Rates); the pricing model and the measurement games are two sides of the same coin."
+      ],
+      "links": [
+        "Concept - Copilot vs Autopilot Deployment Modes",
+        "Concept - Support Deflection Economics",
+        "Concept - AI SDRs and Sales Automation",
+        "Breakdown - Klarna's AI Customer Service Bet",
+        "Breakdown - Harvey and AI in Legal Work",
+        "Lore - What Vendors Don't Say About Deflection Rates",
+        "Concept - Moats in the AI Application Layer",
+        "Decision - Build vs Buy vs Wrap",
+        "Concept - Token Price Deflation"
+      ]
+    },
+    {
+      "title": "Lore - The Klarna Reversal and Support Bot Walk-Backs",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The war story of the industry's most-hyped AI deployment reversing course, and the pattern of quiet support-automation walk-backs it exemplifies — the tribal lesson operators learn after the press release. IN: the Klarna narrative arc, the specific CEO admissions, the broader walk-back pattern, honest evidence status. OUT: the Klarna deployment numbers themselves (link to Breakdown - Klarna's AI Customer Service Bet), the deflection-metric games (link to Lore - What Vendors Don't Say About Deflection Rates).",
+      "key_points": [
+        "The arc: Klarna spent 2024 as the poster child of AI replacing 700 agents and freezing hiring, then in May 2025 CEO Sebastian Siemiatkowski publicly admitted the company 'went too far', that cost-focus had degraded quality and eroded customer trust, and that it was rehiring humans (E2/E3, Bloomberg/TechCrunch/Forbes — multiply reported).",
+        "The stated mechanism of failure: internal review and customer feedback found AI replies were generic, repetitive, and lacked the empathy and nuanced problem-solving that complex support needs — the AI handled volume but not judgment (E2, Klarna/CEO).",
+        "The corrected strategy: AI for routine high-volume queries, humans for complex/VIP cases, with new remote human staff recruited (targeting students, rural residents, loyal users) — a rebalance, not an abandonment (E2, 2025).",
+        "The broader pattern (folklore, partially sourced): Klarna is the loud case, but quiet walk-backs recur — companies over-automate on a savings demo, CSAT and re-contact rates degrade, and humans get reintroduced without a press release; the public reversals are the visible tip.",
+        "Why it keeps happening: the savings are immediate and measurable (headcount, cost-per-ticket) while the quality damage is lagged and diffuse (churn, trust, brand) — the incentive structure rewards over-automation until the lagged cost lands (link Support Deflection Economics).",
+        "The lesson operators internalize: announce capability, not headcount-equivalence; keep a quality guardrail (CSAT, re-contact) firing alongside the savings metric; and scope autonomy to measured query types — the same discipline the Human-in-the-Loop Review pattern encodes.",
+        "Evidence status: the Klarna reversal is well-documented and multiply-sourced (E2/E3); the 'many companies quietly walked back' generalization is weakly-sourced practitioner folklore and labeled as such."
+      ],
+      "links": [
+        "Breakdown - Klarna's AI Customer Service Bet",
+        "Concept - Support Deflection Economics",
+        "Lore - What Vendors Don't Say About Deflection Rates",
+        "Concept - The Pilot-to-Production Gap",
+        "Concept - The Evaluation Gap",
+        "Lore - Hallucination Liability Incidents"
+      ]
+    },
+    {
+      "title": "Lore - What Vendors Don't Say About Deflection Rates",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The measurement games behind support-AI marketing numbers — how 'deflection', 'containment', and 'resolution' are defined to look good, and what operators discover only after signing. IN: the metric-definition tricks, the abandonment-counted-as-success trap, the residual-difficulty effect, honest evidence status. OUT: the clean deflection economics (link to Concept - Support Deflection Economics), the Klarna-specific reversal (link to Lore - The Klarna Reversal and Support Bot Walk-Backs).",
+      "key_points": [
+        "The core trick: vendors report the flattering metric — raw deflection (~45%) or containment — not true resolution (~14% genuine self-service on the same footing) (E1, industry benchmarks 2026); the definition, not the model, produces the headline.",
+        "Abandonment counted as success: 'assumed resolution' logic counts a customer who left without asking for more help as resolved — including customers who gave up and emailed a human, i.e., an unsolved and now-angrier case (E2, Fin transcript critiques 2026).",
+        "The residual-difficulty effect operators discover late: automating the easy 50-60% leaves a harder, costlier residual human queue, so cost-per-remaining-ticket rises and agent burnout can worsen even as total headcount drops (analytic, ties to Support Deflection Economics).",
+        "Gartner's contrarian call: it explicitly challenged the assumption that GenAI support is cheaper, projecting rising costs as model, retrieval, escalation, and maintenance overhead accumulate (E1, Gartner 2024) — a direct counter to vendor savings decks.",
+        "The honest metric vendors avoid featuring is re-contact rate (same customer, same issue, within N days) — it exposes fake resolutions, so it rarely leads a pitch; demand it in a pilot.",
+        "The buyer's defense (tribal knowledge): in a pilot, define resolution as CSAT-confirmed or no-re-contact, audit a sample of 'resolved' transcripts by hand, and price against re-contact-adjusted resolution, not the vendor's headline — the gap between the two is where the deployment succeeds or quietly fails.",
+        "Evidence status: cost and benchmark ranges are E1/E2 industry figures that vary widely by vendor and queue; the 'assumed resolution' and residual-difficulty critiques are well-observed practitioner knowledge, sourced where possible and labeled folklore where not."
+      ],
+      "links": [
+        "Concept - Support Deflection Economics",
+        "Breakdown - Klarna's AI Customer Service Bet",
+        "Lore - The Klarna Reversal and Support Bot Walk-Backs",
+        "Concept - The Evaluation Gap",
+        "Concept - Vertical AI Agents by Function",
+        "Reference - AI Impact by Business Function"
+      ]
+    }
+  ]
+}

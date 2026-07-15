@@ -1,0 +1,585 @@
+{
+  "domain": "02 - Neural Networks",
+  "slug": "neural-networks",
+  "notes": [
+    {
+      "title": "Concept - The Multilayer Perceptron",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The MLP as the base neural network: neurons, weights, biases, the affine-then-nonlinearity stack, the forward pass, and universal approximation. IN: layer structure, why nonlinearity is essential, forward-pass math and FLOP count. OUT: how it is trained (link The Training Loop, Backpropagation), specific activations (link Activation Functions), the transformer FFN's exact shape (link 03).",
+      "key_points": [
+        "A layer computes h = act(Wx + b); with no nonlinearity a stack collapses to a single linear map W3*W2*W1 -- the nonlinearity is the entire source of expressivity, and stacking Linear layers with no activation is a silent underfitting bug",
+        "Universal Approximation Theorem (Cybenko 1989, Hornik 1991): one hidden layer of sufficient width approximates any continuous function on a compact set -- but the required width can be exponential; depth is exponentially more parameter-efficient (Telgarsky 2016, Eldan-Shamir 2016)",
+        "Parameter count of a layer is d_in*d_out + d_out; the weight matrix dominates, bias is negligible; forward FLOPs are ~2*params per input token",
+        "The XOR problem (Minsky and Papert 1969) is not linearly separable and killed the single perceptron; a hidden layer solves it -- the historical hinge that stalled and then revived the field",
+        "The 'MLP' is exactly the position-wise FFN block inside every transformer (usually 4x expansion then projection back); understanding it here transfers directly to 03",
+        "Bias-variance intuition at the surface: width/depth increase capacity; why huge nets still generalize is the deep story (link Generalization in Deep Learning)"
+      ],
+      "links": [
+        "Concept - Backpropagation",
+        "Concept - Activation Functions",
+        "Concept - The Training Loop",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Deep Dive - The Transformer",
+        "Concept - Generalization in Deep Learning"
+      ]
+    },
+    {
+      "title": "Concept - Loss Functions for Neural Networks",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The objective a network minimizes and how it shapes gradients: MSE/MAE/Huber for regression, cross-entropy for classification, label smoothing, and the softmax+cross-entropy fused gradient. IN: which loss for which task, why CE beats MSE for classification, label smoothing, loss-at-init diagnostics. OUT: the information theory of cross-entropy (link 01 Entropy and Cross-Entropy), preference/RL objectives (link 06), the softmax function itself (link Softmax).",
+      "key_points": [
+        "Cross-entropy loss = -sum(y_i * log(y_hat_i)); paired with softmax its gradient w.r.t. the logits is the clean y_hat - y, which is exactly why softmax+CE dominates classification",
+        "MSE through a sigmoid output has gradient proportional to sigmoid'(z) which vanishes when the unit saturates -- the concrete reason CE replaced MSE for classification (fast learning even when badly wrong)",
+        "Label smoothing (Szegedy et al. 2016): replace hard target 1.0 with 1-eps (typ. eps=0.1); improves calibration and stops logits growing unboundedly, but Muller et al. 2019 show it erases inter-class structure and can hurt as a distillation teacher",
+        "Loss-at-init sanity check: for C balanced classes CE ~ ln(C) at step 0 (e.g. ln(50257) ~ 10.82 for GPT-2 vocab, ln(1000) ~ 6.9 for ImageNet) -- a canonical first diagnostic before touching the model",
+        "Reduction matters: mean vs sum vs per-token changes the effective learning rate by batch/sequence length; the masked-loss token-count bug is a classic silent SFT error (link 06)",
+        "Huber/MAE trade robustness to outliers against slower convergence; regression heads matter for value/reward models (link 06 Reward Models)"
+      ],
+      "links": [
+        "Concept - Softmax",
+        "Concept - Entropy and Cross-Entropy",
+        "Concept - Backpropagation",
+        "Concept - Reward Models",
+        "Gotchas - Training Neural Networks",
+        "Concept - KL Divergence"
+      ]
+    },
+    {
+      "title": "Concept - Backpropagation",
+      "type": "concept",
+      "level": "core",
+      "scope": "Reverse-mode automatic differentiation applied to neural nets: the chain rule over the computational graph, forward activations cached for the backward pass, and per-op vector-Jacobian products. IN: the algorithm, the DAG, memory cost, matrix-form local gradients, why reverse-mode. OUT: the optimizer update (link SGD, Adam and AdamW), each layer's specific gradient (in that layer's note), gradient checkpointing/recompute at scale (link 04/08).",
+      "key_points": [
+        "Backprop is reverse-mode autodiff: one forward pass caches activations, one backward pass propagates the adjoint dL/dv via local vector-Jacobian products in reverse topological order; each node needs only its local Jacobian, never the full one",
+        "Cost is ~2x the forward pass (the 'backward is 2x forward' rule of thumb); memory is dominated by retained forward activations, which must live until consumed in backward (link 08 Memory Math for Transformers)",
+        "Why reverse-mode not forward-mode: one scalar output (the loss) and millions of inputs (params) -> reverse costs O(1) passes vs O(#params) for forward-mode; forward-mode wins only for few-input many-output Jacobians",
+        "Matrix form is the whole game: for Y = X W, the backward is X_bar = Y_bar W^T and W_bar = X^T Y_bar -- two matmuls, so the backward pass is also matmul-bound (link 01 Matrix Multiplication as the Atom of Deep Learning)",
+        "Failure modes: gradients vanish or explode multiplicatively across depth (link Vanishing and Exploding Gradients); an in-place op or a .detach() silently severs the graph and zeroes upstream gradients",
+        "Backprop computes exact analytic gradients; finite-difference gradient checking (relative error < 1e-5) is the canonical unit test for a hand-written backward",
+        "Non-obvious: activation recomputation (gradient checkpointing) trades compute for the activation-memory wall -- the same idea FlashAttention exploits (link 08)"
+      ],
+      "links": [
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - Vanishing and Exploding Gradients",
+        "Concept - The Training Loop",
+        "Reference - Memory Math for Transformers",
+        "Snippet - A Minimal Training Loop in PyTorch",
+        "Deep Dive - FlashAttention",
+        "Concept - Softmax"
+      ]
+    },
+    {
+      "title": "Concept - The Training Loop",
+      "type": "concept",
+      "level": "core",
+      "scope": "The canonical optimization loop and its correct ordering: forward -> loss -> backward -> clip -> optimizer step -> zero grad, plus epochs/steps/batches, train vs eval mode, gradient accumulation and clipping. IN: the loop skeleton, each step's role and ordering hazards, effective batch size. OUT: distributed/at-scale loop mechanics and LR schedules (link 04), each optimizer's math (link its note).",
+      "key_points": [
+        "The five-line core: opt.zero_grad(); loss = f(x,y); loss.backward(); clip_grad_norm_(...); opt.step(). loss.backward() ACCUMULATES into .grad by design (for RNNs/accumulation), so forgetting zero_grad silently sums gradients across steps -- the #1 beginner bug",
+        "Effective batch = micro-batch * grad-accum steps * data-parallel world size; gradient accumulation trades more steps for less peak memory at fixed effective batch",
+        "Gradient clipping by global norm (max_norm ~1.0 is the folklore default) tames spikes; in mixed precision you must UNSCALE before clipping and stepping (link 04 Mixed Precision Training)",
+        "model.train() vs model.eval() flips BatchNorm running-stat updates and Dropout; forgetting to switch leaks train-time noise into eval or corrupts running stats (link Breakdown - Batch Normalization)",
+        "zero_grad(set_to_none=True) is the modern default: it skips a memory write and frees grad tensors, slightly changing semantics (None vs 0) that some code depends on",
+        "First debugging move is always overfit-a-single-batch to ~0 loss (link Playbook); the loop is where most 'model' bugs actually live",
+        "Non-obvious: put the LR-schedule step and the optimizer step in the right order (scheduler after optimizer in PyTorch >=1.1) or you silently skip the first LR value"
+      ],
+      "links": [
+        "Concept - Backpropagation",
+        "Concept - Adam and AdamW",
+        "Snippet - A Minimal Training Loop in PyTorch",
+        "Concept - Mixed Precision Training",
+        "Playbook - Debugging a Neural Network That Won't Train",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Gotchas - Training Neural Networks"
+      ]
+    },
+    {
+      "title": "Concept - Softmax",
+      "type": "concept",
+      "level": "core",
+      "scope": "The softmax function turning logits into a distribution: definition, numerical stability, temperature, the Jacobian, and the softmax+cross-entropy fused gradient. IN: max-subtraction stability, log-sum-exp, temperature scaling, saturation pathologies. OUT: sampling parameters at inference (link 07), attention's use of softmax (link 03), the loss objective (link Loss Functions).",
+      "key_points": [
+        "softmax(z)_i = exp(z_i)/sum_j exp(z_j); it is invariant to adding a constant to every logit, so subtract max_j(z_j) first to prevent exp() overflow -- the mandatory numerically stable form",
+        "log-softmax is computed via the log-sum-exp trick, never as log(softmax(...)); PyTorch fuses log_softmax + nll_loss into cross_entropy for exactly this stability reason",
+        "Jacobian d s_i / d z_j = s_i*(delta_ij - s_j); composed with cross-entropy it collapses to the clean y_hat - y (link Loss Functions, Backpropagation)",
+        "Temperature T divides logits before the exp: T->0 approaches argmax, T->inf approaches uniform; the same knob controls sampling sharpness (link 07) and distillation soft targets (link 06 Knowledge Distillation)",
+        "Softmax saturates: a large logit gap drives the winning probability to ~1 and its gradient to ~0, producing logit blow-up and attention entropy collapse (link 18 Attention Sinks)",
+        "The softmax bottleneck (Yang et al. 2018): factoring an N x V log-probability matrix through a d-dim hidden state caps its rank at d, structurally limiting the output distribution's expressivity (link 18)",
+        "Non-obvious: logits are only defined up to an additive constant per row, so raw logit values are meaningless in isolation -- only differences matter (relevant to the logit lens in 14)"
+      ],
+      "links": [
+        "Concept - Loss Functions for Neural Networks",
+        "Concept - Entropy and Cross-Entropy",
+        "Concept - Sampling and Decoding Parameters",
+        "Concept - Attention Mechanism",
+        "Concept - Attention Sinks",
+        "Concept - Knowledge Distillation"
+      ]
+    },
+    {
+      "title": "Concept - Activation Functions",
+      "type": "concept",
+      "level": "core",
+      "scope": "Pointwise nonlinearities: sigmoid/tanh, ReLU and its variants, GELU/SiLU, their derivatives and pathologies, and why smooth gated activations won in transformers. IN: the functions, gradients, dead-neuron and saturation failure modes, exact-vs-tanh GELU. OUT: gated GLU/SwiGLU FFN variants (link 03), the softmax (link Softmax), full-batch optimization dynamics (link Edge of Stability).",
+      "key_points": [
+        "Sigmoid and tanh saturate: their derivatives peak at 0.25 and 1.0 and decay to 0 in the tails, so deep stacks vanish gradients -- the pre-2010 wall on network depth",
+        "ReLU max(0,x) has derivative 0 or 1 and no positive-side saturation; it made deep nets trainable (Nair-Hinton 2010, Glorot et al. 2011) but suffers 'dying ReLU' -- a unit pushed permanently negative gets zero gradient forever and never recovers",
+        "Leaky ReLU / PReLU / ELU / SELU add a negative-side slope to keep gradients alive; gains are usually marginal, SELU targets self-normalizing nets (with LeCun init)",
+        "GELU x*Phi(x) (Hendrycks-Gimpel 2016) and SiLU/Swish x*sigmoid(x): smooth, non-monotonic dip just below 0; default in BERT/GPT. The tanh approximation of GELU differs from exact GELU by ~0.1% but is a real cross-implementation reproducibility trap",
+        "Detection: track the fraction of dead units and activation histograms per layer; a layer with >90% zeros post-ReLU is dying and usually signals too-large LR or bad init",
+        "Non-obvious: GELU's edge over ReLU is small and often within noise -- it persists largely by convention inherited from BERT/GPT rather than a decisive mechanistic win"
+      ],
+      "links": [
+        "Concept - Vanishing and Exploding Gradients",
+        "Concept - Weight Initialization",
+        "Concept - Backpropagation",
+        "Concept - RMSNorm and LayerNorm",
+        "Deep Dive - The Transformer",
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Softmax",
+        "Concept - Dropout"
+      ]
+    },
+    {
+      "title": "Concept - Stochastic Gradient Descent and Momentum",
+      "type": "concept",
+      "level": "core",
+      "scope": "SGD, mini-batching, momentum, and Nesterov acceleration -- the optimizer substrate beneath Adam. IN: the update rules, why stochasticity helps and regularizes, momentum as an EMA of gradients, the noise scale. OUT: adaptive methods (link Adam and AdamW), LR schedules and gradient-noise-scale batch sizing at scale (link 04), at-scale optimizer engineering (link 04).",
+      "key_points": [
+        "SGD update theta <- theta - eta*g; a mini-batch gradient is an unbiased estimate of the full gradient with variance ~ 1/B, giving diminishing returns to batch size past the critical batch size (McCandlish et al. 2018 gradient noise scale -- link 04)",
+        "Momentum: v <- mu*v + g, theta <- theta - eta*v; mu=0.9 averages over ~1/(1-mu)=10 recent gradients, damping oscillation across the short axis of ill-conditioned valleys",
+        "Nesterov evaluates the gradient at the look-ahead point theta - eta*mu*v; it improves the constant in convex theory but rarely matters in deep nets",
+        "SGD's implicit regularization: gradient noise biases the trajectory toward flat, low-norm minima, which is the leading explanation for why plain SGD often test-generalizes better than Adam on vision (link Generalization, Lore - The Adam vs SGD Generalization Wars)",
+        "The learning rate is the single most important hyperparameter: too high diverges to NaN, too low crawls or sticks; the LR range test (Smith 2015) sweeps LR upward until loss diverges to find the usable band",
+        "Non-obvious: the mu=0.9 default is folklore that happens to match typical curvature timescales (~10-step averaging); heavy-ball momentum is a discretized damped oscillator, and too-high mu can itself cause overshoot"
+      ],
+      "links": [
+        "Concept - Adam and AdamW",
+        "Concept - Generalization in Deep Learning",
+        "Lore - The Adam vs SGD Generalization Wars",
+        "Reference - Optimizer Update Rules",
+        "Concept - Scaling Laws",
+        "Concept - The Training Loop"
+      ]
+    },
+    {
+      "title": "Concept - Dropout",
+      "type": "concept",
+      "level": "core",
+      "scope": "Dropout as stochastic regularization: random unit masking, inverted-dropout scaling, train/eval behavior, and the ensemble interpretation. IN: the mechanism, typical rates, why it regularizes, DropConnect/stochastic-depth variants, MC-dropout. OUT: weight decay as a regularizer (covered under Adam and AdamW), the BatchNorm/Dropout ordering pitfall as an aggregated gotcha (link Gotchas, Breakdown - Batch Normalization).",
+      "key_points": [
+        "Inverted dropout: at train time zero each unit with probability p and scale survivors by 1/(1-p) so the expected activation is preserved; at test time do nothing. Forgetting the survivor scaling is a classic silent bug that shifts activation magnitude at inference",
+        "Interpretation: approximates an exponential ensemble of ~2^n weight-sharing subnetworks (Srivastava et al. 2014); equivalently an adaptive-noise injection that penalizes co-adaptation of features",
+        "Rates: 0.1-0.5 for MLPs/CNNs; transformers typically use ~0.1 (attention and residual dropout) and often 0.0 for large-model pretraining, where dataset scale supplies the regularization instead",
+        "Dropout and BatchNorm interact badly -- the variance shift between train (dropped) and eval (kept) statistics degrades accuracy (Li et al. 2019); LayerNorm-based transformers sidestep this",
+        "Variants: DropConnect drops weights not activations; stochastic depth / DropPath (Huang et al. 2016) drops whole residual branches and is key to training very deep ResNets and ViTs",
+        "Non-obvious: keeping dropout ON at inference and averaging many stochastic forward passes (MC-dropout, Gal-Ghahramani 2016) yields a cheap predictive-uncertainty estimate"
+      ],
+      "links": [
+        "Concept - Generalization in Deep Learning",
+        "Breakdown - Batch Normalization",
+        "Gotchas - Training Neural Networks",
+        "Concept - RMSNorm and LayerNorm",
+        "Concept - Vision Transformers"
+      ]
+    },
+    {
+      "title": "Concept - Embeddings as Learned Representations",
+      "type": "concept",
+      "level": "core",
+      "scope": "Embedding layers as learned lookup tables and the geometry of representation space: token/positional/categorical embeddings, sparse gradients, weight tying, and distributed representations. IN: lookup mechanics, sparse-row gradients, tied input/output embeddings, embedding init and norm pathologies. OUT: embedding MODELS for retrieval (link 11), word2vec history (link 17), positional encodings/RoPE (link 03), feature superposition (link 14).",
+      "key_points": [
+        "An embedding layer is a matrix E of shape (V, d); a lookup equals one_hot @ E, and the backward updates only the rows of tokens present in the batch -- a sparse gradient that needs sparse-aware optimizer handling",
+        "Weight tying (Press-Wolf 2017, Inan et al. 2016): share the input embedding with the output projection so E = W_out^T; saves V*d params (enormous for large vocab) and usually improves perplexity; used in GPT-2",
+        "Distributed representation: meaning lives in directions of a continuous space, not in single neurons; approximate linear structure emerges (king - man + woman ~ queen), and the LM head becomes a dot-product retrieval against token embeddings",
+        "Init folklore: GPT-family embeddings init ~ N(0, 0.02); the original Transformer multiplies embeddings by sqrt(d) to match sinusoidal positional-encoding magnitude",
+        "Failure: rare/undertrained token rows keep near-init norms while others grow, producing anomalous 'glitch tokens' like SolidGoldMagikarp that trigger degenerate behavior (link 18 Glitch Tokens)",
+        "Non-obvious: because meaning is superposed across more directions than there are neurons, individual embedding dimensions are rarely interpretable (link 14 Superposition)"
+      ],
+      "links": [
+        "Concept - Superposition",
+        "Lore - Glitch Tokens",
+        "Concept - Embedding Models",
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Concept - Byte-Pair Encoding",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning"
+      ]
+    },
+    {
+      "title": "Snippet - A Minimal Training Loop in PyTorch",
+      "type": "snippet",
+      "level": "core",
+      "scope": "A complete, runnable training loop for a small MLP classifier that demonstrates correct operation ordering, train/eval switching, gradient clipping, and the param-group weight-decay split. IN: the ~40-line runnable example and the 3-4 expert decisions encoded in it. OUT: distributed/AMP scaling (link 04), the theory behind each component (link the concept notes).",
+      "key_points": [
+        "Complete runnable code: synthetic dataset -> nn.Sequential MLP -> AdamW with two param groups -> loop: zero_grad(set_to_none=True), forward, cross_entropy, backward, clip_grad_norm_(1.0), step; plus a torch.no_grad() eval block toggled by model.eval()",
+        "Show the weight-decay param-group split exactly like nanoGPT's configure_optimizers: decay only 2D matmul weights, NO decay on biases, LayerNorm/RMSNorm gains, or embeddings",
+        "Show model.train()/model.eval() toggling and state why it matters (Dropout and BatchNorm behavior change)",
+        "Show gradient clipping positioned after backward() and before step(), and print grad norm to make spikes visible",
+        "Header block: deps (torch 2.x), expected output (loss falling from ~ln(num_classes) toward 0 on an overfittable batch), approximate runtime on CPU",
+        "Why-written-this-way: set_to_none memory/perf win and its None-vs-0 semantics, the decay param-group rationale, clip-before-step ordering, no_grad() in eval to free activation memory"
+      ],
+      "links": [
+        "Concept - The Training Loop",
+        "Concept - Adam and AdamW",
+        "Concept - Backpropagation",
+        "Playbook - Debugging a Neural Network That Won't Train"
+      ]
+    },
+    {
+      "title": "Concept - Adam and AdamW",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The Adam optimizer and the AdamW decoupled-weight-decay fix: first/second moment EMAs, bias correction, the update rule, memory cost, and why AdamW is not Adam+L2. IN: full mechanism, hyperparameters, the decoupling argument, when Adam beats SGD. OUT: at-scale optimizer engineering and Muon/Shampoo/Lion (link 04), the epsilon/bias-correction numerical arcana (link Adam's Epsilon and Bias Correction), LR schedules (link 04).",
+      "key_points": [
+        "Adam (Kingma-Ba 2015): m <- b1*m + (1-b1)*g, v <- b2*v + (1-b2)*g^2, bias-correct m_hat=m/(1-b1^t), v_hat=v/(1-b2^t), update theta <- theta - eta*m_hat/(sqrt(v_hat)+eps); a per-parameter adaptive step",
+        "Defaults b1=0.9, b2=0.999, eps=1e-8, but LLM pretraining commonly uses b2=0.95 for faster, more stable second-moment adaptation at large batch -- the '0.95 for transformers' folklore",
+        "AdamW (Loshchilov-Hutter 2019): apply weight decay as theta <- theta - eta*lambda*theta DECOUPLED from the gradient, not folded in as L2, because Adam's per-coordinate 1/sqrt(v) scaling distorts an L2 term's intended uniform shrinkage; AdamW is now the universal default (weight decay ~0.1)",
+        "Memory: Adam stores m and v, typically in fp32, i.e. 8 bytes/param on top of weights and gradient -- this dominates optimizer-state memory and is what ZeRO shards (link 08 Memory Math, 04 Data Parallelism and ZeRO)",
+        "The update magnitude is roughly bounded by eta because m_hat/sqrt(v_hat) ~ +/-1, making Adam behave like a smoothed sign-descent -- why Adam LRs (1e-4 to 1e-3) are small and transfer better than SGD LRs",
+        "Failure: Adam can settle in sharper minima that generalize worse than SGD (link Lore); Reddi et al. 2018 gave a convex non-convergence counterexample fixed by AMSGrad's max-of-v"
+      ],
+      "links": [
+        "Concept - Stochastic Gradient Descent and Momentum",
+        "Concept - Adam's Epsilon and Bias Correction",
+        "Lore - The Adam vs SGD Generalization Wars",
+        "Reference - Memory Math for Transformers",
+        "Concept - Data Parallelism and ZeRO",
+        "Reference - Optimizer Update Rules"
+      ]
+    },
+    {
+      "title": "Concept - RMSNorm and LayerNorm",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Layer Normalization and RMSNorm: per-token feature normalization, learnable gain/bias, why they stabilize training, and why RMSNorm (dropping mean-centering) won in modern LLMs. IN: both mechanisms, the gradient effect, the re-centering question, precision handling. OUT: pre-norm vs post-norm placement (link 03), BatchNorm (link Breakdown), the which-norm decision (link Decision).",
+      "key_points": [
+        "LayerNorm (Ba et al. 2016): normalize over the feature dim per token, x_hat = (x - mean)/sqrt(var + eps), then scale-shift gamma*x_hat + beta; batch-independent, so it works for variable-length sequences, RNNs, and transformers where BatchNorm fails",
+        "RMSNorm (Zhang-Sennrich 2019): drop mean subtraction and bias, x/sqrt(mean(x^2) + eps) * gamma; ~7-64% faster on the norm op (no mean, no beta) and used in LLaMA/T5/most modern LLMs -- empirical evidence the re-centering was unnecessary",
+        "Why it stabilizes: rescaling activations to a fixed magnitude keeps the forward pass scale-invariant to its input and keeps gradients well-conditioned across depth, decoupling layers during optimization",
+        "Precision: LayerNorm/RMSNorm are computed in fp32 even under bf16/fp16 mixed precision, because the sum-of-squares variance underflows in low precision (link 04 Mixed Precision Training, 01 Floating Point)",
+        "eps placement (1e-5 vs 1e-6) and whether gamma is initialized to 1.0 are load-bearing details; some models drop the learnable bias entirely",
+        "Non-obvious: the LayerNorm backward is not a simple rescale -- its gradient subtracts the mean and the projection onto x, removing the gradient component along the activation direction, which is part of why it conditions optimization"
+      ],
+      "links": [
+        "Breakdown - Batch Normalization",
+        "Decision - Choosing a Normalization Layer",
+        "Concept - Vanishing and Exploding Gradients",
+        "Deep Dive - The Transformer",
+        "Concept - Mixed Precision Training",
+        "Concept - Floating Point for Deep Learning"
+      ]
+    },
+    {
+      "title": "Concept - Weight Initialization",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Why initial weight scale decides whether a deep net trains at all, and the variance-preserving schemes plus transformer-specific residual scaling. IN: the variance-preservation argument, Xavier/He/LeCun/orthogonal formulas, fan-in/out, residual-scaled init, symmetry breaking. OUT: the full formula lookup (folded into this note's table), normalization as a partial substitute (link norm notes), at-scale muP init (link 04).",
+      "key_points": [
+        "Goal: keep the per-layer variance of activations (forward) and gradients (backward) near 1 so signals neither vanish nor explode exponentially with depth",
+        "Xavier/Glorot (2010): Var(W) = 2/(fan_in + fan_out), derived for tanh/linear; He/Kaiming (2015): Var(W) = 2/fan_in for ReLU, where the factor 2 compensates for ReLU zeroing half the variance",
+        "LeCun init (1/fan_in) for SELU/self-normalizing nets; orthogonal init exactly preserves vector norms and helps RNNs and very deep linear-ish stacks",
+        "Transformers: init ~ N(0, 0.02) (GPT-2) and additionally scale residual-projection weights by 1/sqrt(2N) with N = layer count, so the additive residual stream's variance does not grow linearly with depth -- the GPT-2 'scale the residual projections' trick",
+        "Bias init 0 (except the LSTM forget-gate bias ~1.0 folklore to keep the gate open early); norm gain init 1.0; identical/symmetric init makes all units in a layer compute the same function forever because gradients stay identical -- symmetry never breaks",
+        "Non-obvious: BatchNorm/LayerNorm make a network far more forgiving of init scale, so normalization partially substitutes for careful init -- and norm-free nets (Fixup/NF-Net) must re-introduce precise init to compensate (link Normalization-Free Networks)"
+      ],
+      "links": [
+        "Concept - Vanishing and Exploding Gradients",
+        "Concept - RMSNorm and LayerNorm",
+        "Concept - Residual Connections",
+        "Concept - Normalization-Free Networks",
+        "Deep Dive - The Transformer",
+        "Concept - Floating Point for Deep Learning"
+      ]
+    },
+    {
+      "title": "Concept - Vanishing and Exploding Gradients",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Why gradients shrink or blow up multiplicatively through depth and time, how it manifests, and the toolkit that fixes it. IN: the Jacobian-product/spectral-radius mechanism, symptoms and detection, and the fix stack (init, norm, residuals, clipping, gating). OUT: each fix's own note (init, norm, residuals, clipping in the loop), LSTM/GRU gating detail (link 03 RNN lineage), SSM stability (link 03).",
+      "key_points": [
+        "Backprop multiplies Jacobians across layers, so the gradient norm scales like the product of per-layer spectral norms; typical singular values below 1 vanish, above 1 explode -- both exponential in depth or sequence length",
+        "Saturating activations (sigmoid deriv <= 0.25) compound vanishing; this is the mechanistic reason deep nets and vanilla RNNs would not train before ~2010 (Hochreiter 1991, Bengio et al. 1994)",
+        "Symptoms and detection: early-layer grad norms orders of magnitude below late-layer norms (vanish) or NaN/Inf and loss spikes (explode); log per-layer grad-norm ratios and watch the LR-warmup boundary where spikes cluster (link 04 training stability, z-loss)",
+        "Fix stack: variance-preserving init, ReLU-family activations, normalization layers, residual connections (an identity path gives gradients a highway), global-norm gradient clipping, and gating (LSTM/GRU) for recurrence",
+        "Residual connections do not remove bad Jacobians -- they ADD an identity term so the product stays ~1 (the I + F' structure), which is the concrete reason ResNets train at 1000+ layers (link Residual Connections)",
+        "Non-obvious: exploding gradients in transformers often trace to attention-logit growth and unclipped updates rather than the FFN; clipping plus lower LR at warmup is the standard mitigation"
+      ],
+      "links": [
+        "Concept - Backpropagation",
+        "Concept - Residual Connections",
+        "Concept - Weight Initialization",
+        "Concept - RMSNorm and LayerNorm",
+        "Concept - The Training Loop",
+        "Concept - State Space Models and Mamba"
+      ]
+    },
+    {
+      "title": "Concept - Residual Connections",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Skip/residual connections as the gradient highway that makes very deep nets trainable: the identity-mapping mechanism, gradient flow, and the residual-stream view. IN: the y = x + F(x) mechanism, why gradients survive, pre-activation ordering, the additive-stream interpretation, depth-variance scaling. OUT: pre-norm vs post-norm placement (link 03), ResNet-as-CNN-architecture detail (link 03), residual-stream interpretability circuits (link 14).",
+      "key_points": [
+        "y = x + F(x) gives backward dL/dx = dL/dy * (I + F'(x)); the identity term guarantees gradient reaches early layers even when F'(x) ~ 0 (He et al. 2015/2016), directly countering vanishing gradients",
+        "It solves the degradation problem: plain deep nets get WORSE with added depth (not from overfitting) because they cannot even learn to approximate identity; residuals make identity the zero-effort default",
+        "Pre-activation ordering (He 2016) -- norm/activation before the weight -- yields a cleaner unobstructed identity path; the transformer analog is pre-norm placement (link 03)",
+        "Residual-stream view: in transformers each block reads from and writes additively to a shared stream that acts as a memory bus; interpretability treats it as the substrate where features are written and read (link 14 Induction Heads)",
+        "Depth scaling: because contributions are summed, residual-stream variance grows ~ linearly with depth, requiring 1/sqrt(2N) init or normalization to control (link Weight Initialization)",
+        "Non-obvious: a deep residual net behaves like an ensemble of many shorter paths (Veit et al. 2016) -- deleting a single residual layer barely hurts, unlike a plain net where it is catastrophic"
+      ],
+      "links": [
+        "Concept - Vanishing and Exploding Gradients",
+        "Concept - Weight Initialization",
+        "Concept - RMSNorm and LayerNorm",
+        "Deep Dive - The Transformer",
+        "Concept - Induction Heads",
+        "Concept - Backpropagation"
+      ]
+    },
+    {
+      "title": "Concept - Generalization in Deep Learning",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Why overparameterized nets generalize despite the capacity to memorize noise: the classical-vs-modern picture, flat minima, implicit regularization, and effective capacity. IN: the rethinking-generalization result, flat-vs-sharp minima, SGD's implicit bias, norm/margin bounds. OUT: grokking and double descent as named phenomena (link 18), sharpness-aware training as a method (link SAM), scaling laws (link 04).",
+      "key_points": [
+        "Zhang et al. 2017 'Understanding deep learning requires rethinking generalization': nets fit random labels to zero training error yet still generalize on real labels, so classical VC/capacity bounds cannot explain what is happening",
+        "Flat minima generalize better (Hochreiter-Schmidhuber 1997, Keskar et al. 2017): large-batch training finds sharper minima that generalize worse; the flatness-generalization link is contested in detail but load-bearing in practice",
+        "Implicit regularization: SGD's gradient noise and its optimization trajectory bias solutions toward low-norm, flat regions even with no explicit regularizer -- much of generalization comes from the optimizer, not the loss",
+        "Effective capacity is not parameter count; norm-based and margin-based bounds (Bartlett et al. 2017) correlate with generalization far better than VC dimension",
+        "In the overparameterized regime more parameters can REDUCE test error past the interpolation threshold, contradicting the classical U-curve (link 18 Double Descent)",
+        "Non-obvious: explicit regularizers (dropout, weight decay) are often neither necessary nor sufficient for good generalization here -- they help but the implicit bias of training does much of the work"
+      ],
+      "links": [
+        "Concept - Sharpness-Aware Minimization",
+        "Concept - Stochastic Gradient Descent and Momentum",
+        "Concept - Double Descent",
+        "Concept - Grokking",
+        "Concept - Scaling Laws"
+      ]
+    },
+    {
+      "title": "Breakdown - Batch Normalization",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "Reverse-engineering BatchNorm: what the 2015 paper claimed, what the mechanism actually is, the internal-covariate-shift myth, the train/eval discrepancy, and batch-size dependence. IN: the algorithm, running stats, the ICS debunking, loss-landscape smoothing, why it fails at small batch and in transformers. OUT: LayerNorm/RMSNorm (link their note), the which-norm decision (link Decision), general regularization theory.",
+      "key_points": [
+        "Headline: BatchNorm (Ioffe-Szegedy 2015) let CNNs train with much higher learning rates and converge faster on ImageNet; it became near-universal in vision until transformers moved to LayerNorm",
+        "How it works: normalize each feature over the BATCH dimension using batch mean/variance at train time, maintain EMA running stats (momentum default 0.1) for eval, then apply learnable gamma/beta",
+        "The clever-but-wrong part: the paper attributed its benefit to reducing 'internal covariate shift', but Santurkar et al. 2018 showed ICS is largely unchanged and BatchNorm instead SMOOTHS the loss landscape (improves gradient Lipschitzness) -- a famous case of the right technique with the wrong stated mechanism",
+        "Train/eval discrepancy: batch stats in train vs running stats in eval means small batches, distribution shift, or a forgotten model.eval() silently collapse accuracy -- a top production bug",
+        "Batch-size dependence and leakage: statistics get noisy at batch size 1-2 (so detection/segmentation and transformers use GroupNorm/LayerNorm), and normalizing over the batch leaks information across examples, a correctness hazard in some setups (e.g. contrastive/metric learning)",
+        "What to steal: the normalize-then-affine template and the higher-LR enablement; what to avoid: BatchNorm in transformers/RNNs and in any tiny-batch or cross-example-sensitive regime"
+      ],
+      "links": [
+        "Concept - RMSNorm and LayerNorm",
+        "Decision - Choosing a Normalization Layer",
+        "Concept - Dropout",
+        "Concept - Vision Transformers",
+        "Gotchas - Training Neural Networks",
+        "Concept - Generalization in Deep Learning",
+        "Concept - The Training Loop",
+        "Concept - Vanishing and Exploding Gradients",
+        "Concept - Weight Initialization",
+        "Concept - Mixed Precision Training"
+      ]
+    },
+    {
+      "title": "Reference - Optimizer Update Rules",
+      "type": "reference",
+      "level": "advanced",
+      "scope": "A lookup sheet of optimizer update equations, default hyperparameters, and per-parameter memory cost, from SGD through AdamW. IN: exact update formulas, default betas/eps/LR ranges, optimizer-state bytes, decay-coupling and precision footnotes. OUT: at-scale optimizers Muon/Shampoo/Lion/Adafactor engineering (link 04), the derivations and intuition (link the concept notes).",
+      "key_points": [
+        "Table 1 (update rules, one row each): SGD, SGD+Momentum, Nesterov, Adagrad, RMSProp, Adam, AdamW, Nadam, Adafactor -- listing state variables and the exact per-step update expression",
+        "Table 2 (default hyperparameters): SGD lr ~0.1 with momentum 0.9 (vision); Adam/AdamW lr 1e-3 (small nets) down to 1e-4 to 3e-4 (LLMs), betas (0.9, 0.999) or (0.9, 0.95), eps 1e-8 to 1e-6, weight decay 0.01-0.1 -- date-stamped (as of 2026)",
+        "Table 3 (optimizer-state memory per param): SGD 0 extra, Momentum 4 bytes, Adam/AdamW 8 bytes (m+v in fp32), Adafactor sub-linear via factored second moment -- cross-link 08 Memory Math for Transformers",
+        "Footnote: eps inside vs outside the sqrt (Adam vs LAMB convention) and why it changes behavior at tiny v (link Adam's Epsilon and Bias Correction)",
+        "Footnote: coupled L2 vs decoupled weight decay and why AdamW differs from Adam+L2 (link Adam and AdamW)",
+        "Footnote: mixed precision requires fp32 master weights and fp32 optimizer states even when compute is bf16/fp16 (link 04 Mixed Precision Training)"
+      ],
+      "links": [
+        "Concept - Adam and AdamW",
+        "Concept - Stochastic Gradient Descent and Momentum",
+        "Reference - Memory Math for Transformers",
+        "Concept - Mixed Precision Training",
+        "Concept - Adam's Epsilon and Bias Correction"
+      ]
+    },
+    {
+      "title": "Decision - Choosing a Normalization Layer",
+      "type": "decision",
+      "level": "advanced",
+      "scope": "A framework for choosing among BatchNorm, LayerNorm, RMSNorm, GroupNorm, and no-norm, by architecture, batch size, and modality. IN: the decision flow and a tradeoff matrix with real numbers; the edge cases that flip the default. OUT: the mechanisms themselves (link norm notes, Breakdown - Batch Normalization), pre/post-norm placement (link 03).",
+      "key_points": [
+        "Decision flow: transformer/sequence model -> LayerNorm or RMSNorm (RMSNorm if you want the speed win and are following LLaMA); large-batch CNN -> BatchNorm; small-batch vision such as detection/segmentation -> GroupNorm; want to drop norm entirely -> NF-Net-style adaptive gradient clipping (link Normalization-Free Networks)",
+        "Tradeoff matrix (options x criteria): batch dependence, train/eval discrepancy, per-op speed, cross-example leakage, extra params (beta) -- with numbers, e.g. RMSNorm removes the mean and beta and is measurably faster than LayerNorm on the norm op",
+        "Flip factors: batch size 1-2 rules out BatchNorm; variable sequence length rules out BatchNorm; RL/distillation fine-tuning where train/eval statistic mismatch bites favors batch-independent norms; kernel-fusion availability on your hardware can decide LN vs RMSNorm",
+        "Default for LLMs (as of 2026): RMSNorm in pre-norm placement (placement itself is owned by 03); default for classic CNNs: BatchNorm",
+        "Non-obvious: 'no norm' is viable but shifts the burden to precise init and gradient clipping, and has not been shown to scale to frontier LLMs (link Normalization-Free Networks)"
+      ],
+      "links": [
+        "Concept - RMSNorm and LayerNorm",
+        "Breakdown - Batch Normalization",
+        "Concept - Normalization-Free Networks",
+        "Deep Dive - The Transformer",
+        "Concept - Vision Transformers",
+        "Concept - The Training Loop"
+      ]
+    },
+    {
+      "title": "Playbook - Debugging a Neural Network That Won't Train",
+      "type": "playbook",
+      "level": "advanced",
+      "scope": "An operational procedure for diagnosing a model that will not learn, distilled from Karpathy's 'Recipe for Training Neural Networks' and lab practice. IN: ordered diagnostic steps from data inspection through overfit-a-batch to LR sweeps, with a symptom-to-cause branch table. OUT: the mechanism behind each fix (link the concept notes), distributed-training-specific debugging (link 04).",
+      "key_points": [
+        "Step 1: verify loss at init (~ln(C) for C-class classification); a wrong value means a label, logit, or loss-reduction bug -- fix it before touching the model",
+        "Step 2: overfit a single batch to ~0 loss; if you cannot, the model or optimization is broken, not the data volume or regularization",
+        "Step 3: inspect the actual decoded inputs and targets entering the loss (catch preprocessing, off-by-one label shift, and tokenization bugs -- most 'model' bugs are data bugs)",
+        "Step 4: run an LR sweep / range test; disable fancy schedules first; NaN means LR/eps/overflow too high, a flat loss means LR too low or a disconnected graph",
+        "Step 5: turn OFF dropout, weight decay, and augmentation while debugging, then re-add once it trains -- regularizing before the model can fit masks the real problem",
+        "Step 6: check per-layer grad norms (vanishing/exploding), the dead-ReLU fraction, and that zero_grad and train/eval mode are correct",
+        "Branch table: NaN loss -> LR/eps/fp16 overflow; loss flat -> LR too low or graph disconnected; train good but val bad -> overfit or eval-mode/running-stats bug; loss falls then explodes -> clip gradients and lower LR at warmup"
+      ],
+      "links": [
+        "Concept - The Training Loop",
+        "Concept - Loss Functions for Neural Networks",
+        "Gotchas - Training Neural Networks",
+        "Concept - Vanishing and Exploding Gradients",
+        "Snippet - A Minimal Training Loop in PyTorch",
+        "Concept - Adam and AdamW"
+      ]
+    },
+    {
+      "title": "Concept - The Edge of Stability",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The empirical finding that gradient descent trains at a sharpness of ~2/eta rather than below it, contradicting classical descent-lemma intuition. IN: the 2/eta threshold, progressive sharpening, non-monotone loss, the adaptive-optimizer analog, and the LR-curvature-generalization link. OUT: classical convex convergence theory (link 01 optimization), sharpness-aware training as a method (link SAM), at-scale training stability (link 04).",
+      "key_points": [
+        "Classical theory says GD converges only if sharpness (top Hessian eigenvalue lambda_max) < 2/eta; Cohen et al. 2021 showed real training instead DRIVES lambda_max up to ~2/eta and then hovers there -- the 'edge of stability'",
+        "Progressive sharpening: lambda_max rises throughout training until it hits 2/eta, after which the loss decreases NON-monotonically (it oscillates) yet still trends down, violating the monotone descent lemma",
+        "Implication: the usable learning rate is coupled to curvature -- the LR you pick sets the sharpness the model equilibrates at, linking LR directly to implicit flatness and thus generalization (link Generalization)",
+        "Adaptive optimizers have an analog (Cohen et al. 2022): Adam operates at an edge of stability measured in its preconditioned norm, so the phenomenon is not specific to plain GD",
+        "Why it matters practically: it explains why LR warmup helps (it lets sharpness adjust before the full LR hits), why some 'too large' LRs work anyway, and why smaller LRs can find flatter, better-generalizing solutions",
+        "Folklore/open (as of 2026): the precise interaction of the edge of stability with SGD minibatch noise, batch size, and normalization is unsettled"
+      ],
+      "links": [
+        "Concept - Stochastic Gradient Descent and Momentum",
+        "Concept - Sharpness-Aware Minimization",
+        "Concept - Generalization in Deep Learning",
+        "Concept - Adam and AdamW",
+        "Concept - The Training Loop",
+        "Concept - Scaling Laws"
+      ]
+    },
+    {
+      "title": "Concept - Sharpness-Aware Minimization",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "SAM: minimizing the worst-case loss within a neighborhood to bias training toward flat minima, its two-step gradient, cost, and variants. IN: the min-max objective, the ascend-then-descend update, ASAM and efficiency variants, empirical gains and the 2x-cost barrier. OUT: the flatness-generalization theory (link Generalization), the edge-of-stability view of curvature (link Edge of Stability), at-scale training (link 04).",
+      "key_points": [
+        "Objective (Foret et al. 2020): minimize max over ||eps|| <= rho of L(theta + eps), pushing toward flat minima; approximated by an ascent step to theta + rho*g/||g|| followed by a gradient step evaluated at that perturbed point",
+        "Cost: two forward-backward passes per step (one to find the worst-case point, one to update), which is the main adoption barrier; LookSAM and applying SAM every k steps recover most of the gain more cheaply",
+        "rho (the neighborhood radius, ~0.05) is the key hyperparameter; ASAM (Kwon et al. 2021) makes it scale-invariant so it transfers across layers with different weight norms",
+        "Gains: consistent test-accuracy and robustness improvements on vision (ResNet, ViT), largest where data is limited or the model would otherwise overfit",
+        "Connection: SAM explicitly optimizes for the flatness that plain SGD only achieves implicitly, making it a controlled probe of the flatness-generalization hypothesis (link Generalization, Edge of Stability)",
+        "Open/folklore (as of 2026): whether SAM's benefit justifies the 2x compute at LLM-pretraining scale is unclear; it remains mostly a vision and fine-tuning tool"
+      ],
+      "links": [
+        "Concept - Generalization in Deep Learning",
+        "Concept - The Edge of Stability",
+        "Concept - Stochastic Gradient Descent and Momentum",
+        "Concept - Vision Transformers",
+        "Concept - Adam and AdamW",
+        "Concept - Scaling Laws"
+      ]
+    },
+    {
+      "title": "Concept - Normalization-Free Networks",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Training deep nets without normalization layers: why you would want to, and the techniques -- scaled residuals, adaptive gradient clipping, near-zero residual init -- that replace BatchNorm/LayerNorm. IN: NF-Nets, adaptive gradient clipping, Fixup/SkipInit/ReZero, DeepNorm, and what norm's real jobs are. OUT: the norm layers themselves (link norm notes), the which-norm decision (link Decision), pre/post-norm placement (link 03).",
+      "key_points": [
+        "Motivation: BatchNorm carries a train/eval discrepancy, cross-batch information leakage, and a compute/memory cost; removing normalization improves throughput and reproducibility if you can keep training stable",
+        "NF-Nets (Brock et al. 2021): scaled residual blocks plus Adaptive Gradient Clipping (clip each gradient by a ratio to its weight norm) match or beat BatchNorm ResNets on ImageNet at higher training throughput",
+        "Fixup (Zhang et al. 2019), SkipInit, and ReZero (Bachlechner et al. 2020): initialize each residual branch near zero (e.g. a learnable scalar starting at 0) so the network begins as identity and can train deep with no norm",
+        "Mechanism: these methods reproduce norm's two real jobs -- controlling residual-stream variance growth with depth and keeping gradients well-scaled -- through init and clipping instead of runtime normalization",
+        "Transformers: fully norm-free transformers are hard because norm placement is load-bearing for stability; most keep RMSNorm, and DeepNet/DeepNorm scales the residual branch (allowing 1000-layer transformers) rather than removing norm (link 04 training stability)",
+        "Open (as of 2026): whether norm-free approaches scale to frontier LLMs is unresolved -- RMSNorm remains the default"
+      ],
+      "links": [
+        "Concept - RMSNorm and LayerNorm",
+        "Breakdown - Batch Normalization",
+        "Concept - Residual Connections",
+        "Concept - Weight Initialization",
+        "Decision - Choosing a Normalization Layer",
+        "Concept - Vision Transformers"
+      ]
+    },
+    {
+      "title": "Gotchas - Training Neural Networks",
+      "type": "gotchas",
+      "level": "unicorn",
+      "scope": "The aggregated catalog of training bugs and silent failures practitioners learn the hard way -- data, loss, optimizer, precision, and mode bugs -- ranked by how much pain they cause. IN: symptom/cause/fix/detection for each pitfall. OUT: the mechanisms in depth (link the concept notes), distributed/at-scale-specific gotchas (link 04).",
+      "key_points": [
+        "Forgot zero_grad: gradients accumulate across steps so loss stalls or explodes; detection = grad norm grows every step. Fix = zero_grad(set_to_none=True) before each backward",
+        "Loss-reduction mismatch: sum vs mean vs per-token silently rescales the effective LR by batch/sequence length; the masked-loss token-count bug undercounts valid tokens in SFT (link 06). Detection = loss magnitude jumps when batch size changes",
+        "Wrong train/eval mode: BatchNorm running stats keep updating or Dropout stays active at eval, giving nondeterministic or degraded metrics; forgetting model.eval() is a top production incident (link Breakdown - Batch Normalization)",
+        "Data not shuffled, label leakage, or train/test contamination: too-good validation then production collapse (link 13 Benchmark Contamination). Detection = suspiciously fast val improvement",
+        "NaN loss: log(0) in a hand-rolled loss, fp16 overflow in exp/softmax, LR too high, or bad init; detection = assert torch.isfinite(loss) and check loss-at-init ~ ln(C) (link 01 Floating Point)",
+        "Regularizing before fitting: augmentation/dropout/weight-decay turned on before the model can overfit a single batch masks the real bug (link Playbook)",
+        "Silent autograd breaks: an in-place op, a .detach(), or reusing a graph across steps zeroes or errors the backward; set_to_none changes None-vs-0 semantics some code relies on",
+        "Non-obvious: the fastest triage for a mysterious 'model' failure is to decode and eyeball the exact tensors entering the loss -- pipeline bugs outnumber modeling bugs"
+      ],
+      "links": [
+        "Concept - The Training Loop",
+        "Playbook - Debugging a Neural Network That Won't Train",
+        "Concept - Loss Functions for Neural Networks",
+        "Breakdown - Batch Normalization",
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Supervised Fine-Tuning (SFT)",
+        "Concept - Benchmark Contamination"
+      ]
+    },
+    {
+      "title": "Lore - The Adam vs SGD Generalization Wars",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The decade-long practitioner argument over whether adaptive optimizers generalize worse than SGD, why vision stayed on SGD while NLP embraced Adam, and how AdamW plus large-scale pretraining mostly ended the debate. IN: the narrative, the key papers and hacks, the resolution and its residue. OUT: the optimizer mechanisms (link Adam, SGD notes), at-scale optimizer engineering (link 04).",
+      "key_points": [
+        "What happened: around 2017 Wilson et al. 'The Marginal Value of Adaptive Gradient Methods' argued SGD generalizes better than Adam on vision; ImageNet SOTA stayed on SGD+momentum for years while transformers and NLP defaulted to Adam",
+        "SWATS (Keskar-Socher 2017): a shipped hack that starts with Adam for speed and switches to SGD late for generalization -- people really ran this to get both",
+        "The plot twist: AdamW (Loshchilov-Hutter 2019) showed much of Adam's 'bad generalization' was actually improperly coupled weight decay; decoupling it closed most of the reported gap",
+        "Why NLP/transformers effectively require Adam: sparse, heavy-tailed gradients from embeddings and LayerNorm and very large condition numbers make SGD impractical, and transformer loss landscapes differ from CNNs (link Embeddings, RMSNorm and LayerNorm)",
+        "Resolution (as of 2026): AdamW is the universal LLM default, SGD survives in parts of vision and some fine-tuning, and the 'Adam generalizes worse' claim is now read mostly as a weight-decay artifact -- though the flat-minima intuition persists",
+        "Evidence status: well-sourced on the papers and hacks; the 'transformers just can't use SGD' explanation is a folklore layer that is directionally true but rarely rigorously stated"
+      ],
+      "links": [
+        "Concept - Adam and AdamW",
+        "Concept - Stochastic Gradient Descent and Momentum",
+        "Concept - Generalization in Deep Learning",
+        "Concept - Scaling Laws",
+        "Concept - Embeddings as Learned Representations"
+      ]
+    },
+    {
+      "title": "Concept - Adam's Epsilon and Bias Correction",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "The numerical arcana of Adam that only bites at scale: where epsilon sits, why 1e-8 breaks in low precision, the bias-correction/warmup interaction, and RAdam. IN: epsilon placement, precision underflow, bias-correction-vs-warmup, beta2 memory, the sign-descent bound. OUT: the base Adam mechanism (link Adam and AdamW), mixed-precision engineering (link 04), general hyperparameter folklore (link 18).",
+      "key_points": [
+        "Epsilon placement: Adam adds eps OUTSIDE the sqrt as m_hat/(sqrt(v_hat)+eps), whereas LAMB and some variants put it inside as m_hat/sqrt(v_hat+eps); when v_hat is tiny these differ substantially -- a silent cross-framework reproducibility trap",
+        "Precision: default eps=1e-8 can round away or underflow in fp16 (smallest normal ~6e-5), so optimizer states are kept in an fp32 master copy; large-model configs raise eps to 1e-6 or even 1e-5 for stability (the 'raise Adam eps for big models' folklore)",
+        "Bias correction is largest early -- for beta2=0.999 the second moment needs ~1/(1-beta2)=2000 steps to warm up; without correction the first thousands of steps take biased, too-small effective steps",
+        "Bias correction and LR warmup partly do the same job; RAdam (Liu et al. 2019) frames warmup as a variance-reduction fix for Adam's early high-variance adaptive term and rectifies it automatically until enough samples accumulate",
+        "beta2 choice: 0.999 (~2000-step memory) vs 0.95 (~20-step) -- large-batch LLMs use 0.95 for faster, more stable adaptation, and this interacts with eps and with gradient clipping at warmup",
+        "Non-obvious: because m_hat/sqrt(v_hat) ~ +/-1, Adam's per-step update magnitude is roughly bounded by the LR, making it behave like smoothed sign descent -- the reason Adam LRs are tiny and far more transferable across scales than SGD LRs"
+      ],
+      "links": [
+        "Concept - Adam and AdamW",
+        "Reference - Optimizer Update Rules",
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Mixed Precision Training",
+        "Concept - Stochastic Gradient Descent and Momentum"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,731 @@
+{
+  "domain": "18 - Frontier & Esoterica",
+  "slug": "esoterica",
+  "notes": [
+    {
+      "title": "Concept - The Emergent Abilities Debate",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The controversy over whether LLM capabilities appear as sharp phase transitions at scale or whether that sharpness is a measurement artifact. IN: the Wei-vs-Schaeffer argument, metric discontinuity, what counts as evidence for real emergence. OUT: scaling-law fitting itself (link 04) and the interpretability circuits that would explain a real jump (link 14).",
+      "key_points": [
+        "Wei et al. 2022 'Emergent Abilities of LLMs': capabilities like 3-digit arithmetic, MMLU, word-unscrambling jump from near-random to strong within a narrow parameter range (often between 10^22 and 10^24 training FLOPs), unpredictable from smaller-model performance",
+        "Schaeffer et al. 2023 'Are Emergent Abilities a Mirage?' (NeurIPS best paper): emergence is largely an artifact of discontinuous metrics — exact-match and multiple-choice accuracy have knife-edge thresholds; swap to token-edit-distance or per-token log-prob and the same curves are smooth and predictable",
+        "The mechanism of the mirage: exact-match on a k-token answer scales roughly as p^k, so smooth per-token improvement looks like a cliff once p crosses a threshold; the choice of metric, not the model, creates the discontinuity",
+        "The rebuttal to the rebuttal: some capabilities (e.g., in-context learning of novel tasks, certain BIG-Bench 'breakthrough' tasks) still show sharpness under smoother metrics; grokking is an existence proof that genuine phase transitions in capability do occur",
+        "Why it matters operationally: if emergence is real you cannot forecast dangerous capabilities from small models (safety-relevant); if it is a metric artifact you can, and eval design (13) is the lever",
+        "Named artifacts: BIG-Bench, the 'breakthroughness' and 'linearity' scores; the connection to inverse and U-shaped scaling as evidence that scale-vs-capability is not monotone"
+      ],
+      "links": [
+        "Concept - Scaling Laws",
+        "Concept - Grokking",
+        "Concept - Inverse Scaling and U-Shaped Scaling",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Concept - Induction Heads",
+        "Reference - Where Real AI Knowledge Lives"
+      ]
+    },
+    {
+      "title": "Lore - Machine Learning Is Alchemy",
+      "type": "lore",
+      "level": "surface",
+      "scope": "The 2017 Rahimi-LeCun 'alchemy' argument and what it says about why this entire domain exists: deep learning works far ahead of its theory. IN: the test-of-time speech, LeCun's rebuttal, the empirical-vs-rigor culture, why folklore is legitimate knowledge here. OUT: specific unexplained phenomena themselves (their own notes).",
+      "key_points": [
+        "Ali Rahimi, NeurIPS 2017 Test-of-Time talk (accepting for the 2007 random-features paper): 'Machine learning has become alchemy' — a plea for rigor, ablations, and understanding over gradient-tweaking until it works",
+        "Yann LeCun's public rebuttal: criticizing a whole community as practicing alchemy is 'dangerous'; alchemy gave rise to chemistry and metallurgy; engineering artifacts (the telescope, the steam engine) routinely precede the theory that explains them",
+        "The standing tension this domain lives in: we ship trillion-parameter systems whose training dynamics (grokking, double descent, emergence) we cannot predict from first principles; the folklore IS the working knowledge until theory catches up",
+        "Rich Sutton's 'The Bitter Lesson' (2019) as the adjacent argument: general methods that scale with compute beat human-engineered structure, which further devalues clean theory in favor of empirical scaling",
+        "Evidence status: verified history — the talk and rebuttal are public and widely cited; the framing ('alchemy') is deliberately provocative rhetoric, not a technical claim",
+        "The lesson for a practitioner: labeled folklore (weakly-sourced but real) is worth more than false theoretical certainty; this domain's job is to catalog the alchemy honestly"
+      ],
+      "links": [
+        "Concept - Grokking",
+        "Concept - Double Descent",
+        "Reference - Open Problems in LLM Engineering",
+        "Lore - Hyperparameter Folklore",
+        "Reference - Where Real AI Knowledge Lives",
+        "Lore - The OPT-175B Logbook"
+      ]
+    },
+    {
+      "title": "Concept - Grokking",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Delayed generalization: a network reaches 100% train accuracy while validation stays at chance, then generalizes abruptly thousands of steps later. IN: the phenomenon, the regularization dependence, the mechanistic account, connections to double descent. OUT: general backprop/optimizer mechanics (link 02) and the SAE/circuit tooling used to study it (link 14).",
+      "key_points": [
+        "Power et al. 2022 (OpenAI): small decoder transformer on modular arithmetic (e.g., a+b mod 97, a/b mod p) memorizes the train split within ~10^3 steps but val accuracy stays random until ~10^5 steps, then snaps to ~100% — 'grokking'",
+        "Weight decay is close to necessary: without L2/AdamW weight decay grokking is slow or absent; the generalizing circuit has lower weight norm than the memorizing circuit, so decay eventually makes it the loss-minimizing solution — 'circuit efficiency'",
+        "Nanda et al. 2023 'Progress measures for grokking via mechanistic interpretability': the model learns a discrete Fourier / trig-identity algorithm (rotate to frequency space, multiply, read off) — restricted-loss and excluded-loss progress measures show the circuit forming gradually before test accuracy moves",
+        "Liu et al. 'Omnigrok': recasts grokking as motion on the loss landscape driven by weight norm; inflating initialization scale induces grokking on many tasks, deflating it removes the delay — grokking is not special to arithmetic",
+        "Zhong et al. 'The Clock and the Pizza': the learned algorithm depends on architecture/width — models find qualitatively different mechanisms (a 'clock' vs a 'pizza') for the same task, a caution against assuming one true circuit",
+        "Relationship to epoch-wise double descent and the slingshot mechanism (Thilak et al.); failure modes: too little data, no weight decay, or wrong LR give either pure memorization or no convergence",
+        "Why an engineer cares: grokking is the cleanest existence proof that train loss and true generalization can decouple for a long time — early stopping on val can stop you right before the phase transition"
+      ],
+      "links": [
+        "Concept - Double Descent",
+        "Concept - The Emergent Abilities Debate",
+        "Snippet - Reproducing Grokking on Modular Addition",
+        "Concept - Adam and AdamW",
+        "Concept - Induction Heads",
+        "Concept - Mode Connectivity and Flat Minima",
+        "Concept - Numeracy and Digit Tokenization",
+        "Reference - Open Problems in LLM Engineering"
+      ]
+    },
+    {
+      "title": "Concept - Double Descent",
+      "type": "concept",
+      "level": "core",
+      "scope": "The non-monotone generalization curve where test error rises to a peak at the interpolation threshold, then falls again as models grow past it. IN: model-wise, epoch-wise, and sample-wise double descent, the interpolation-threshold mechanism, effective model complexity. OUT: the classical bias-variance derivation (link 01) and grokking's specific mechanism (own note).",
+      "key_points": [
+        "Belkin et al. 2019 'Reconciling modern ML practice and the bias-variance trade-off': test error follows the classical U up to the interpolation threshold (model just fits the train set), spikes there, then descends again in the overparameterized regime — the modern deep-learning regime lives past the peak",
+        "Nakkiran et al. 2019 'Deep Double Descent' (OpenAI): the peak sits where Effective Model Complexity ≈ number of training samples; increasing width, training longer (epoch-wise), or — counterintuitively — adding data (sample-wise) can each move you onto the peak and hurt",
+        "The mechanism at the threshold: with just enough capacity to interpolate, the fit is forced through every noisy label with huge norm / ill-conditioned solutions (near-singular feature Gram matrix); more capacity gives the optimizer room to pick a smoother min-norm interpolant",
+        "Sample-wise double descent is the shocking one: for a fixed model, more training data can increase test error near the threshold — 'more data hurts' — which breaks the naive intuition and matters for data-scaling decisions",
+        "Regularization and early stopping smooth or remove the peak; optimal regularization (ridge tuned per sample size) can eliminate double descent entirely (Nakkiran 'Optimal Regularization Can Mitigate Double Descent')",
+        "Epoch-wise double descent connects to grokking (both are test error moving long after train loss saturates); label noise amplifies all three variants and is often required to see the peak clearly"
+      ],
+      "links": [
+        "Concept - Grokking",
+        "Concept - Scaling Laws",
+        "Concept - The Emergent Abilities Debate",
+        "Concept - Mode Connectivity and Flat Minima",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - The Lottery Ticket Hypothesis"
+      ]
+    },
+    {
+      "title": "Concept - The Lottery Ticket Hypothesis",
+      "type": "concept",
+      "level": "core",
+      "scope": "The claim that a dense network contains a sparse subnetwork which, trained from the original init, matches the full net. IN: iterative magnitude pruning, weight rewinding, late rewinding, supermasks, why it resists scaling to LLMs. OUT: production LLM pruning methods (SparseGPT/Wanda, link 07) and sparsity kernels (link 08).",
+      "key_points": [
+        "Frankle & Carbin 2019 (ICLR best paper): a randomly-initialized dense net contains a subnetwork ('winning ticket') that, trained in isolation from the same initialization, matches the full net's accuracy in at most the same number of iterations — found via Iterative Magnitude Pruning",
+        "IMP recipe: train, prune the p% smallest-magnitude weights, reset surviving weights to their original init values (the rewind), repeat; reaches 80-96% sparsity on MNIST/CIFAR without accuracy loss",
+        "The rewind is load-bearing: re-initializing the surviving weights randomly (same mask, new values) destroys the ticket — the mask and the specific init are coupled. This is the key non-obvious result",
+        "Late rewinding (Frankle et al. 2020 'Stabilizing the LTH'): for ResNets/ImageNet, rewinding to init (step 0) fails; you must rewind to an early step k (~0.1-7% of training) where the network becomes stable to SGD noise — links directly to linear mode connectivity",
+        "Supermasks (Zhou et al.; Ramanujan et al. 2020 'What's Hidden in a Randomly Weighted Network'): a subnetwork of a randomly-weighted net, selected by mask alone with no weight training, can already reach high accuracy — the mask carries information",
+        "Why it stalls at LLM scale: IMP requires many full training runs, unstructured sparsity gets no speedup on dense tensor cores, and one-shot post-training pruning (SparseGPT, Wanda) is what actually ships — the hypothesis is more scientific insight than production tool",
+        "Failure/limits: tickets are dataset- and optimizer-specific; transfer across tasks is partial; structured pruning (whole heads/channels) generally beats unstructured for real latency"
+      ],
+      "links": [
+        "Concept - Double Descent",
+        "Concept - Mode Connectivity and Flat Minima",
+        "Concept - Post-Training Quantization Formats",
+        "Concept - Backpropagation",
+        "Concept - Tensor Cores",
+        "Concept - Knowledge Distillation",
+        "Reference - Open Problems in LLM Engineering"
+      ]
+    },
+    {
+      "title": "Concept - Attention Sinks",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The phenomenon that attention heads park large probability mass on the first token(s) regardless of content, and how streaming inference exploits it. IN: why sinks form from softmax normalization, StreamingLLM, trained sink tokens, ViT registers, the tie to massive activations. OUT: KV-cache memory math (link 07) and the FlashAttention kernel (link 08).",
+      "key_points": [
+        "Observation: in decoder LLMs (GPT-2, Llama, Mistral) many heads route 30-80% of their attention to token 0 (often BOS) even when it is semantically irrelevant — the 'attention sink'",
+        "Mechanism: softmax forces attention weights to sum to 1, so a head that wants to attend to 'nothing' must dump the mass somewhere; the initial token is visible to every position under the causal mask and has a stable representation, making it the default sink — a normalization escape valve",
+        "Xiao et al. 2023 'Efficient Streaming LMs with Attention Sinks' (StreamingLLM): keep the KV of the first ~4 tokens as permanent 'sink' cache plus a sliding window of recent tokens; this holds perplexity flat over 4M+ tokens, whereas evicting the sink tokens makes perplexity explode",
+        "You can train in a dedicated learnable sink token so position-0 semantics aren't hijacked; some modern models add a per-head learnable sink logit (the softmax-off-by-one idea in disguise)",
+        "Tight coupling to massive activations: sink positions carry hidden-state dimensions with enormous magnitude that act as a fixed attention bias — the sink and the outlier are two views of the same implicit-bias mechanism",
+        "Vision analogue: Darcet et al. 2024 'Vision Transformers Need Registers' — ViTs spawn high-norm artifact tokens in low-information patches; adding explicit register tokens gives the sink a proper home and cleans up feature maps",
+        "Failure modes: quantization and KV-cache eviction that touch sink tokens or their outlier channels crater quality; RoPE-based context extension must preserve early positions or the sink drifts"
+      ],
+      "links": [
+        "Concept - Massive Activations and Outlier Features",
+        "Snippet - Softmax-Off-By-One (Quiet Attention)",
+        "Concept - KV Cache",
+        "Concept - Attention Mechanism",
+        "Concept - Softmax",
+        "Concept - Post-Training Quantization Formats",
+        "Concept - RoPE Extrapolation and Context Extension",
+        "Concept - Attention Entropy Collapse"
+      ]
+    },
+    {
+      "title": "Concept - Massive Activations and Outlier Features",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "A handful of hidden-state dimensions and token positions carry activations orders of magnitude larger than the rest, acting as an implicit bias and wrecking naive quantization. IN: outlier feature emergence, massive activations as attention bias, the quantization consequences. OUT: the quantization formats/algorithms that route around them (link 07) and LayerNorm math (link 02).",
+      "key_points": [
+        "Dettmers et al. 2022 'LLM.int8()': at ~6.7B parameters, outlier feature dimensions emerge — a small set of hidden dimensions (often <0.1% of dims) with magnitudes 20-100x the rest, consistent across tokens; naive INT8 quantization of these destroys accuracy, forcing mixed-precision (FP16 decomposition of the outlier columns)",
+        "Sun et al. 2024 'Massive Activations in LLMs': an even sparser set — sometimes 4 scalar activations out of millions — reach magnitudes in the thousands; they concentrate in specific feature dims and at specific tokens (BOS, delimiters, '.'), and are nearly constant across inputs",
+        "These massive activations function as an implicit, learned attention bias: zeroing them collapses the model; replacing them with their mean does not — they are a fixed bias term the network built for itself, mechanistically the same object as attention sinks",
+        "Why quantization engineers obsess over this: per-tensor scales get dominated by the outlier, quantizing everything else to near-zero. SmoothQuant migrates the scale from activations into weights; AWQ protects 'salient' channels; both are direct responses to this phenomenon",
+        "Location folklore: outlier channels are stable enough that you can enumerate them for a given checkpoint; they correlate with LayerNorm gain parameters and with the residual stream's high-variance directions",
+        "Detection: hook the residual stream, track per-dimension max magnitude across a batch; the outlier dims and sink tokens light up immediately. Failure mode: FP8/INT4 KV-cache quant that ignores them silently degrades long-context quality"
+      ],
+      "links": [
+        "Concept - Attention Sinks",
+        "Concept - Post-Training Quantization Formats",
+        "Concept - RMSNorm and LayerNorm",
+        "Concept - Attention Entropy Collapse",
+        "Concept - Superposition",
+        "Concept - KV Cache",
+        "Snippet - Softmax-Off-By-One (Quiet Attention)"
+      ]
+    },
+    {
+      "title": "Concept - The Softmax Bottleneck",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The rank limitation that a single softmax over a d-dimensional hidden state imposes on the expressible output distribution. IN: the rank argument, Mixture of Softmaxes, stolen probability, why large d mitigates but never removes it. OUT: the softmax operator itself (link 02) and vocabulary/tokenizer construction (link 04).",
+      "key_points": [
+        "Yang et al. 2018 'Breaking the Softmax Bottleneck: A High-Rank RNN Language Model': the pre-softmax logits are H·Wᵀ (context matrix × embedding matrix), so the matrix of true log-probabilities the model can express has rank ≤ d (hidden dim); natural-language next-token log-prob matrices are empirically high-rank, so a single softmax is fundamentally rank-limited",
+        "Consequence: for a vocabulary V ≫ d, there exist context-conditional distributions the model literally cannot represent, no matter the weights — a capacity ceiling independent of training",
+        "Fix from the paper: Mixture of Softmaxes (MoS) — compute K weighted softmaxes over K context vectors and average; the log of a mixture is high-rank, restoring expressivity and improving perplexity on PTB/WikiText at real cost in compute",
+        "The 'stolen probability' corollary (Demeter et al. 2020): because logits are dot products with a fixed embedding, tokens whose output embedding lies in the interior of the embedding convex hull can never be the argmax for any hidden state — some tokens are structurally un-generatable at greedy decode",
+        "Why modern LLMs mostly escape it: d = 4096-16384 is large relative to the effective rank needed, and untied large output heads help; but the bottleneck resurfaces with small models, aggressive weight tying, and low-rank output projections",
+        "Practical fingerprint: pathological over-smoothing / inability to sharply separate near-synonyms in tiny models; connects to why final-layer LayerNorm and logit temperature interact with expressible sharpness"
+      ],
+      "links": [
+        "Concept - Softmax",
+        "Concept - Sampling and Decoding Parameters",
+        "Concept - Byte-Pair Encoding",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - Neural Text Degeneration and Repetition Loops",
+        "Reference - Open Problems in LLM Engineering"
+      ]
+    },
+    {
+      "title": "Concept - Neural Text Degeneration and Repetition Loops",
+      "type": "concept",
+      "level": "core",
+      "scope": "Why maximization decoding drives models into repetitive, degenerate loops and the self-reinforcement that sustains them. IN: the degeneration phenomenon, the positive-feedback mechanism, nucleus sampling and penalties as responses. OUT: the full sampling-parameter reference (link 07) and constrained decoding (link 07).",
+      "key_points": [
+        "Holtzman et al. 2019 'The Curious Case of Neural Text Degeneration': greedy and beam search on well-trained LMs produce bland, repetitive, looping text ('I don't know. I don't know. I don't know…') — the highest-probability continuation is unnaturally repetitive, unlike human text which is more surprising",
+        "Self-reinforcement mechanism (Xu et al. 2022 'Learning to Break the Loop'): once a phrase repeats, the model assigns it monotonically increasing probability on each subsequent occurrence — a positive feedback loop; the repetition probability of a sentence rises with the number of prior repetitions",
+        "Why it happens: perplexity-trained models put too much mass on high-frequency continuations; the argmax path lives in a repetitive region of the distribution, and the KV cache makes prior tokens ever more salient",
+        "The introduced fix — nucleus (top-p) sampling: truncate to the smallest set of tokens covering probability mass p (~0.9-0.95) and renormalize, cutting the unreliable tail while preserving dynamic breadth; this became the default over top-k precisely because of degeneration",
+        "Engineering countermeasures and their costs: repetition penalty (Keskar CTRL), no-repeat-ngram blocking, presence/frequency penalties — each can over-correct and suppress legitimate repetition (code, tables, poetry)",
+        "Where loops still bite in 2026: low-temperature or greedy decode on base models, long-generation drift, and small quantized models; connects to mode collapse (RLHF narrows further) and to the softmax bottleneck's over-smoothing"
+      ],
+      "links": [
+        "Concept - Sampling and Decoding Parameters",
+        "Concept - The Softmax Bottleneck",
+        "Concept - Mode Collapse in RLHF",
+        "Concept - Constrained Decoding",
+        "Concept - KV Cache",
+        "Gotchas - Long-Context Failure Modes"
+      ]
+    },
+    {
+      "title": "Concept - Mode Collapse in RLHF",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The diversity collapse that preference optimization induces: the policy narrows to a few high-reward 'typical' responses and loses entropy relative to the SFT model. IN: the entropy-reduction phenomenon, reward over-optimization, GPT-isms, why DPO also collapses. OUT: PPO/DPO training mechanics (link 06) and reward-hacking-as-training-pathology (link 06).",
+      "key_points": [
+        "Kirk et al. 2023 'Understanding the Effects of RLHF on LLM Generalisation and Diversity': RLHF improves out-of-distribution generalization but sharply reduces output diversity versus the SFT checkpoint — across-sample and per-input variety both drop, even at high temperature",
+        "Mechanism: the KL-regularized RL objective rewards the policy for concentrating mass on the reward model's favored region; the entropy bonus and reference-KL penalty are meant to hold it back but in practice the distribution still sharpens into a 'typical set' of safe, high-reward completions",
+        "Reward over-optimization (Gao et al. 2022 'Scaling Laws for Reward Model Overoptimization'): as you optimize a proxy reward, true quality rises then falls (Goodhart), following a predictable functional form in KL distance — the collapse and the over-optimization are the same coin",
+        "Observable fingerprints: 'As an AI language model…', lexical tics ('delve', 'tapestry', 'boasts', 'it's important to note'), near-identical samples across seeds, list-formatting reflexes, and flattened style — the homogenization practitioners call GPT-isms",
+        "DPO and offline methods collapse too, sometimes worse: DPO can drive up the margin by pushing down the chosen-and-rejected pair's shared mass, reducing likelihood of both and sharpening onto a narrow mode; length bias compounds it",
+        "Costs and mitigations: diversity matters for best-of-n, synthetic data generation, and creative tasks; mitigations include lower KL target, entropy targeting, sampling temperature at generation, and periodic SFT re-anchoring — all trade against reward",
+        "Open question: how much collapse is intrinsic to alignment vs an artifact of narrow reward models and annotator homogeneity"
+      ],
+      "links": [
+        "Deep Dive - RLHF End to End",
+        "Concept - Reward Hacking",
+        "Concept - Reward Models",
+        "Concept - Direct Preference Optimization (DPO)",
+        "Concept - Neural Text Degeneration and Repetition Loops",
+        "Concept - KL Divergence",
+        "Concept - LLM-as-Judge"
+      ]
+    },
+    {
+      "title": "Concept - Inverse Scaling and U-Shaped Scaling",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Tasks where larger models get monotonically worse, and the cases where that trend later reverses into a U. IN: the Inverse Scaling Prize task families, the causal categories, U-shaped reversal and the role of CoT. OUT: general scaling-law fitting (link 04) and the emergence debate's metric argument (own note).",
+      "key_points": [
+        "McKenzie et al. 2023 'Inverse Scaling: When Bigger Isn't Better' (the Inverse Scaling Prize): eleven tasks where accuracy falls as model size grows — e.g., Redefine Math (redefine π as 462, model refuses to comply), Resisting Correction / NeQA (negated questions), Hindsight Neglect, Memo Trap, Pattern-Match Suppression, Modus Tollens",
+        "Four causal categories the authors identify: (1) strong prior overriding the instruction, (2) imitation of undesirable patterns in training data, (3) distractor tasks the model latches onto, (4) unwanted few-shot pattern-matching that ignores the actual question",
+        "U-shaped scaling (Wei et al. 2023 'Inverse Scaling Can Become U-Shaped'): on some of these tasks the very largest models reverse the trend — accuracy goes down then back up — because only they can suppress the distractor subtask; the inverse-scaling range was a valley, not a slope",
+        "Chain-of-thought flips several inverse-scaling tasks to positive scaling, implying the failure is often an inability to allocate the right computation rather than a missing capability",
+        "Why this matters for forecasting: a monotone scaling assumption is unsafe; capability-vs-scale can be non-monotone, which directly complicates the emergent-abilities debate and any safety argument that 'bigger is more capable therefore more predictable'",
+        "Related non-monotonicity: sycophancy and instruction-priors that strengthen with RLHF; the tension between imitation (predict the data) and instruction-following (obey the user)"
+      ],
+      "links": [
+        "Concept - The Emergent Abilities Debate",
+        "Concept - Scaling Laws",
+        "Concept - Chain-of-Thought and Why It Works",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Concept - Mode Collapse in RLHF",
+        "Reference - Open Problems in LLM Engineering"
+      ]
+    },
+    {
+      "title": "Concept - Numeracy and Digit Tokenization",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "How tokenization of numbers shapes (and sabotages) arithmetic, and the folklore fixes labs adopted. IN: BPE digit-merging pathologies, single-digit vs right-to-left grouping, value-aware numeric embeddings, length generalization on arithmetic. OUT: the BPE algorithm itself (link 04) and how models internally compute (grokking's Fourier circuit, own note).",
+      "key_points": [
+        "The root problem: byte-level BPE merges multi-digit substrings by corpus frequency, so '2017' is one token but '2018' might be '201'+'8'; identical digits get inconsistent, non-compositional representations, and carry/borrow structure is invisible to the model",
+        "Lab fixes and their rationale: PaLM and Llama tokenize digits individually (each 0-9 is its own token) so every number is a compositional sequence; Llama 3 groups digits into three-digit chunks; some pipelines split numbers right-to-left so units align to a fixed position — right-to-left grouping measurably improves addition",
+        "Value-aware encodings: xVal (Golkar et al. 2023) uses a single [NUM] token scaled by the number's value, giving a continuous inductive bias; Abacus embeddings (McLeish et al. 2024 'Transformers Can Do Arithmetic with the Right Embeddings') add per-digit positional hints and unlock length generalization from 20-digit to 100-digit addition",
+        "The famous failure: '9.11 vs 9.9' — models call 9.11 larger, driven by tokenization plus training distribution (version strings, dates, chapter numbers) where 9.11 > 9.9; a canonical demonstration that tokenization leaks into reasoning",
+        "The 'count the r's in strawberry' class of failure: character-level questions are hard because BPE hides the character composition of tokens; the model never sees the letters, only the merged token id",
+        "Wallace et al. 2019 'Do NLP Models Know Numbers?' — embeddings capture rough magnitude (probing recovers value) but extrapolate poorly beyond the training range; internally, models often implement addition via Fourier/trig features on digit embeddings (the same mechanism found in grokking)",
+        "Practical consequence: for arithmetic-heavy or code/finance workloads, tokenizer choice and digit handling can matter more than model size; test with off-distribution digit lengths, not just short numbers"
+      ],
+      "links": [
+        "Concept - Byte-Pair Encoding",
+        "Concept - Grokking",
+        "Gotchas - Tokenizer Pathologies",
+        "Lore - Glitch Tokens",
+        "Concept - Chain-of-Thought and Why It Works",
+        "Reference - Architecture Numerology"
+      ]
+    },
+    {
+      "title": "Concept - RoPE Extrapolation and Context Extension",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Why rotary embeddings fail to extrapolate past their trained context and the family of frequency-rescaling tricks that extend them. IN: the extrapolation failure, position interpolation, NTK-aware / NTK-by-parts, base-frequency (theta) scaling, the fine-tuning requirement. OUT: RoPE's core construction (link 03) and YaRN's specifics (own Breakdown).",
+      "key_points": [
+        "RoPE (Su et al. 2021) rotates each query/key 2D pair by angle m·θ_i with frequencies θ_i = base^(−2i/d), base=10000; at inference positions m beyond the training range the rotation angles are out-of-distribution and attention scores degrade sharply — models do not extrapolate for free",
+        "Position Interpolation (Chen et al. 2023): linearly downscale positions by L_train/L_target so all angles stay in-range, then fine-tune ~1000 steps; simple and effective but compresses high-frequency (fine positional) information uniformly, hurting local resolution",
+        "NTK-aware scaling (bloc97, r/LocalLLaMA folklore turned standard): instead of scaling positions, increase the base θ so interpolation is spread unevenly — high-frequency dims (short wavelength, carry local order) are barely touched, low-frequency dims (long wavelength) are interpolated most; often works with little or no fine-tuning",
+        "NTK-by-parts refines this by a wavelength criterion: dims whose wavelength exceeds the original context are fully interpolated, dims well within it are left alone, with a ramp between — the conceptual core that YaRN productizes",
+        "Base-theta retraining: labs simply pretrain long-context with a larger base (Llama 3 uses θ=500000; some use 1e6+), because a larger base makes more dimensions have wavelengths shorter than the context and thus generalize — 'just raise theta' is the blunt production answer",
+        "The folklore that bites: naive extension tanks short-context quality; you must eval both regimes. Which dims to protect, how much fine-tuning, and the attention-temperature correction are the levers. LongRoPE (Ding et al. 2024) evolutionary-searches per-dim rescale factors to reach 2M tokens",
+        "Failure signature: perplexity fine to the extension boundary then a cliff; needle-in-haystack passes near the ends but fails mid-context; local coherence breaks if high-freq dims were over-interpolated"
+      ],
+      "links": [
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Breakdown - YaRN",
+        "Decision - Choosing a Context Extension Method",
+        "Playbook - Extending a Model's Context Window",
+        "Gotchas - Long-Context Failure Modes",
+        "Concept - Ring Attention and Extreme Context",
+        "Concept - Attention Entropy Collapse"
+      ]
+    },
+    {
+      "title": "Concept - Ring Attention and Extreme Context",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Distributing a single attention computation across devices so context length scales with the number of accelerators, enabling million-token windows. IN: the ring communication pattern, blockwise attention, load-balancing (striped/zigzag), the memory math. OUT: single-device FlashAttention kernels (link 08) and context-parallel training bookkeeping (link 04).",
+      "key_points": [
+        "Liu et al. 2023 'Ring Attention with Blockwise Transformers for Near-Infinite Context': shard the sequence across N hosts, each holding a block of queries and its local K/V; K/V blocks are passed hand-to-hand around a ring while each host accumulates attention against every block — the full K/V is never materialized on one device",
+        "The trick is overlap: each host computes attention on its current K/V block while asynchronously receiving the next block, so communication hides under computation and the ring adds near-zero wall-clock overhead when block compute ≥ transfer time",
+        "Memory scaling: per-device activation memory for attention becomes O(seq/N) instead of O(seq), so maximum context grows linearly with device count — combined with FlashAttention's online-softmax accumulation to avoid the N×N score matrix, this is what makes 1M+ token context feasible",
+        "Load imbalance from causal masking: with a naive contiguous split, later ring steps do more work (more visible keys); Striped Attention (Brandon et al. 2023) and zigzag/interleaved assignment rebalance so every host does equal work, roughly doubling throughput on causal models",
+        "Real usage: the Large World Model (LWM) trained to 1M tokens on ring attention; context-parallelism in Megatron/DeepSpeed and Gemini-class long-context claims lean on the same primitive — 18 owns the 'extreme context' framing, 04 owns the CP training accounting",
+        "Costs and failure modes: it trades HBM for interconnect bandwidth, so it wants NVLink/InfiniBand and degrades on slow fabric; a straggler host stalls the whole ring; the online-softmax rescale must be numerically careful in bf16/fp8 or long-context logits drift"
+      ],
+      "links": [
+        "Deep Dive - FlashAttention",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Concept - All-Reduce and Collective Operations",
+        "Concept - RoPE Extrapolation and Context Extension",
+        "Concept - KV Cache",
+        "Gotchas - Long-Context Failure Modes",
+        "Concept - GPU Memory Hierarchy"
+      ]
+    },
+    {
+      "title": "Concept - Mode Connectivity and Flat Minima",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The geometry of the loss landscape that explains why independent solutions can be merged and why flatness predicts generalization. IN: mode connectivity, linear mode connectivity modulo permutation, flat-vs-sharp minima, SAM, the tie to model merging. OUT: the model-merging algorithms themselves (link 06) and SGD/optimizer mechanics (link 02).",
+      "key_points": [
+        "Garipov et al. 2018 'Loss Surfaces, Mode Connectivity, and Fast Ensembling': distinct SGD solutions are not isolated valleys — they are connected by simple curves (Bezier/polygonal paths) of near-constant low loss, so the landscape is far more connected than the many-isolated-minima picture suggested",
+        "Linear mode connectivity (Frankle et al. 2020): two networks are LMC if the straight line between them in weight space stays low-loss; a network becomes stable to SGD noise (spawns LMC children) only after a short early 'burn-in' — the same stability point that makes lottery-ticket rewinding work",
+        "Permutation symmetry and Git Re-Basin (Ainsworth et al. 2022): two independently trained nets usually have a high loss barrier between them, but after permuting the hidden units of one to align with the other, the barrier often vanishes — 'LMC modulo permutation', suggesting one big basin up to symmetry",
+        "Flat minima generalize better: Hochreiter & Schmidhuber 1997 (MDL argument) and Keskar et al. 2016 showed large-batch training finds sharper minima that generalize worse; flatness ≈ robustness to weight perturbation ≈ lower effective description length",
+        "Sharpness-Aware Minimization (Foret et al. 2020): explicitly minimize the worst-case loss in a neighborhood (an inner ascent step then descent), pushing toward flat regions; improves generalization at ~2x step cost, and its variants (ASAM, GSAM) matter for ViTs",
+        "Why an engineer cares: this geometry underwrites weight averaging (SWA, EMA), Model Soups (Wortsman et al. 2022 — average fine-tunes for free accuracy), and merging (SLERP/TIES/DARE) — merging only works because the endpoints are mode-connected",
+        "Caveats: sharpness is reparameterization-dependent (Dinh et al. 2017 — you can rescale a flat minimum to look sharp), so 'flatness' needs a scale-invariant definition; the permutation-alignment story is cleaner for MLPs/CNNs than for attention"
+      ],
+      "links": [
+        "Concept - The Lottery Ticket Hypothesis",
+        "Concept - Double Descent",
+        "Concept - Knowledge Distillation",
+        "Concept - Adam and AdamW",
+        "Concept - The Training Loop",
+        "Concept - Grokking",
+        "Reference - Open Problems in LLM Engineering"
+      ]
+    },
+    {
+      "title": "Concept - The Reversal Curse",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The finding that LLMs trained on 'A is B' fail to infer 'B is A', exposing how directionally facts are stored. IN: the experiment, the directional-gradient mechanism, the real-world GPT-4 measurement, implications for knowledge editing and RAG. OUT: MLP-as-key-value interpretability internals (link 14) and RAG architecture (link 11).",
+      "key_points": [
+        "Berglund et al. 2023 'The Reversal Curse: LLMs trained on A is B fail to learn B is A': fine-tune a model on synthetic facts like 'Uriah Hawthorne is the composer of Abyssal Melodies' and it cannot answer 'Who composed Abyssal Melodies?' — accuracy and log-prob for the correct reverse are at chance",
+        "It is not fixed by scale or paraphrase augmentation within the studied range: the log-probability assigned to the correct name in the reverse direction is no higher than for a random name, so the model genuinely did not form the reverse association",
+        "Mechanism: autoregressive training only ever updates P(B | A-context); the gradient never sees 'given B, predict A', and because facts are stored as directional key→value lookups in the MLPs, the reverse key is never written — association is asymmetric by construction",
+        "Real-model measurement: GPT-4 answers 'Who is Tom Cruise's mother?' ~79% but 'Who is Mary Lee Pfeiffer's son?' only ~33% — the curse survives at frontier scale for rarely-co-stated directions, softened only when both directions appear in pretraining",
+        "Implications: knowledge editing that writes one direction won't propagate to the other; RAG is partly necessary because parametric knowledge is directionally lossy; data augmentation that states facts in both directions is a real pretraining lever",
+        "Connections and contrasts: Allen-Zhu & Li 'Physics of Language Models' knowledge-extraction results show storage vs extractability gaps; the curse is a special case of the broader 'models store what they were trained to predict, not the logical closure of it'"
+      ],
+      "links": [
+        "Concept - Induction Heads",
+        "Deep Dive - RAG Architectures",
+        "Concept - Supervised Fine-Tuning (SFT)",
+        "Concept - Backpropagation",
+        "Concept - Synthetic Training Data",
+        "Reference - Open Problems in LLM Engineering"
+      ]
+    },
+    {
+      "title": "Concept - Attention Entropy Collapse",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "A training instability where attention distributions collapse toward one-hot, driving entropy to zero and loss to divergence, and the QK-normalization / logit-capping fixes that became standard. IN: the collapse phenomenon, the logit-growth cause, QK-norm, σReparam, logit soft-capping. OUT: general loss-spike/z-loss stability (link 04) and RMSNorm placement (link 02).",
+      "key_points": [
+        "Zhai et al. 2023 'Stabilizing Transformer Training by Preventing Attention Entropy Collapse': during training, some attention heads sharpen until their softmax is nearly one-hot; attention entropy crashes to ~0, correlating with training instability, loss spikes, and divergence",
+        "Cause: the attention logits q·k/√d can grow without bound as query/key norms increase; large logits saturate the softmax (tiny gradients, high curvature), and once collapsed the head can't recover — an entropy runaway, not a random spike",
+        "Fix 1 — QK-normalization: apply LayerNorm/RMSNorm to queries and keys before the dot product, bounding logit magnitude; adopted in ViT-22B (Dehghani et al. 2023), and now common in language models for stability at scale",
+        "Fix 2 — σReparam (the paper's method): reparameterize weights with spectral normalization plus a learned scalar so the spectral norm is controlled, keeping attention entropy healthy without per-head normalization",
+        "Fix 3 — logit soft-capping: Gemma 2 caps attention logits (and final logits) via t·tanh(x/t) with t≈50 (attention) / 30 (final), preventing runaway growth; a blunt but effective bound used in production",
+        "Detection and cost: monitor per-layer attention entropy and max logit during training; collapse shows as entropy plummeting a few hundred steps before the loss spike. Ties to massive activations (outlier query/key channels drive the logit growth) and to why bf16 without these guards is fragile at scale"
+      ],
+      "links": [
+        "Concept - Massive Activations and Outlier Features",
+        "Concept - RMSNorm and LayerNorm",
+        "Concept - Attention Mechanism",
+        "Concept - Mixed Precision Training",
+        "Concept - Attention Sinks",
+        "Reference - Architecture Numerology",
+        "Deep Dive - Anatomy of a Pretraining Run"
+      ]
+    },
+    {
+      "title": "Breakdown - BitNet b1.58",
+      "type": "breakdown",
+      "level": "frontier",
+      "scope": "Reverse-engineers the ternary-weight LLM that replaces FP16 matmuls with additions at ~1.58 bits per weight. IN: BitLinear, absmean ternary quantization, the QAT-from-scratch requirement, the reported parity claims, the kernel/inference story. OUT: post-training quantization formats for existing models (link 07) and the memory-math primitives (link 08).",
+      "key_points": [
+        "Ma et al. 2024 'The Era of 1-bit LLMs: All LLMs are in 1.58 Bits': weights are constrained to {−1, 0, +1}, i.e. log2(3) ≈ 1.58 bits each; the '1.58' is the information content of a ternary weight, and the added 0 state (vs the original binary BitNet) gives explicit feature filtering",
+        "BitLinear replaces nn.Linear: weights quantized to ternary via absmean scaling (divide by the mean absolute weight, round to {−1,0,1}), activations quantized to INT8 with absmax per-token scaling; a matmul with ternary weights is pure add/subtract — no floating-point multiply in the main GEMM",
+        "The headline economics: eliminating multiplies slashes energy (multiply dominates arithmetic energy) and memory bandwidth; reported ~3-4x lower memory and multiples of throughput versus FP16 LLaMA at matched perplexity from ~3B parameters up, with the gap closing as scale grows",
+        "The hard constraint: it is quantization-aware training from scratch, not post-training — you cannot convert an existing FP16 checkpoint to b1.58 without retraining, because the network must learn to live in the ternary weight space (straight-through estimator on the quantizer)",
+        "Inference reality: needs custom kernels (bitnet.cpp, lookup-table GEMM) to realize the gains, since stock GPU tensor cores are built for FP16/INT8, not ternary-add; follow-ups (BitNet a4.8, 4-bit activations) chase further savings",
+        "What to steal vs stay skeptical: the absmean/STE recipe and 'multiply-free GEMM' are transferable ideas; independent reproductions at true frontier scale remain limited as of 2026, and the parity claims are strongest at small-to-mid scale — treat the 'all LLMs' headline as a thesis, not a settled result",
+        "Why it's in esoterica: it is the sharp edge of the extreme-quantization frontier where the whole arithmetic changes, and it stress-tests the folklore that models need FP16 dynamic range"
+      ],
+      "links": [
+        "Concept - Post-Training Quantization Formats",
+        "Concept - Mixed Precision Training",
+        "Reference - Memory Math for Transformers",
+        "Concept - Tensor Cores",
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Massive Activations and Outlier Features",
+        "Concept - The Roofline Model",
+        "Reference - Open Problems in LLM Engineering",
+        "Reference - Model Genealogy",
+        "Concept - Knowledge Distillation"
+      ]
+    },
+    {
+      "title": "Breakdown - YaRN",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "Reverse-engineers YaRN, the RoPE context-extension method that became the practical default, and its two clever parts. IN: NTK-by-parts interpolation, attention temperature scaling, the token/step efficiency numbers, how it composes with fine-tuning. OUT: the general RoPE-extension concept (own note) and the operational extension procedure (own Playbook).",
+      "key_points": [
+        "Peng et al. 2023 'YaRN: Efficient Context Window Extension of LLMs': extends Llama-family models to 64k-128k using ~10x fewer tokens and ~2.5x fewer training steps than Position Interpolation, and became the community-standard extension baked into many long-context checkpoints",
+        "Clever part 1 — NTK-by-parts (wavelength-aware interpolation): classify each RoPE dimension by whether its wavelength is much shorter than the original context (leave untouched — preserves local ordering), much longer (fully interpolate — the truly out-of-range dims), or in between (linear ramp); this beats uniform PI, which blurs high-frequency positional signal",
+        "Clever part 2 — attention temperature scaling: extending context changes the expected attention-logit magnitude and thus the softmax entropy; YaRN multiplies q and k by a constant √(1/t) with t ≈ (0.1·ln(s) + 1)^2 for scale factor s, restoring the pre-extension entropy for free at inference — a one-line change with no extra parameters",
+        "Why the temperature term matters: it is the empirical correction that lets YaRN work with minimal or no fine-tuning where NTK-aware alone leaves a small perplexity gap; it is the same 'attention entropy control' idea that shows up in training-stability work",
+        "Composition: apply the frequency rescale + temperature, then optionally fine-tune ~400 steps on long documents; 'Dynamic YaRN' switches the scale factor based on the actual sequence length so short prompts keep full-resolution RoPE",
+        "What to steal: the wavelength taxonomy for deciding which dims to touch, and the closed-form temperature correction; what's dated — as base-theta pretraining (θ=500000+) and native long-context training spread, YaRN is increasingly an adaptation tool rather than the primary path",
+        "Failure modes: over-large scale factors degrade short-context and needle-retrieval quality; forgetting the temperature term yields flat-looking attention and weak long-range recall"
+      ],
+      "links": [
+        "Concept - RoPE Extrapolation and Context Extension",
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Decision - Choosing a Context Extension Method",
+        "Playbook - Extending a Model's Context Window",
+        "Concept - Attention Entropy Collapse",
+        "Gotchas - Long-Context Failure Modes",
+        "Concept - Softmax",
+        "Concept - Ring Attention and Extreme Context",
+        "Reference - Architecture Numerology",
+        "Concept - Sampling and Decoding Parameters"
+      ]
+    },
+    {
+      "title": "Reference - Architecture Numerology",
+      "type": "reference",
+      "level": "unicorn",
+      "scope": "A lookup table of the magic constants in transformer design and the mechanical reasons behind them. IN: FFN expansion ratios, head dims, vocab padding, aspect ratios, RoPE bases, Adam betas, warmup fractions, divisibility rules. OUT: the derivations of each (link to owning domain) and the memory-byte formulas (link 08).",
+      "key_points": [
+        "FFN expansion: classic Transformer uses d_ff = 4·d_model; gated variants (SwiGLU/GeGLU) use ~8/3·d_model ≈ 2.67x per the two projections so total FFN params match the 4x baseline (PaLM, Llama) — the '4x' folklore is really 'keep FFN params ≈ 8·d_model²'",
+        "Head dimension: 64 or 128 are near-universal; head_dim × n_heads = d_model; 128 is favored because FlashAttention and tensor cores want the head dim as a multiple of the MMA tile (8/16), and 128 balances softmax stability (1/√d scaling) against kernel efficiency",
+        "Vocab padding: pad vocabulary to a multiple of 64 or 128 (GPT-2's 50257 → 50304 gives a measurable speedup in nanoGPT) so the embedding/unembedding GEMM tiles cleanly on tensor cores; unpadded odd vocab sizes leave the last tile half-empty",
+        "Aspect ratio: Kaplan et al. found weak dependence on depth/width shape at fixed params; folklore target d_model/n_layers ≈ 100-256; too deep-thin is unstable, too wide-shallow underperforms — most families sit in a narrow band",
+        "RoPE base θ: 10000 (original), 500000 (Llama 3), 1e6+ for long-context variants; larger base pushes more dimensions to wavelengths shorter than the context so they generalize — the single most common context-extension knob",
+        "Optimizer folklore constants: AdamW β=(0.9, 0.95) for LLMs (not 0.999, which is too sluggish for the second moment at LLM batch sizes), ε=1e-8, weight decay 0.1, gradient clip 1.0, warmup ≈ 2000 steps or 0.1-1% of total; z-loss coefficient ~1e-4",
+        "Divisibility rules that avoid silent slowdowns: d_model divisible by n_heads; both divisible by tensor-parallel degree; batch·seq a multiple of the MMA tile; the recurring theme is 'align every dimension to a power-of-two-ish tile so the hardware's systolic array stays full' — see the memory-math reference for the byte accounting"
+      ],
+      "links": [
+        "Reference - Memory Math for Transformers",
+        "Concept - Tensor Cores",
+        "Deep Dive - The Transformer",
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Concept - Adam and AdamW",
+        "Concept - RoPE Extrapolation and Context Extension",
+        "Lore - Hyperparameter Folklore"
+      ]
+    },
+    {
+      "title": "Reference - Open Problems in LLM Engineering",
+      "type": "reference",
+      "level": "frontier",
+      "scope": "A curated catalog of standing unsolved problems in building and understanding LLMs, each with a pointer to where the real work lives. IN: the open question, why it's hard, current best partial answers, the note that goes deeper. OUT: solved-enough mechanics (link to owner) and speculative AGI-timeline discourse (out of scope entirely).",
+      "key_points": [
+        "Generalization theory: why do massively overparameterized nets generalize at all? Double descent and grokking describe it; no predictive theory explains it — implicit bias of SGD, min-norm interpolation, and the flat-minima story are partial answers",
+        "Why in-context learning works: is it implicit gradient descent (von Oswald et al.), induction-head circuitry (Olsson et al.), or Bayesian task inference? All have evidence; none fully accounts for the phenomenon — routed to induction heads and the emergence debate",
+        "Hallucination as an open problem: models are calibrated on token-level uncertainty but confidently wrong on facts; whether hallucination is fixable in-parameter or intrinsically requires retrieval is unsettled — connects to the reversal curse and knowledge storage",
+        "Superposition and the interpretability ceiling: features are packed in superposition (14); SAEs recover some but 'dark matter' (unexplained variance) remains, and enumerative safety is unproven — is full mechanistic interpretability even tractable?",
+        "Scaling's end: data-constrained scaling (Muennighoff et al.), the running-out-of-tokens question, and whether synthetic data avoids model collapse (Shumailov et al. 'The Curse of Recursion') are live; test-time compute (o-series) reopened the scaling axis",
+        "Continual learning / catastrophic forgetting: no production recipe lets a frontier model learn new facts online without a full re-train or RAG crutch; knowledge editing is brittle and directional (reversal curse)",
+        "The measurement problem: emergence-vs-mirage, contamination, and Goodharted benchmarks mean we cannot cleanly say what a model can do — arguably the most practically damaging open problem, owned methodologically by evaluation (13)",
+        "Each entry is a launch point, not a resolution — this reference is deliberately a map of ignorance, updated as the frontier moves (as of 2026)"
+      ],
+      "links": [
+        "Concept - Grokking",
+        "Concept - The Emergent Abilities Debate",
+        "Concept - The Reversal Curse",
+        "Concept - Superposition",
+        "Concept - Scaling Laws",
+        "Concept - Induction Heads",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Reference - Where Real AI Knowledge Lives"
+      ]
+    },
+    {
+      "title": "Lore - Hyperparameter Folklore",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The war stories and superstitions behind the magic hyperparameters everyone copies without deriving. IN: the 3e-4 legend, warmup superstition, batch-size folklore, the divine-benevolence quote, seed magic, grad-student descent. OUT: the tabulated constants themselves (link Architecture Numerology) and muP's actual theory (link 04).",
+      "key_points": [
+        "Karpathy's '3e-4 is the best learning rate for Adam, hands down' (2016 tweet, half in jest) became genuine folklore — copied into countless configs; the real content is that Adam's update is roughly scale-invariant so a single LR transfers across many problems, which is why the joke keeps working",
+        "Warmup superstition: linear LR warmup over ~2000 steps is near-universal but under-explained; the leading account is that Adam's second-moment estimate is high-variance early (few samples), so large early steps blow up — RAdam (Liu et al. 2019) tried to 'rectify' this and remove warmup, yet warmup persisted because it just works",
+        "Batch-size folklore: the linear scaling rule (Goyal et al. 2017, 'ImageNet in 1 Hour' — scale LR linearly with batch, warm up) and the critical batch size (McCandlish et al. 2018, 'An Empirical Model of Large-Batch Training') — past the critical size you buy no sample efficiency, only wall-clock, which sets the economics of every large run",
+        "The 'divine benevolence' quote: Shazeer 2020 'GLU Variants Improve Transformer' ends with 'We offer no explanation as to why these architectures seem to work; we attribute their success, as all else, to divine benevolence' — the field's most honest one-liner about why SwiGLU beat GELU",
+        "Adam β=(0.9, 0.95) vs the default (0.9, 0.999): at LLM batch sizes the 0.999 second-moment memory is too long, so labs quietly switched to 0.95; ε placement (inside vs outside the sqrt) and ε=1e-8 vs 1e-6 are copied lineage-to-lineage without re-derivation",
+        "Ritual and reproducibility: 'babysitting the run', staring at loss.png, the reputation of magic seeds, and 'grad-student descent' (manual search dressed up as method); muP (Yang et al.) promises principled HP transfer across width but few teams adopt the full recipe, so guess-and-check endures",
+        "Evidence status: the quotes and papers are verified; the causal explanations for warmup and specific betas are labeled folklore — weakly theorized, strongly practiced, which is exactly what makes them unicorn knowledge"
+      ],
+      "links": [
+        "Reference - Architecture Numerology",
+        "Concept - Adam and AdamW",
+        "Concept - The Training Loop",
+        "Lore - Machine Learning Is Alchemy",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Lore - The OPT-175B Logbook"
+      ]
+    },
+    {
+      "title": "Lore - Glitch Tokens",
+      "type": "lore",
+      "level": "advanced",
+      "scope": "The SolidGoldMagikarp saga: under-trained vocabulary tokens that make models hallucinate, evade, or break. IN: the discovery story, the r/counting tokenizer-vs-training-corpus mismatch, observed behaviors, later systematic detection. OUT: the detection method as code (own Snippet) and the tokenizer-pathology checklist (own Checklist).",
+      "key_points": [
+        "The story: in February 2023, Rumbelow & Watkins (SERI-MATS) posted 'SolidGoldMagikarp (plus, prompt generation)' on LessWrong — feeding GPT-2/3/J tokens like ' SolidGoldMagikarp', ' petertodd', ' TheNitromeFan', 'davidjl', ' guiActiveUn', ' externalToEVA' produced bizarre outputs: the model couldn't repeat them, insulted the user, spelled different words, or hallucinated wildly",
+        "Root cause — a tokenizer/training-corpus mismatch: GPT-2's BPE tokenizer was trained on a corpus that included Reddit r/counting usernames and Puzzle & Dragons (a game) subreddit text, so these strings earned dedicated tokens; that data was then deduplicated/filtered out of the model's training set, so the embeddings for those tokens were initialized and almost never updated — near-random vectors the model can't interpret",
+        "Behavioral taxonomy: 'unspeakable' tokens (model refuses/can't echo them), evasion and deflection, hallucinated substitutions, spelling out unrelated words, and occasional profanity or persona breaks — all downstream of an embedding sitting in a meaningless region of activation space",
+        "The ' petertodd' phenomenon became its own micro-legend for the surreal, menacing completions it produced — a canonical example that these are not cherry-picked bugs but a systematic artifact of the tokenizer-training pipeline",
+        "Systematic follow-up: Land & Bartolo 2024 'Fishing for Magikarp' turned the anecdote into method — automatically detecting under-trained and unreachable tokens across many open models (Llama, Mistral, Gemma), finding hundreds per tokenizer, especially in multilingual and code token ranges",
+        "The lesson mechanically: the tokenizer and the training corpus must be co-designed; any token whose training-set frequency is ~0 is a latent glitch, and large multilingual vocabularies (100k-256k) make this more common, not less",
+        "Evidence status: verified — the LessWrong writeup, the reproductions, and the academic follow-up are all public and replicable on released checkpoints"
+      ],
+      "links": [
+        "Snippet - Finding Under-Trained Tokens",
+        "Checklist - Auditing a Tokenizer for Glitch Tokens",
+        "Gotchas - Tokenizer Pathologies",
+        "Concept - Byte-Pair Encoding",
+        "Concept - Numeracy and Digit Tokenization",
+        "Concept - Deduplication at Scale",
+        "Concept - Refusal Mechanics"
+      ]
+    },
+    {
+      "title": "Gotchas - Tokenizer Pathologies",
+      "type": "gotchas",
+      "level": "core",
+      "scope": "Aggregated failure modes that trace back to tokenization, ordered by how often they bite. IN: leading-space/prompt-boundary merges, double-BOS, trailing-whitespace prediction, digit inconsistency, glitch/unreachable tokens, multilingual over-fragmentation. OUT: the BPE training algorithm (link 04) and the glitch-token backstory (own Lore).",
+      "key_points": [
+        "Leading-space and boundary merges: ' dog' and 'dog' are different tokens; a prompt ending mid-word or without the expected space changes which token the model sees, silently shifting behavior — the classic 'my prompt works with a trailing space but not without' bug",
+        "Double-BOS / template mismatch: adding BOS in the tokenizer AND in the chat template gives two BOS tokens, which many models handle poorly (the attention sink expects exactly one); missing BOS entirely can also degrade the sink — verify the exact special-token sequence",
+        "Trailing-whitespace trap: if the prompt ends with a space, the model must predict a token that does not itself start with a space, which is off-distribution; the fix is to not emit a trailing space and let the model produce the space-prefixed token",
+        "Digit inconsistency: multi-digit BPE merges make arithmetic non-compositional; the same number can tokenize differently in different contexts, and comparisons like 9.11 vs 9.9 go wrong — route to the numeracy note for the deeper story and fixes",
+        "Glitch / unreachable tokens: under-trained tokens (SolidGoldMagikarp class) produce hallucination and evasion; unreachable tokens (never emitted by the tokenizer on any normal string) waste vocab and can be exploited — audit before trusting a new tokenizer",
+        "Multilingual and code over-fragmentation: a tokenizer tuned for English shreds other scripts and code into many tokens, inflating cost and latency and hurting quality; token-per-word varies 2-5x across languages, which quietly changes context budget and per-token pricing",
+        "Symptom→cause table the note should include: 'model can't spell a word' → BPE hides characters; 'off-by-one formatting' → boundary token; 'garbage on rare string' → glitch token; 'arithmetic wrong on long numbers' → digit merges; 'foreign text truncated early' → fragmentation eating the context window"
+      ],
+      "links": [
+        "Lore - Glitch Tokens",
+        "Concept - Numeracy and Digit Tokenization",
+        "Concept - Byte-Pair Encoding",
+        "Concept - Attention Sinks",
+        "Checklist - Auditing a Tokenizer for Glitch Tokens",
+        "Concept - Prompt Caching"
+      ]
+    },
+    {
+      "title": "Gotchas - Long-Context Failure Modes",
+      "type": "gotchas",
+      "level": "advanced",
+      "scope": "The ways million-token context windows fail silently even when the model 'supports' the length. IN: lost-in-the-middle, needle-tests that lie, RoPE out-of-distribution degradation, attention dilution, KV-quant artifacts. OUT: the context-extension methods (own notes) and prompt-level context engineering (link 09).",
+      "key_points": [
+        "Lost-in-the-middle (Liu et al. 2023): retrieval accuracy is U-shaped in position — models use information at the very start and very end of a long context far better than the middle; a fact buried at 50% depth can be effectively invisible even within the advertised window",
+        "Needle-in-a-haystack tests lie: a model can pass single-needle retrieval (find one sentence) while failing multi-needle, aggregation, or reasoning-over-context tasks; NIAH is necessary but wildly insufficient — RULER and multi-hop long-context benchmarks expose the gap",
+        "RoPE out-of-distribution degradation: past the trained length, rotation angles are unseen and attention scores decay; a model 'extended' to 128k via a naive scale can show fine perplexity but broken mid-context recall and damaged short-context quality — always eval both regimes",
+        "Attention dilution: softmax over 10^6 keys spreads probability thin; genuine signal competes with the attention-sink mass and with noise, so effective retrieval SNR drops with length even when the mechanism is 'correct'",
+        "KV-cache quantization artifacts: INT4/FP8 KV quant that ignores outlier channels and sink tokens degrades long-context recall specifically (short prompts look fine), because the errors compound over thousands of cached positions",
+        "Cost/latency cliff people forget: prefill is O(L²) in attention and KV memory is O(L)·layers·heads — a 1M-token prompt can cost more than the generation and blow the memory budget; the 'it supports 1M tokens' spec omits that you may not afford to fill it",
+        "Detection playbook the note should give: run positional-sweep NIAH, multi-needle, and a short-context regression; watch for a perplexity cliff at the extension boundary and for recall that collapses in the middle band"
+      ],
+      "links": [
+        "Concept - RoPE Extrapolation and Context Extension",
+        "Concept - Ring Attention and Extreme Context",
+        "Concept - Context Rot",
+        "Concept - KV Cache",
+        "Concept - Attention Sinks",
+        "Playbook - Extending a Model's Context Window",
+        "Concept - Post-Training Quantization Formats"
+      ]
+    },
+    {
+      "title": "Checklist - Auditing a Tokenizer for Glitch Tokens",
+      "type": "checklist",
+      "level": "advanced",
+      "scope": "A pre-flight verification list to run before trusting a tokenizer in training or production, catching under-trained, unreachable, and pathological tokens. IN: reachability, embedding-statistic outliers, round-trip, special-token hygiene, multilingual spot-checks. OUT: the detection code itself (own Snippet) and BPE training (link 04).",
+      "key_points": [
+        "Reachability: confirm every token id can actually be produced by encoding some string; enumerate 'unreachable' tokens (present in vocab, never emitted) — these are prime glitch candidates and wasted capacity",
+        "Embedding-statistic outliers: flag tokens whose input embedding L2 norm or whose unembedding row magnitude is anomalously small, and tokens whose max predicted probability across contexts is near zero — the under-trained signature from 'Fishing for Magikarp'",
+        "Repeat-the-token probe: for each candidate, prompt the model to echo the token verbatim; failure, deflection, or substitution confirms a glitch token behaviorally, not just statistically",
+        "Round-trip integrity: encode→decode every token and a corpus sample and assert byte-exact reconstruction; catches byte-fallback bugs, normalization (NFC/NFKC) surprises, and lossy merges",
+        "Special-token hygiene: verify exactly one BOS is added (tokenizer vs chat template), EOS/PAD/UNK ids are correct and distinct, and reserved/added tokens have trained embeddings (not fresh random rows appended after pretraining)",
+        "Digit and whitespace behavior: check how integers and decimals tokenize (single-digit? grouped? consistent across contexts?) and whether leading/trailing spaces shift tokens, since both drive arithmetic and formatting bugs",
+        "Multilingual and code spot-check: measure tokens-per-word across your target languages and on code; extreme fragmentation (>3-4x English) warns of quality and cost problems and of ranges where under-trained tokens cluster"
+      ],
+      "links": [
+        "Snippet - Finding Under-Trained Tokens",
+        "Lore - Glitch Tokens",
+        "Gotchas - Tokenizer Pathologies",
+        "Concept - Byte-Pair Encoding",
+        "Concept - Numeracy and Digit Tokenization"
+      ]
+    },
+    {
+      "title": "Playbook - Extending a Model's Context Window",
+      "type": "playbook",
+      "level": "advanced",
+      "scope": "An end-to-end procedure to take a RoPE model from its trained length to a target long context without wrecking short-context quality. IN: method selection, scale-factor computation, fine-tuning, dual-regime evaluation, rollback triggers. OUT: the theory of each method (own notes) and serving-time long-context batching (link 07).",
+      "key_points": [
+        "Step 1 — establish baselines before touching anything: record short-context perplexity and a task suite, plus positional NIAH at the current length; you cannot detect regression without a pre-extension reference (expected: stable curves; a noisy baseline means fix eval first)",
+        "Step 2 — pick the method by budget and target: modest extension with little compute → NTK-aware base scaling (often training-free); larger, high-quality target → YaRN with brief fine-tuning; extreme (>512k) → base-theta pretraining or LongRoPE search, plus ring/context parallelism to fit memory — route to the decision note",
+        "Step 3 — compute the scale factor and apply: set s = L_target / L_train, apply the frequency rescale (and YaRN's attention-temperature term); sanity-check that high-frequency dims are preserved and low-frequency dims interpolated (expected: attention entropy near pre-extension levels)",
+        "Step 4 — fine-tune on genuinely long documents: a few hundred steps on packed long sequences (not concatenated short ones — packing artifacts teach the wrong positional distribution); watch loss for spikes that signal attention-entropy issues",
+        "Step 5 — evaluate both regimes: run long-context NIAH with a positional sweep, multi-needle/RULER, AND the original short-context suite; the failure signature to catch is long-context gains bought with short-context regression",
+        "Step 6 — verify serving reality: confirm KV-cache memory and prefill latency at the new length are affordable, and that KV quantization (if used) still passes long-context recall — an extended window you can't afford to fill is a spec, not a capability",
+        "Rollback triggers: >X% short-context regression, a perplexity cliff at the boundary, or mid-context recall collapse → reduce scale factor, protect more high-frequency dims, or add fine-tuning data"
+      ],
+      "links": [
+        "Decision - Choosing a Context Extension Method",
+        "Concept - RoPE Extrapolation and Context Extension",
+        "Breakdown - YaRN",
+        "Gotchas - Long-Context Failure Modes",
+        "Concept - Ring Attention and Extreme Context",
+        "Concept - KV Cache",
+        "Concept - Context Rot"
+      ]
+    },
+    {
+      "title": "Snippet - Reproducing Grokking on Modular Addition",
+      "type": "snippet",
+      "level": "advanced",
+      "scope": "Runnable code that trains a tiny transformer on (a+b) mod p and reproduces the grokking delay curve. IN: the dataset construction, minimal model, the weight-decay/full-batch setup that makes grokking appear, logging train vs val to see the gap. OUT: the mechanistic Fourier analysis (link Grokking concept) and general training-loop theory (link 02).",
+      "key_points": [
+        "Dataset: all pairs (a, b) with a, b in [0, p) for a prime like p=97, label = (a+b) mod p; split ~30-50% train / rest val; input is the 3-token sequence [a, b, '='] and the model predicts the sum token — this exact setup is Power et al.'s minimal grokking task",
+        "Model: a 1-2 layer, width ~128 decoder-only transformer (or even a 2-layer MLP on one-hot inputs) — grokking does not need scale; the point is a small model that can both memorize and generalize",
+        "The critical hyperparameters that MAKE grokking appear: AdamW with strong weight decay (~1.0), full-batch or large-batch training, and a long run (10^4-10^5 steps); omit weight decay and you get memorization with no generalization — the snippet must foreground this",
+        "Logging: plot train accuracy and val accuracy on a log-x step axis; the expected output is train→100% within ~10^2-10^3 steps while val stays ~1/p (chance) for thousands of steps, then val snaps to ~100% — the signature grokking curve",
+        "Reproducibility notes to include: grokking timing is seed- and LR-sensitive; too little data → never groks, too much regularization → slow or unstable; a small LR warmup helps; expect to wait — the delay is the phenomenon, not a bug",
+        "Why it's written this way: full-batch + high weight decay isolates the memorize-then-generalize dynamic by removing SGD noise as a confound and by making the low-norm generalizing solution the eventual minimizer; the log-x axis is essential because the transition is invisible on a linear axis",
+        "Pointer: to see WHY it groks (the discrete Fourier / trig algorithm and progress measures), follow to the Grokking concept and TransformerLens-style analysis"
+      ],
+      "links": [
+        "Concept - Grokking",
+        "Concept - Double Descent",
+        "Concept - Adam and AdamW",
+        "Concept - The Training Loop",
+        "Concept - Numeracy and Digit Tokenization"
+      ]
+    },
+    {
+      "title": "Snippet - Finding Under-Trained Tokens",
+      "type": "snippet",
+      "level": "unicorn",
+      "scope": "Runnable code that scans a model's vocabulary for glitch/under-trained tokens using unembedding statistics and a repeat probe. IN: computing per-token predicted probability and embedding norms, ranking candidates, verifying behaviorally. OUT: the tokenizer-audit checklist framing (own Checklist) and the SolidGoldMagikarp history (own Lore).",
+      "key_points": [
+        "Core signal (Land & Bartolo 2024 'Fishing for Magikarp'): under-trained tokens have unembedding rows that the model almost never predicts; compute, for each token t, the model's maximum output probability for t across a set of prompts, or use the unembedding row's L2 norm relative to the distribution — low values flag candidates",
+        "Complementary signal: input-embedding statistics — tokens whose input embedding is near the mean/centroid or has anomalously small norm were rarely updated; combine input- and output-side signals to reduce false positives",
+        "Unreachable-token pass: iterate the vocab, and for each token id check whether re-encoding its decoded string yields that id back; ids that never round-trip are unreachable and are strong glitch candidates independent of the model",
+        "Behavioral verification: for the top candidates, prompt the model to repeat the token verbatim (e.g., 'Please echo: <token>'); glitch tokens fail — substitution, refusal, or nonsense — which confirms the statistical hit",
+        "Implementation shape: load model + tokenizer (transformers), take the unembedding weight (lm_head), compute a cheap per-token score in one matmul over a batch of hidden states or directly from row norms, argsort ascending, then run the repeat probe on the tail",
+        "Why it's written this way: the row-norm / max-probability score is a single GPU matmul over the whole vocab (cheap), so you screen 100k-256k tokens fast and reserve the expensive generative probe for the few hundred worst — statistics first, behavior second",
+        "Caveats to state: legitimately rare tokens (rare Unicode, reserved slots) can look under-trained without being harmful; thresholds are model-specific; multilingual and code token ranges dominate the candidate list on large-vocab tokenizers"
+      ],
+      "links": [
+        "Lore - Glitch Tokens",
+        "Checklist - Auditing a Tokenizer for Glitch Tokens",
+        "Gotchas - Tokenizer Pathologies",
+        "Concept - Byte-Pair Encoding",
+        "Concept - Softmax"
+      ]
+    },
+    {
+      "title": "Snippet - Softmax-Off-By-One (Quiet Attention)",
+      "type": "snippet",
+      "level": "unicorn",
+      "scope": "Runnable code implementing softmax_1 (the '+1 in the denominator' attention variant) and a demonstration of how it changes outlier/sink behavior. IN: the softmax_1 formula, a drop-in attention function, a before/after look at attention mass and activation magnitudes. OUT: the attention-sink phenomenon in depth (own Concept) and quantization consequences (link 07).",
+      "key_points": [
+        "The idea (Evan Miller 2023 'Attention Is Off By One'): replace softmax(x)_i = e^{x_i}/Σ_j e^{x_j} with softmax_1(x)_i = e^{x_i}/(1 + Σ_j e^{x_j}); the extra +1 is an implicit always-present 'null' key with logit 0, giving a head a way to attend to nothing so its outputs can go to ~0",
+        "Why it might help: standard softmax forces the weights to sum to exactly 1 even when a head has nothing to say, so the model manufactures attention sinks and massive activations to absorb the mass; the escape valve is meant to remove that pressure — 'quiet attention' / 'ghost softmax'",
+        "Implementation: the whole change is appending a zero column to the logits before softmax (or adding 1 to the exp-sum) and dropping the corresponding output; numerically, keep the max-subtraction trick and add exp(0 − max) = e^{−max} to the denominator for stability",
+        "Demonstration the snippet should run: take a small pretrained attention layer (or a toy setup), compare per-head attention mass on token 0 and the max hidden-state magnitude under softmax vs softmax_1 — the point is to visualize whether the sink/outlier shrinks",
+        "Honest evidence status: this is a plausible, popular hypothesis, not a settled win — Miller's own follow-up quantization tests were mixed, and Gu et al. 2024 found attention sinks still emerge under variants; StreamingLLM's trained sink token is a competing fix that provably works",
+        "Why it's written this way: the +1 is cleanest expressed as a phantom zero-logit key so the code makes the mechanism obvious, and the stable-softmax max-subtraction must be preserved or long-sequence logits overflow — the note demonstrates the mechanism and reports the ambiguity rather than overselling",
+        "Connections to draw in prose: this is the same lever as YaRN's attention-temperature and as learnable per-head sink logits now shipped in some models — three angles on 'control where the leftover softmax mass goes'"
+      ],
+      "links": [
+        "Concept - Attention Sinks",
+        "Concept - Massive Activations and Outlier Features",
+        "Concept - Softmax",
+        "Concept - Attention Mechanism",
+        "Concept - Post-Training Quantization Formats"
+      ]
+    },
+    {
+      "title": "Decision - Choosing a Context Extension Method",
+      "type": "decision",
+      "level": "advanced",
+      "scope": "How to pick among position interpolation, NTK-aware scaling, YaRN, LongRoPE, and native long-context pretraining for a given target length and budget. IN: the decision flow, the tradeoff matrix, the edges that flip the default. OUT: the mechanism of each method (own notes) and the step-by-step execution (own Playbook).",
+      "key_points": [
+        "Default for the 80% case: for a 2-8x extension with a modest fine-tuning budget, YaRN (NTK-by-parts + attention temperature, ~few hundred fine-tune steps) is the standard choice — best quality-per-token and the community default baked into many checkpoints",
+        "Training-free / tiny budget: NTK-aware base-theta scaling (or dynamic scaling by sequence length) extends 2-4x with little or no fine-tuning; use when you cannot train, accepting some mid-context recall loss",
+        "Position Interpolation: simplest to reason about and implement, but uniformly compresses high-frequency dims (hurts local resolution) and generally needs more fine-tuning tokens than YaRN for equal quality — pick it only for simplicity or as a baseline",
+        "Extreme targets (>512k-2M): native pretraining with a large RoPE base (θ=500000-1e6+) is what frontier labs actually do; LongRoPE (evolutionary per-dim search) reaches 2M on existing models; both require ring/context-parallelism to fit the memory — a different budget class entirely",
+        "Tradeoff-matrix axes the note must fill with numbers: fine-tuning tokens/steps needed, short-context regression risk, max reliable length, implementation complexity, and whether serving KV memory at the target is affordable",
+        "Edges that flip the decision: heavy short-context production traffic → prefer dynamic scaling that reverts to full-resolution RoPE on short prompts; retrieval-heavy long-context → weight mid-context (RULER) not just NIAH; if the base model was already trained with high θ, a smaller additional scale suffices",
+        "Anti-pattern to call out: quoting the extended length as a capability without dual-regime eval and without checking prefill cost/KV memory — the method choice is only valid relative to a measured short-and-long evaluation"
+      ],
+      "links": [
+        "Concept - RoPE Extrapolation and Context Extension",
+        "Breakdown - YaRN",
+        "Playbook - Extending a Model's Context Window",
+        "Concept - Ring Attention and Extreme Context",
+        "Gotchas - Long-Context Failure Modes",
+        "Concept - KV Cache"
+      ]
+    }
+  ]
+}

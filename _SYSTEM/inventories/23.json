@@ -1,0 +1,424 @@
+{
+  "domain": "23 - Adoption & Blockers",
+  "slug": "adoption-blockers",
+  "notes": [
+    {
+      "title": "Concept - The Pilot-to-Production Gap",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The headline phenomenon of the Applied Wing: most enterprise GenAI pilots never reach production or measurable P&L impact. IN: the MIT NANDA 95% claim and its critiques, corroborating abandonment data (S&P, Gartner), the buy-vs-build success asymmetry, why demos are easy and production is a reliability cliff, the 'GenAI Divide' framing. OUT: detailed change management (own note), the eval gap (own note), unit economics of the products (link to 22), the reliability mechanism itself (link to Capability-Reliability Gap, 20).",
+      "key_points": [
+        "MIT NANDA 'The GenAI Divide: State of AI in Business 2025' (Aug 2025) headline: ~95% of enterprise GenAI pilots show no measurable P&L impact; only ~5% reach rapid revenue acceleration (E2, single report; basis: 150 interviews, 350-employee survey, 300 public deployments).",
+        "Critiques matter: the 95% is not an RCT or peer-reviewed, 'no P&L impact' is not the same as 'failed,' and the figure is widely misquoted as '95% of AI fails' — tier it E2 and state the counter-framing in the same breath (STANDARDS 8).",
+        "Independent corroboration: S&P Global Market Intelligence VotE survey (fielded Oct-Nov 2024, n=1006) found the share of firms abandoning most AI initiatives rose from 17% to 42% YoY, with ~46% of POCs scrapped before production (E2, single survey).",
+        "Gartner forecast (2024): at least 30% of GenAI projects abandoned after POC by end-2025 (E1 forecast, attribute to Gartner, do not launder into fact).",
+        "Buy-vs-build asymmetry: NANDA reports vendor/partnership tools reached production ~67% of the time vs internal builds succeeding roughly one-third as often — a concrete argument for Build vs Buy vs Wrap (22).",
+        "Root cause per NANDA is a 'learning gap,' not model quality/infra/regulation: systems don't retain feedback, adapt to context, or fit day-to-day workflow — the blocker is organizational and integration, not raw capability.",
+        "Non-obvious: demo-to-prod is a reliability cliff, not a slope. A 90% demo is a 10%-failure product, and the last few points of reliability cost more than the first 90% — the mechanism behind the gap (link Capability-Reliability Gap 20, Evaluation Gap)."
+      ],
+      "links": [
+        "Concept - The Evaluation Gap",
+        "Concept - Data and Integration Readiness",
+        "Concept - Organizational Resistance and Change Management",
+        "Playbook - Crossing the Pilot-to-Production Gap",
+        "Gotchas - Enterprise AI Adoption",
+        "Concept - The Capability-Reliability Gap",
+        "Decision - Build vs Buy vs Wrap",
+        "Reference - AI Market Sizing Claims",
+        "Playbook - Picking Profitable AI Use Cases",
+        "Deep Dive - Bubble or Boom"
+      ]
+    },
+    {
+      "title": "Concept - Shadow AI",
+      "type": "concept",
+      "level": "surface",
+      "scope": "Unsanctioned employee use of public AI tools with company data, outside IT governance — the AI-era of shadow IT. IN: definition and drivers, the Samsung archetype, prevalence surveys, consumer-tier retention as the leak vector, why outright bans fail, the sanctioned-alternative response. OUT: prompt-injection/data-leak mechanics (link to 14), enterprise security architecture (own Security Exposure note), DLP tooling internals.",
+      "key_points": [
+        "Definition: employees using public GenAI tools (ChatGPT, Gemini, consumer Copilot) with company data without IT approval — invisible to governance, contract, and logging.",
+        "Samsung archetype: three leaks in ~20 days in April 2023 — semiconductor equipment source code, a defect-detection algorithm, and an internal meeting transcript pasted into ChatGPT; Samsung banned public GenAI on corporate devices by May 2023 (E2, Bloomberg/Forbes/Register reporting).",
+        "The leak vector is the consumer ToS, not a model exploit: free/Plus tiers may retain and train on inputs, whereas enterprise API / zero-retention tiers contractually do not — the fix is procurement and configuration, not a smarter model.",
+        "Prevalence is survey-tier (E2/E1): 2024-2025 surveys repeatedly find a majority of knowledge workers use AI at work and a large share paste company data or hide usage from employers — cite as survey-dependent, not fact.",
+        "Compliance exposure: PII/PHI in prompts can breach GDPR/HIPAA and become a reportable data-processing event in regulated industries (link EU AI Act for Operators).",
+        "Why outright bans fail: prohibition pushes usage underground; the durable response is a sanctioned enterprise tier (zero-retention, SSO, logging) plus clear policy, because friction drives circumvention.",
+        "Non-obvious: the fastest way to cut shadow AI is to give employees an approved tool as good as the consumer one — a change-management lever, not a security-control one (link Organizational Resistance and Change Management)."
+      ],
+      "links": [
+        "Concept - Enterprise AI Security Exposure",
+        "Concept - Organizational Resistance and Change Management",
+        "Reference - The EU AI Act for Operators",
+        "Gotchas - Enterprise AI Adoption",
+        "Concept - The Pilot-to-Production Gap",
+        "Lore - Failed Enterprise AI Deployments",
+        "Concept - Unit Economics of LLM Products",
+        "Reference - AI Impact by Business Function",
+        "Concept - Prompt Injection",
+        "Concept - Cost Engineering for LLM Applications"
+      ]
+    },
+    {
+      "title": "Concept - The Evaluation Gap",
+      "type": "concept",
+      "level": "core",
+      "scope": "Why enterprises can't tell whether their AI actually works in production, and why that blocks sign-off. IN: absence of task-specific eval sets, benchmark-vs-real-work divergence, no ground truth for generative outputs, silent regressions, over-reliance on vibes and LLM-judges. OUT: eval harness construction and statistics (link to 13), LLM-as-judge bias internals (link to 13), benchmark contamination mechanics (link to 13).",
+      "key_points": [
+        "The gap: most enterprises deploy without a task-specific eval set, so they cannot quantify accuracy, detect regressions, or defend a go/no-go decision — a direct expression of NANDA's 'learning gap' and a top reason pilots stall.",
+        "Benchmark != real work: high MMLU/SWE-bench numbers don't predict performance on messy proprietary tasks. The METR RCT (2025) is the sharpest case — developers felt ~20% faster but were measured 19% slower (single RCT, n=16, 246 tasks) — perceived and measured value diverge (link Breakdown - The METR Developer Slowdown RCT 20).",
+        "No ground truth: unlike classic ML, generative outputs often lack labels, so teams fall back on spot-checks that miss the 'improved case A, broke case B' regression pattern.",
+        "LLM-as-judge is the common crutch but carries position, verbosity, and self-preference bias and must be validated against human labels on a slice (link LLM-as-Judge 13).",
+        "Statistical illiteracy compounds it: a 2-point move on 50 examples is noise, yet enterprises overreact to anecdotes and single demos (link Statistical Rigor in Model Evaluation 13).",
+        "Contamination inflates the numbers teams trust: public benchmark scores are elevated by training-set leakage, so vendor benchmark claims overstate real-world capability (link Benchmark Contamination 13).",
+        "Non-obvious: building the eval set IS the product work — teams that cross the pilot-to-production gap invest in 50-500 labeled real cases up front; teams that ship on demos silently regress (link Designing an Eval Harness 13)."
+      ],
+      "links": [
+        "Concept - The Pilot-to-Production Gap",
+        "Playbook - Crossing the Pilot-to-Production Gap",
+        "Gotchas - Enterprise AI Adoption",
+        "Concept - The Verification Tax",
+        "Concept - Vendor and Model Churn Risk",
+        "Concept - The Capability-Reliability Gap",
+        "Breakdown - The METR Developer Slowdown RCT",
+        "Reference - Developer Productivity Studies",
+        "Deep Dive - Designing an Eval Harness",
+        "Concept - LLM-as-Judge",
+        "Concept - Benchmark Contamination",
+        "Concept - Statistical Rigor in Model Evaluation"
+      ]
+    },
+    {
+      "title": "Concept - Data and Integration Readiness",
+      "type": "concept",
+      "level": "core",
+      "scope": "The unglamorous blocker: enterprise data quality, access, entitlements, and legacy-system integration determine AI success more than model choice. IN: siloed/stale/permission-gated data, document-level access control in RAG/agents, legacy integration failures, the share of effort spent on plumbing. OUT: RAG retrieval internals and vector indexes (link to 11), pretraining corpus/dedup mechanics (link to 05), MCP protocol (link to 10).",
+      "key_points": [
+        "Core claim: most GenAI value is blocked upstream — data is siloed, unlabeled, permission-gated, stale, or trapped in legacy systems the model can't reach. NANDA and S&P both cite integration/data (and security) as top blockers, not model quality (E2).",
+        "Permission/entitlement leakage: a RAG system or agent that indexes everything can surface documents a user shouldn't see (HR, salary, M&A). Document/row-level access control is the hard part, and most POCs skip it (link Enterprise AI Security Exposure).",
+        "Legacy integration kills projects: the MD Anderson Watson for Oncology effort (~$62M, shelved 2016) died partly because it was never integrated with the hospital's new Epic EHR (E2/E3, IEEE Spectrum/STAT) — the model was never the bottleneck.",
+        "Data quality dominates output quality: real records are missing fields, ambiguous, and out of chronological order (documented in the Watson leukemia pilot); garbage-in outweighs model selection.",
+        "Retrieval readiness is underestimated: RAG assumes clean, chunked, well-embedded, freshly-synced content plus entitlement-aware retrieval — an ETL and permissions project, not a prompt (link Deep Dive - RAG Architectures 11).",
+        "Effort split: the data/integration/permissions work is commonly 60-80%+ of an enterprise AI project — the 'boring' work that decides success and where budgets are underspent.",
+        "Non-obvious: a better model rarely fixes a readiness failure; leverage lives in entitlements, connectors, and freshness — which is exactly why vendor tools with pre-built integrations beat internal builds (link Build vs Buy vs Wrap 22)."
+      ],
+      "links": [
+        "Concept - The Pilot-to-Production Gap",
+        "Concept - The Evaluation Gap",
+        "Gotchas - Enterprise AI Adoption",
+        "Playbook - Crossing the Pilot-to-Production Gap",
+        "Concept - Enterprise AI Security Exposure",
+        "Lore - Failed Enterprise AI Deployments",
+        "Decision - Build vs Buy vs Wrap",
+        "Concept - Unit Economics of LLM Products",
+        "Deep Dive - Agentic Coding in Production",
+        "Deep Dive - RAG Architectures",
+        "Concept - Model Context Protocol (MCP)",
+        "Concept - HNSW"
+      ]
+    },
+    {
+      "title": "Concept - Organizational Resistance and Change Management",
+      "type": "concept",
+      "level": "core",
+      "scope": "The human blocker: adoption stalls even when the technology works, because of worker distrust, workflow disruption, incentive misalignment, and enablement gaps. IN: trust/verification friction, shelfware, incentives, workflow fit, what actually drives adoption. OUT: labor-market displacement projections (link to 24), the operational crossing procedure (own Playbook), productivity measurement methodology (link to 20).",
+      "key_points": [
+        "Adoption is a change problem, not a tech problem: accurate tools stall when workers don't trust output, don't know how to use them, or aren't incentivized to — NANDA's 'learning gap' is substantially organizational (E2).",
+        "Trust/verification friction: knowledge workers distrust confident-but-wrong output and re-check everything, eroding time savings; the METR RCT shows experts can be slowed even while feeling faster (link The Verification Tax, Breakdown - The METR Developer Slowdown RCT 20).",
+        "Incentive misalignment: if AI makes a team's headcount look cuttable, the team quietly resists; adoption thrives when the gains accrue to the user, not only the employer.",
+        "Workflow disruption: tools that don't fit the existing system-of-record (Salesforce, Epic, ServiceNow) get abandoned regardless of quality (link Data and Integration Readiness).",
+        "Enablement gap: without prompt/tool training and worked examples, usage stays shallow, and the intra-team spread between power users and non-users is enormous.",
+        "What works (E2, practitioner/consultancy sourcing): executive sponsorship, embedded champions, redesigning the workflow around the tool rather than bolting it on, and measuring active use rather than licenses sold.",
+        "Non-obvious: seats sold != value delivered — shelfware is rampant; the metric that matters is active use on real tasks, and a good sanctioned tool simultaneously reduces shadow AI (link Shadow AI)."
+      ],
+      "links": [
+        "Concept - The Pilot-to-Production Gap",
+        "Concept - Shadow AI",
+        "Concept - The Verification Tax",
+        "Concept - Data and Integration Readiness",
+        "Gotchas - Enterprise AI Adoption",
+        "Breakdown - The METR Developer Slowdown RCT",
+        "Breakdown - Klarna's AI Customer Service Bet",
+        "Reference - AI Impact by Business Function",
+        "Concept - Support Deflection Economics"
+      ]
+    },
+    {
+      "title": "Concept - Vendor and Model Churn Risk",
+      "type": "concept",
+      "level": "core",
+      "scope": "The risk of building long-lived deployments on rapidly changing models and providers. IN: model deprecations, silent endpoint regressions, price/quality volatility, provider concentration and lock-in, AI-startup mortality, mitigations. OUT: token price economics and deflation (link to 22), vendor-side moats/defensibility (link to 22), prompt versioning mechanics (link to 09), model genealogy (link to 19).",
+      "key_points": [
+        "Model deprecation churn: providers retire snapshots on short notice (OpenAI has deprecated older GPT-3.5/GPT-4 snapshots; Anthropic retires Claude versions), forcing pinned integrations to be re-qualified (E2, provider changelogs).",
+        "Silent regression: a provider updates an endpoint and a tuned prompt or eval regresses with no code change on your side — a top cause of 'it worked last week' incidents; the defense is dated-snapshot pinning plus a gating eval (link The Evaluation Gap).",
+        "Price/quality volatility: cost per unit of a given capability has fallen roughly an order of magnitude per year — good for margins but forcing constant re-benchmarking and re-optimization (link Token Price Deflation 22).",
+        "Provider concentration and lock-in: proprietary features (structured outputs, tool-call formats, prompt caching, context length) create switching costs; a model-agnostic abstraction layer is defensive engineering.",
+        "Vendor mortality: many AI startups will not survive the current cycle, so putting a core workflow on a Series-A wrapper is continuity risk (link Breakdown - Frontier Lab Economics 22 for the burn context, Decision - Build vs Buy vs Wrap 22).",
+        "Mitigations: abstraction layers, an eval suite that gates every model swap, snapshot pinning, and avoiding proprietary lock-in where portability matters.",
+        "Non-obvious: 'just upgrade to the new model' is never free — each swap re-opens the eval and prompt-tuning bill, so frontier progress is itself a deployment blocker for anything that needs stability (link Deep Dive - Bubble or Boom 24)."
+      ],
+      "links": [
+        "Concept - Token Price Deflation",
+        "Decision - Build vs Buy vs Wrap",
+        "Breakdown - Frontier Lab Economics",
+        "Concept - The Evaluation Gap",
+        "Gotchas - Enterprise AI Adoption",
+        "Concept - The Pilot-to-Production Gap",
+        "Concept - Agentic Deployment Risk",
+        "Deep Dive - Bubble or Boom",
+        "Reference - Model Genealogy",
+        "Concept - LLM Observability and Tracing"
+      ]
+    },
+    {
+      "title": "Reference - The EU AI Act for Operators",
+      "type": "reference",
+      "level": "core",
+      "scope": "A date-stamped lookup for operators deploying AI in or into the EU: risk tiers, enforcement dates, provider-vs-deployer duties, GPAI rules, penalties, and the 2026 Digital Omnibus delay. IN: the tables an operator opens mid-decision. OUT: injection/guardrail engineering (link to 14), copyright litigation (own Tracker), full US regulatory landscape, fair-use doctrine.",
+      "key_points": [
+        "Risk-tier table: unacceptable (banned outright), high-risk (Annex III — obligations-heavy), limited (transparency/disclosure), minimal (unregulated) — with the obligation weight and examples per tier.",
+        "Enforcement timeline (date-stamped mid-2026, E2/E3): in force 1 Aug 2024; prohibited practices + AI-literacy duties from 2 Feb 2025; GPAI-model obligations from 2 Aug 2025; high-risk (Annex III) originally 2 Aug 2026, deferred to 2 Dec 2027 under the Digital Omnibus (provisional agreement 7 May 2026, pending formal adoption — verify current status before relying on it).",
+        "Penalties (Article 99): up to EUR 35M or 7% of global annual turnover for prohibited-practice breaches; EUR 15M or 3% for other obligation breaches; EUR 7.5M or 1% for supplying incorrect information — whichever is higher.",
+        "Provider vs deployer: most enterprises are deployers, not providers, but deploying a third-party model into a high-risk use case still carries deployer duties — human oversight, logging, monitoring, and input-data governance.",
+        "GPAI obligations (Arts 51-55): transparency, training-data summaries, and a copyright policy; systemic-risk GPAI (trained above the ~10^25 FLOP threshold) carry extra duties — these flow down to operators through vendor documentation.",
+        "High-risk deployer checklist: risk management, data governance, human oversight, accuracy/robustness, event logging, and post-market monitoring — the duties that make high-risk uses expensive to run.",
+        "Footnotes: AI-Act 'operator' differs from GDPR 'controller' and fines can stack; reach is extraterritorial (applies where output is used in the EU); the Omnibus delay is provisional, not final."
+      ],
+      "links": [
+        "Reference - AI Copyright Litigation Tracker",
+        "Gotchas - Enterprise AI Adoption",
+        "Concept - Enterprise AI Security Exposure",
+        "Concept - The Pilot-to-Production Gap",
+        "Concept - Shadow AI",
+        "Reference - The 2026 Navigation Cheatsheet",
+        "Decision - Build vs Buy vs Wrap",
+        "Concept - Refusal Mechanics",
+        "Concept - LLM Observability and Tracing"
+      ]
+    },
+    {
+      "title": "Playbook - Crossing the Pilot-to-Production Gap",
+      "type": "playbook",
+      "level": "core",
+      "scope": "End-to-end procedure to take a GenAI POC to a governed production deployment. IN: use-case selection, eval-set-first, data/permissions readiness, human-in-the-loop design, guardrails, staged rollout, monitoring, ROI gate, and a failure-branch table. OUT: eval harness construction detail (link to 13), canary/deploy infra mechanics (link to 16), agent-loop engineering (link to 10), use-case ROI math (link to 22/24).",
+      "key_points": [
+        "Step 0 — pick a survivable use case: high value, error-tolerant or cheaply-verifiable, bounded scope; reject use cases needing >99% autonomous accuracy with no human review (link Playbook - Picking Profitable AI Use Cases 24, Capability-Reliability Gap 20). Deviation: if you can't state the acceptable error rate, stop.",
+        "Step 1 — build the eval set BEFORE the system: 50-500 labeled real cases including adversarial/edge inputs; no eval, no launch (link The Evaluation Gap). Deviation: 'we'll add evals later' means you'll ship on demos.",
+        "Step 2 — data and permissions readiness: connect systems-of-record, enforce document-level entitlements, verify freshness (link Data and Integration Readiness). Deviation: a red-team query surfacing a restricted doc is a blocker, not a bug.",
+        "Step 3 — design human-in-the-loop for the error profile: full autonomy only where verification is cheap; otherwise assist/approve modes, and count review cost in ROI (link The Verification Tax).",
+        "Step 4 — guardrails and security: input/output filtering, injection defenses on any tool or data access, PII handling, and logging (link Enterprise AI Security Exposure, Prompt Injection 14).",
+        "Step 5 — staged rollout: shadow mode -> canary percentage -> full, gating each stage on the eval suite and live metrics; keep a kill switch and a non-AI fallback path.",
+        "Step 6 — monitor and re-baseline: track quality, cost/token, latency, adoption, and regression on every model swap (link Vendor and Model Churn Risk, LLM Observability 16). Verification: a change is done only when the eval suite passes AND an adoption/ROI metric moves. Branch table: demo good/prod bad -> missing eval set; permission leak -> entitlements; non-adoption -> change management; regressed overnight -> model churn; cost blowout -> verification/human-review tax."
+      ],
+      "links": [
+        "Concept - The Pilot-to-Production Gap",
+        "Concept - The Evaluation Gap",
+        "Concept - Data and Integration Readiness",
+        "Concept - The Verification Tax",
+        "Concept - Enterprise AI Security Exposure",
+        "Concept - Vendor and Model Churn Risk",
+        "Gotchas - Enterprise AI Adoption",
+        "Playbook - Picking Profitable AI Use Cases",
+        "Concept - The Capability-Reliability Gap",
+        "Deep Dive - Designing an Eval Harness",
+        "Concept - Prompt Injection",
+        "Concept - LLM Observability and Tracing",
+        "Gotchas - Agents in Production"
+      ]
+    },
+    {
+      "title": "Gotchas - Enterprise AI Adoption",
+      "type": "gotchas",
+      "level": "advanced",
+      "scope": "The high-pain pitfalls that bite real enterprise AI deployments, symptom-first and ordered by damage. IN: demo-vs-prod, shelfware, entitlement leakage, silent model regression, injection via ingested data, hallucination-as-representation, ROI evaporation at scale, vendor lock-in. OUT: injection defense internals (link to 14), eval methodology (link to 13), the reliability mechanism (link to 20).",
+      "key_points": [
+        "Demo works, production doesn't: cherry-picked demo inputs hide the tail. Cause: no representative eval set. Fix: eval-first with real cases. Detect: a labeled real-case suite run before sign-off (link The Evaluation Gap).",
+        "Seat licenses != usage (shelfware): buying ChatGPT Enterprise/Copilot for everyone yields low active use. Cause: no change management. Fix: enablement + champions. Detect: active-use telemetry, not license count (link Organizational Resistance and Change Management).",
+        "Entitlement leakage in RAG: the assistant surfaces salary/HR/M&A docs to the wrong user. Cause: index-everything without document-level ACL. Fix: entitlement-aware retrieval. Detect: red-team queries for restricted content (link Data and Integration Readiness).",
+        "Silent model-update regression: the provider bumps an endpoint and quality drops with no deploy. Cause: unpinned model. Fix: dated-snapshot pins + eval gate on swaps. Detect: continuous regression eval (link Vendor and Model Churn Risk).",
+        "Prompt injection via ingested data: an agent reads a malicious email or webpage and exfiltrates data or misacts. Cause: treating retrieved content as trusted. Fix: instruction/data separation + least-privilege tools. Detect: an injection test corpus (link Prompt Injection 14, Enterprise AI Security Exposure).",
+        "Hallucination becomes a binding representation: the bot invents a policy/refund and the company is held to it (Air Canada). Fix: ground and cite, constrain to retrieved facts; disclaimers don't fully protect you. Detect: grounding/faithfulness checks (link Lore - Hallucination Liability Incidents).",
+        "POC ROI evaporates at scale: token + human-review costs negligible in a pilot dominate at volume. Cause: ignoring the verification tax and unit economics. Detect: model fully-loaded cost per successful task (link The Verification Tax, Unit Economics of LLM Products 22). Bonus gotcha: vendor mortality/lock-in — run a 'can we swap providers in a week?' drill."
+      ],
+      "links": [
+        "Concept - The Pilot-to-Production Gap",
+        "Concept - The Evaluation Gap",
+        "Concept - Enterprise AI Security Exposure",
+        "Concept - Vendor and Model Churn Risk",
+        "Lore - Hallucination Liability Incidents",
+        "Concept - The Verification Tax",
+        "Playbook - Crossing the Pilot-to-Production Gap",
+        "Concept - Unit Economics of LLM Products",
+        "Reference - Developer Productivity Studies",
+        "Concept - Prompt Injection",
+        "Deep Dive - RAG Architectures",
+        "Concept - LLM Observability and Tracing"
+      ]
+    },
+    {
+      "title": "Concept - Enterprise AI Security Exposure",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The new attack and leak surface that AI deployments open, from the operator's risk view. IN: outward data leakage (consumer tools, retention), inward adversarial input (prompt injection in practice), the lethal trifecta, autonomy-driven surface growth, model/plugin supply chain, PII in prompts and logs. OUT: injection/jailbreak taxonomy and defense internals (link to 14), guardrail engineering (link to 14), watermarking/detection (link to 14).",
+      "key_points": [
+        "Two exposure classes: outward leakage (employees paste secrets into consumer tools — Samsung 2023) and inward adversarial input (prompt injection via retrieved or tool-accessed content).",
+        "Prompt injection in practice: an agent that browses, reads email, or queries documents can be hijacked by attacker-planted instructions to exfiltrate data or take actions — Simon Willison's 'lethal trifecta' = access to private data + exposure to untrusted content + ability to communicate externally (E2, practitioner framing; link Prompt Injection 14).",
+        "Data retention risk is contractual, not behavioral: consumer ChatGPT/Gemini tiers may retain and train on inputs, while enterprise API / zero-retention tiers do not — the control is procurement/config (link Shadow AI).",
+        "Autonomy grows the surface: MCP tools, browsing, and multi-agent systems each add untrusted-content channels; least-privilege tool scoping is the primary defense (link Model Context Protocol (MCP) 10, Gotchas - Agents in Production 10).",
+        "Model/plugin supply chain: poisoned open weights, malicious models on public hubs, and prompt-injected tool descriptions are emerging vectors; provenance and sandboxing matter.",
+        "PII/compliance collision: prompts and logs become regulated data stores (GDPR/HIPAA), so 'log everything for observability' fights data-minimization (link The EU AI Act for Operators).",
+        "Non-obvious: guardrails and disclaimers reduce but don't eliminate liability — you are accountable for what your deployed system says and does (Air Canada), so the security bar for autonomous actions is far higher than for chat (link Lore - Hallucination Liability Incidents, Agentic Deployment Risk)."
+      ],
+      "links": [
+        "Concept - Shadow AI",
+        "Concept - Agentic Deployment Risk",
+        "Lore - Hallucination Liability Incidents",
+        "Gotchas - Enterprise AI Adoption",
+        "Reference - The EU AI Act for Operators",
+        "Playbook - Crossing the Pilot-to-Production Gap",
+        "Concept - The Pilot-to-Production Gap",
+        "Deep Dive - Agentic Coding in Production",
+        "Decision - Build vs Buy vs Wrap",
+        "Concept - Prompt Injection",
+        "Concept - Jailbreak Taxonomy",
+        "Concept - Model Context Protocol (MCP)",
+        "Gotchas - Agents in Production"
+      ]
+    },
+    {
+      "title": "Reference - AI Copyright Litigation Tracker",
+      "type": "reference",
+      "level": "advanced",
+      "scope": "A date-stamped lookup of the major AI-training copyright cases, their holdings, status, and operator implications. IN: the case table (Bartz, Thomson Reuters, NYT, Kadrey, Getty, Andersen) with rulings and what each means for deployers. OUT: data-licensing mechanics for pretraining (link to 05), the EU AI Act's copyright/GPAI rules (own EU note), fair-use doctrine theory.",
+      "key_points": [
+        "Bartz v. Anthropic (N.D. Cal.): Judge Alsup, June 2025 — training on lawfully-acquired books is fair use, but using pirated copies (LibGen/PiLiMi) is not; class certified Aug 2025; $1.5B settlement (~$3,000/work across ~500,000 works), preliminary approval 25 Sep 2025 — the largest US copyright settlement (E3, court records).",
+        "Thomson Reuters v. Ross Intelligence (D. Del.): 11 Feb 2025 — first ruling rejecting a fair-use defense for AI training data (2,243 Westlaw headnotes infringed); expressly limited to non-generative AI, so its reach to generative models is unsettled (E3).",
+        "NYT v. OpenAI/Microsoft (S.D.N.Y.): filed 27 Dec 2023; motions to dismiss largely denied 26 Mar 2025; active in discovery through mid-2026, with contested log-production and sanctions fights; no trial date set (E3, docket).",
+        "Kadrey v. Meta (N.D. Cal.): Judge Chhabria, June 2025 — summary judgment for Meta on fair use but on narrow grounds (plaintiffs failed to show market harm), explicitly not a blanket blessing for AI training (E3).",
+        "Getty Images v. Stability AI: the US case was narrowed, and the UK High Court (Nov 2025) largely favored Stability on the core training claims — image-model exposure and jurisdiction differ from text (E3, with jurisdiction note).",
+        "Andersen v. Stability AI (artists, N.D. Cal.): ongoing; some claims survived dismissal, testing output-similarity theories (E3).",
+        "Operator takeaways (date-stamped mid-2026): data provenance is the fault line — piracy loses even where training wins; generative output that reproduces a source is the live risk; vendor indemnification clauses (offered in varying forms by Microsoft, Google, Anthropic, OpenAI) are now a standard procurement ask."
+      ],
+      "links": [
+        "Reference - The EU AI Act for Operators",
+        "Lore - Hallucination Liability Incidents",
+        "Gotchas - Enterprise AI Adoption",
+        "Concept - The Pilot-to-Production Gap",
+        "Lore - Failed Enterprise AI Deployments",
+        "Decision - Build vs Buy vs Wrap",
+        "Reference - The 2026 Navigation Cheatsheet",
+        "Concept - Deduplication at Scale",
+        "Concept - Synthetic Training Data",
+        "Reference - Where Real AI Knowledge Lives"
+      ]
+    },
+    {
+      "title": "Lore - Hallucination Liability Incidents",
+      "type": "lore",
+      "level": "advanced",
+      "scope": "War stories where a deployed model's confident errors created legal, financial, or reputational liability. IN: Air Canada, Mata v. Avianca, NYC MyCity, Chevy Tahoe $1, DPD, the mechanical lesson, and honest evidence status. OUT: injection/extraction as an attack taxonomy (link to 14), the copyright cases (own Tracker), refusal mechanics (link to 14).",
+      "key_points": [
+        "Moffatt v. Air Canada (BC Civil Resolution Tribunal, Feb 2024): the airline's chatbot invented a bereavement-refund policy; the tribunal rejected Air Canada's argument that the bot was 'a separate legal entity' and held the airline liable, awarding ~CAD 812 total — the first precedent that a company owns its bot's words (E3, tribunal decision).",
+        "Mata v. Avianca (S.D.N.Y., 22 Jun 2023): lawyers filed a brief with ChatGPT-fabricated case citations; Judge Castel imposed a $5,000 Rule 11 sanction for 'subjective bad faith' — the case has since been cited in hundreds of follow-on 'AI hallucination in court filings' sanctions (E3, court order).",
+        "NYC MyCity chatbot (Mar 2024): the Microsoft-Azure-powered official city bot told businesses they could refuse Section 8 vouchers and take a cut of workers' tips — illegal advice from a government tool; left publicly accessible for months and finally removed in Feb 2026 (E2/E3, The Markup investigation).",
+        "Chevrolet of Watsonville bot (Nov 2023): prompt-injected into 'agreeing' to sell a ~$76k Tahoe for $1 with a 'legally binding, no takesies-backsies' clause; not enforced, but the canonical viral trust-and-injection lesson (E2, reporting).",
+        "DPD chatbot (Jan 2024): jailbroken into swearing and writing a poem calling DPD 'useless'; pulled within hours after millions of impressions — reputational, not legal, damage (E2).",
+        "Mechanical lesson: a deployed LLM's outputs are the company's representations; 'the AI said it' and disclaimers don't reliably transfer liability. Grounding, citation, and constrained scope reduce exposure; any customer-facing agent with tool/data access is also an injection liability surface.",
+        "Evidence status: Air Canada and Mata are documented court/tribunal records (E3); MyCity, Chevy, and DPD are well-reported press incidents (E2). All real, named, and dated — no composites (STANDARDS 8)."
+      ],
+      "links": [
+        "Reference - The EU AI Act for Operators",
+        "Reference - AI Copyright Litigation Tracker",
+        "Concept - Enterprise AI Security Exposure",
+        "Gotchas - Enterprise AI Adoption",
+        "Concept - The Pilot-to-Production Gap",
+        "Concept - Agentic Deployment Risk",
+        "Lore - Failed Enterprise AI Deployments",
+        "Breakdown - Klarna's AI Customer Service Bet",
+        "Reference - The 2026 Navigation Cheatsheet",
+        "Concept - Prompt Injection",
+        "Concept - Refusal Mechanics"
+      ]
+    },
+    {
+      "title": "Concept - Agentic Deployment Risk",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The new blocker class as autonomous agents move toward production (2025-2026): compounding error over multi-step trajectories, side-effecting action risk, injection-driven misuse, and the oversight cost that raises the reliability bar. IN: the reliability math of autonomy, action blast radius, injection surface, trajectory-level evaluation, where agents work vs stall. OUT: agent-loop internals and orchestration (link to 10), MCP/tool mechanics (link to 10), agent eval methodology (link to 13), capability-trajectory forecasts (link to 24).",
+      "key_points": [
+        "Compounding reliability is the core blocker: a 95%-per-step agent over 20 steps succeeds at roughly 0.95^20 ~= 36% end-to-end — autonomy multiplies the reliability bar, which is why open-ended multi-step agents stall in production (link The Capability-Reliability Gap 20).",
+        "Action risk: unlike chat, agents take side-effecting actions (send email, move money, run code), so errors are wrong deeds, not just wrong text; blast radius drives the need for scoping and approval gates.",
+        "Injection-driven misuse: any agent reading untrusted content is exploitable via the lethal trifecta — planted instructions can exfiltrate data or trigger unauthorized actions (link Enterprise AI Security Exposure, Prompt Injection 14).",
+        "Oversight cost undercuts ROI: the more you must review agent actions, the less autonomy saves — the verification tax scales with autonomy (link The Verification Tax, METR Time Horizons 24).",
+        "Evaluation is harder: trajectory-level, path-dependent outcomes with sparse ground truth resist single-turn eval (link The Evaluation Gap, Gotchas - Agents in Production 10).",
+        "Where it works mid-2026: narrow, verifiable, reversible domains — coding agents backed by tests/CI (link Deep Dive - Agentic Coding in Production 20) and tightly-scoped support flows — not open-ended autonomy.",
+        "Non-obvious: the winning production pattern is bounded autonomy — small trusted action sets, human approval on irreversible steps, cheap verification — not maximal agency; 'give the agent more tools' usually lowers reliability (link Deep Dive - Bubble or Boom 24)."
+      ],
+      "links": [
+        "Concept - Enterprise AI Security Exposure",
+        "Concept - The Verification Tax",
+        "Concept - The Evaluation Gap",
+        "Concept - The Capability-Reliability Gap",
+        "Deep Dive - Agentic Coding in Production",
+        "Concept - METR Time Horizons",
+        "Deep Dive - Bubble or Boom",
+        "Concept - The Pilot-to-Production Gap",
+        "Lore - Failed Enterprise AI Deployments",
+        "Deep Dive - The Agent Loop",
+        "Gotchas - Agents in Production",
+        "Concept - Prompt Injection",
+        "Concept - Model Context Protocol (MCP)"
+      ]
+    },
+    {
+      "title": "Concept - The Verification Tax",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The hidden cost of human review and correction of AI output, which erodes or reverses ROI. IN: why '80% done' is not 80% saved, the METR slowdown, verification-vs-generation asymmetry, the perception gap, scaling with stakes and autonomy, design levers. OUT: full productivity-study details (link to 20), agent action risk (own Agentic note), eval-set methodology (link to 13).",
+      "key_points": [
+        "Definition: the time/cost of checking and fixing AI output is a tax on every use; net value = generation savings minus verification cost, and the second term is routinely omitted from ROI models.",
+        "METR RCT (Jul 2025): experienced open-source developers were measured 19% slower with early-2025 AI on their own mature repos, while forecasting a ~24% speedup and still perceiving ~20% afterward (single RCT, n=16, 246 tasks; Cursor Pro + Claude 3.5/3.7) — the sharpest evidence the tax can exceed the benefit.",
+        "Verification-vs-generation asymmetry: AI pays off when checking is far cheaper than doing (code with tests, retrieval with citations) and is a trap when verifying requires redoing the work (expert judgment, unlabeled tasks).",
+        "Perception gap corrupts decisions: users systematically overestimate AI speedup (METR forecast +24% vs actual -19%), so self-reported productivity is unreliable input to adoption decisions (link The Evaluation Gap).",
+        "Scales with stakes and autonomy: higher error cost means more review means higher tax, and agents amplify it (link Agentic Deployment Risk) — which is why error-tolerant, cheaply-verifiable use cases win (link Playbook - Picking Profitable AI Use Cases 24).",
+        "Design levers: make outputs verifiable (citations, tests, structured diffs), auto-route only high-confidence cases, and measure fully-loaded cost per accepted output rather than raw generation speed.",
+        "Non-obvious: capability gains can raise the tax — a more fluent, more-confident model produces errors that are harder to catch, so better models don't automatically lower verification cost."
+      ],
+      "links": [
+        "Breakdown - The METR Developer Slowdown RCT",
+        "Reference - Developer Productivity Studies",
+        "Concept - The Capability-Reliability Gap",
+        "Concept - The Evaluation Gap",
+        "Concept - Agentic Deployment Risk",
+        "Concept - Organizational Resistance and Change Management",
+        "Concept - METR Time Horizons",
+        "Playbook - Picking Profitable AI Use Cases",
+        "Concept - The Pilot-to-Production Gap",
+        "Lore - Failed Enterprise AI Deployments",
+        "Breakdown - GitHub Copilot's Measured Productivity Impact"
+      ]
+    },
+    {
+      "title": "Lore - Failed Enterprise AI Deployments",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The graveyard: named, documented enterprise AI flops (pre-LLM and LLM-era) that teach the durable operator lessons. IN: IBM Watson for Oncology/MD Anderson, Zillow Offers, McDonald's-IBM drive-thru, the cross-cutting failure pattern, hype-cycle survivorship bias, vendor-incentive folklore, evidence status. OUT: the specific hallucination-liability cases (own Lore note), forecasting/bubble framing (link to 24).",
+      "key_points": [
+        "IBM Watson for Oncology / MD Anderson: ~$62M spent ($39M IBM + $23M PwC) over four years, shelved 2016; never integrated with the new Epic EHR, and STAT (2018) reported 'unsafe and incorrect' recommendations (trained partly on synthetic Sloan-Kettering cases, not real patient data) (E2/E3, IEEE Spectrum/STAT) — the archetypal overpromise + integration failure.",
+        "Zillow Offers (2021): the algorithmic iBuying program overpaid in a turning market, forcing a >$500M inventory write-down, program shutdown, and layoffs of ~25% of staff (~2,000 people); CEO Rich Barton: 'the unpredictability in forecasting home prices far exceeds what we anticipated' (E3, investor call / 10-Q).",
+        "McDonald's x IBM drive-thru (ended Jun 2024): ~100 locations since 2021; voice-order accuracy in the low-80s% against a 95% target, plus viral fails (260 nuggets, bacon on ice cream) — the last-10%-of-accuracy cliff in a noisy, real-time environment (E2, CNBC/Restaurant Dive).",
+        "Cross-cutting lesson: these predate and postdate LLMs but fail the same way — capability demo != production reliability, data/integration is the real work, and a messy, moving real world breaks brittle systems (link The Pilot-to-Production Gap, Data and Integration Readiness).",
+        "Hype-cycle tell: each launched with executive fanfare and a big number; the failures were quiet write-downs — survivorship bias makes the field look more successful than the base rate (link Deep Dive - Bubble or Boom 24; ties to the NANDA 95%).",
+        "Vendor-incentive folklore: consultancy/vendor-led megaprojects (Watson) optimize for contract size over shipped value — 'buy from specialists and integrate small' beats 'moonshot with a systems integrator' (link Decision - Build vs Buy vs Wrap 22).",
+        "Evidence status: Watson and Zillow are richly documented (filings, IEEE/STAT, Stanford GSB case); McDonald's is well-reported. All real, named, dated — the durable operator folklore is 'believe the write-down, not the launch.'"
+      ],
+      "links": [
+        "Concept - The Pilot-to-Production Gap",
+        "Concept - Data and Integration Readiness",
+        "Concept - The Evaluation Gap",
+        "Lore - Hallucination Liability Incidents",
+        "Deep Dive - Bubble or Boom",
+        "Decision - Build vs Buy vs Wrap",
+        "Reference - AI Market Sizing Claims",
+        "Reference - Where Real AI Knowledge Lives"
+      ]
+    }
+  ]
+}

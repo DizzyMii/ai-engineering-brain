@@ -1,0 +1,618 @@
+{
+  "domain": "16 - Production & Ops",
+  "slug": "production-ops",
+  "notes": [
+    {
+      "title": "Concept - LLMOps",
+      "type": "concept",
+      "level": "surface",
+      "scope": "What LLMOps is and why LLM apps break classical MLOps/DevOps assumptions, plus the layered stack that production LLM systems run on. IN: the orienting model of the discipline and its layers (gateway, observability, prompt/config management, eval/CI, semantic cache, cost/quota, deployment). OUT: serving-engine internals (link to 07), eval methodology (link to 13), training/fine-tuning pipelines (link to 04/06/12).",
+      "key_points": [
+        "Why LLMOps != MLOps: for most apps the model is an external frozen dependency (an API), there is no gradient/training loop, the prompt is the 'code', outputs are non-deterministic, and there is no clean ground-truth label so offline metrics don't map to production quality",
+        "The stack layers: gateway/proxy (LiteLLM, Portkey, Cloudflare AI Gateway), observability/tracing (Langfuse, LangSmith, Arize Phoenix, Helicone), prompt+config management, eval/CI harness, semantic + prompt cache, cost/quota governance, deployment/rollout",
+        "The 'three artifacts' that version and ship together: the exact model snapshot (gpt-4o-2024-08-06, not gpt-4o), the prompt template hash, and the inference config (temperature, tools, max_tokens); changing any one is a deploy",
+        "The loop shifts from MLOps 'train -> deploy -> monitor' (weeks) to 'prompt -> eval -> ship -> observe -> iterate' measured in hours; velocity is the point and the danger",
+        "Rough production magnitudes: 2-5 model calls per user action is common in agentic/RAG apps, cost is usually input-token dominated (RAG context), chat p50 latency budget ~1-3s",
+        "Failure modes: prompts treated as untracked config -> silent regressions nobody can bisect; no request/response logging -> incidents that cannot be reproduced; no cost attribution -> unknown unit economics"
+      ],
+      "links": [
+        "Concept - LLM Observability and Tracing",
+        "Concept - Cost Engineering for LLM Applications",
+        "Concept - Model Lifecycle and Versioning",
+        "Concept - LLM Gateways and Routing",
+        "Breakdown - vLLM",
+        "Deep Dive - Designing an Eval Harness",
+        "Deep Dive - The Agent Loop",
+        "Decision - Fine-Tuning vs RAG vs Prompting"
+      ]
+    },
+    {
+      "title": "Concept - Model Lifecycle and Versioning",
+      "type": "concept",
+      "level": "surface",
+      "scope": "How the artifacts of an LLM application are versioned, promoted, and retired over time. IN: the model+prompt+config version triple, provider alias vs pinned-snapshot semantics, prompt registries, model registries for self-hosted weights, promotion/rollback, and provider deprecation/sunset handling. OUT: fine-tuning/training that produces weights (link to 06/12), the mechanics of progressive rollout (own Deployment Patterns note).",
+      "key_points": [
+        "The version triple: pin the exact model string (gpt-4o-2024-08-06, claude-sonnet-4-20250514) not the floating alias, plus a prompt template hash and the decode config; log all three per request so any output is reproducible-in-principle",
+        "Provider aliases are moving targets: 'gpt-4o' repoints under you; dated snapshots are stable but get deprecated on a sunset schedule (OpenAI ~months-to-a-year deprecation notices, Azure GA/retirement dates) forcing migration",
+        "Prompt versioning: content-hash or semver stored in git or a prompt registry (Langfuse, PromptLayer, Humanloop); tie each prompt version to its eval run so a version carries a known score before it ships",
+        "Model registry for self-hosted weights: MLflow / W&B model registry with stage tags (staging/prod), immutability, and provenance (which checkpoint, data, base model, LoRA adapter)",
+        "Rollback design: keep N-1 pinned and warm; use an endpoint alias/router so rollback is an instant alias flip, not a redeploy",
+        "Failure modes: not pinning -> a silent provider update changes behavior overnight; no rollback path -> you are stuck when a new model regresses; prompt and model versioned separately so nobody knows which combination was live during an incident"
+      ],
+      "links": [
+        "Concept - LLMOps",
+        "Concept - Model Deployment Patterns for LLMs",
+        "Lore - When the Model Changed Under You",
+        "Concept - Production Monitoring and Drift Detection",
+        "Deep Dive - LoRA",
+        "Reference - Model Genealogy",
+        "Concept - Supervised Fine-Tuning (SFT)"
+      ]
+    },
+    {
+      "title": "Concept - LLM Observability and Tracing",
+      "type": "concept",
+      "level": "core",
+      "scope": "Capturing telemetry for LLM applications: traces, spans, sessions, and the token/cost/latency/quality metrics attached to them, plus how this differs from classical APM. IN: the trace data model for multi-step LLM/agent calls, what to capture per span, sampling and payload handling, and the online-eval hook. OUT: the wire-level OTel attribute names (own Reference note), eval scoring methodology (link to 13), agent-specific debugging (link to 10).",
+      "key_points": [
+        "The data model: a trace = one user request; spans = each LLM call, retrieval, tool call, guardrail; spans nest for agent loops; a session groups multi-turn conversations across traces",
+        "What to capture per LLM span: model id, templated + rendered prompt, messages, params, prompt/completion token counts, computed cost, TTFT and total latency, finish_reason, tool calls, cache-hit flag, and error",
+        "Why generic APM (raw Datadog/Jaeger traces) is insufficient: you need the prompt/response payloads, token accounting, and quality scores attached to spans, and text payloads are high-cardinality and large",
+        "Tooling landscape: Langfuse, LangSmith, Arize Phoenix, Helicone, Braintrust, W&B Weave, Traceloop; OpenTelemetry GenAI semantic conventions are the emerging vendor-neutral standard",
+        "Sampling and privacy: full-payload logging is expensive and a PII liability, so sample (tail-based to keep error/slow traces), redact, or store hashes; keep 100% of metrics but sample bodies",
+        "Online-eval hook: attach LLM-as-judge and heuristic scores to spans asynchronously so quality is a first-class dimension you can slice by prompt version",
+        "Failure modes: cardinality explosion from unbounded tags, dropped spans under load, accidentally logging secrets/PII, and no linkage from a trace back to the exact prompt+model version that produced it"
+      ],
+      "links": [
+        "Reference - OpenTelemetry GenAI Semantic Conventions",
+        "Breakdown - Langfuse",
+        "Concept - PII Redaction and Data Retention",
+        "Concept - Production Monitoring and Drift Detection",
+        "Concept - LLM-as-Judge",
+        "Gotchas - Agents in Production",
+        "Concept - Cost Engineering for LLM Applications",
+        "Deep Dive - The Agent Loop"
+      ]
+    },
+    {
+      "title": "Concept - Cost Engineering for LLM Applications",
+      "type": "concept",
+      "level": "core",
+      "scope": "Understanding and controlling the marginal cost of LLM applications. IN: the token-cost model and input/output price asymmetry, the real cost drivers, the levers that reduce cost, and per-tenant attribution/chargeback. OUT: training cost (link to 04), GPU dollar-per-hour hardware economics for self-hosting (own Decision note), the internals of routing (own Routing note).",
+      "key_points": [
+        "Cost per call = input_tokens x in_price + output_tokens x out_price; output is typically 3-5x the input price, and reasoning models bill hidden 'thinking' tokens you don't see in the completion",
+        "Real magnitudes (as of 2026): frontier models roughly $2.5-15/M input and $10-75/M output, small/cheap models roughly $0.1-0.6/M; Batch API ~50% off; prompt caching ~90% off the cached-input portion",
+        "Cost drivers: RAG context bloat (long input on every call), agent loops (N calls x monotonically growing context), retries and self-consistency sampling, verbose outputs, and per-user system prompts that defeat prefix caching",
+        "Levers: prompt caching (link to 09), semantic caching (own note), model routing and cascades (own note), max_tokens caps, structured-output schemas to cut verbosity, context pruning (link to Context Rot), and Batch API for async workloads",
+        "Attribution: tag every call with tenant/user/feature/trace_id so you can build cost dashboards, compute per-customer margin, and track the 'fully-loaded cost per request' unit-economics metric",
+        "Failure modes: unbounded agent loops or retry storms produce 10-100x bill spikes (see Runaway-bill lore in Gotchas), no per-tenant caps means one customer eats your margin, and cost dashboards keyed on a floating alias misattribute pricing"
+      ],
+      "links": [
+        "Concept - Semantic Caching",
+        "Concept - Model Routing and Cascades",
+        "Snippet - Token Cost Attribution and Budget Enforcement",
+        "Concept - Prompt Caching",
+        "Concept - Context Rot",
+        "Decision - Self-Hosting vs Managed LLM API",
+        "Gotchas - LLM Production Operations",
+        "Concept - KV Cache"
+      ]
+    },
+    {
+      "title": "Concept - Semantic Caching",
+      "type": "concept",
+      "level": "core",
+      "scope": "Caching LLM responses by embedding-similarity of the request rather than exact string match. IN: the embed-lookup-threshold-serve mechanism, when it pays off, threshold tuning as a precision/recall problem, and invalidation/keying. OUT: KV-cache and prefix caching at the serving layer (link to 07), prompt-caching billing (link to 09), embedding-model internals and ANN index internals (link to 11).",
+      "key_points": [
+        "Mechanism: embed the incoming prompt, run ANN vector search (link to HNSW) against a store of prior (prompt, response) pairs; if cosine similarity >= threshold return the cached completion, else call the model and insert the new pair",
+        "Distinct from exact-match caching (a hash lookup) and from prefix/prompt caching (07/09) which reuse the KV cache to cut prefill cost but still call the model; semantic caching skips the call entirely",
+        "Threshold tuning is the crux and a precision/recall tradeoff: too low serves false-positive answers ('capital of Austria' vs 'capital of Australia' embed close), too high collapses the hit rate; typical operating points sit around 0.95-0.97 cosine and must be validated per domain",
+        "Keying and invalidation: the cache key must include model id + prompt template version + relevant params + tenant; use TTLs for staleness, version-bump on prompt/model change, and manual purge on source-content changes",
+        "Economics: it only pays off when embedding cost + vector-store round-trip latency is well below the model call it replaces; works best on high-repetition workloads (FAQ, classification, dedup queries)",
+        "Failure modes: false hits that serve a confidently wrong answer (the highest-pain failure), caching personalized/context-dependent responses, cross-tenant leakage when the key omits tenant, and cache poisoning",
+        "Real systems: GPTCache (Zilliz), Redis/RedisVL semantic cache, and cache layers in Portkey/Helicone/LiteLLM"
+      ],
+      "links": [
+        "Concept - HNSW",
+        "Concept - Cost Engineering for LLM Applications",
+        "Concept - Prompt Caching",
+        "Concept - Embedding Models",
+        "Concept - KV Cache",
+        "Gotchas - LLM Production Operations",
+        "Concept - LLM Gateways and Routing"
+      ]
+    },
+    {
+      "title": "Concept - LLM Gateways and Routing",
+      "type": "concept",
+      "level": "core",
+      "scope": "The proxy layer that sits between application code and model providers. IN: what a gateway centralizes (unified API, key vault + virtual keys, spend limits, load balancing, fallback, caching, logging, rate limiting), the static routing/load-balancing strategies, and the deployment topology and tradeoffs. OUT: learned/quality-based routing and cascades (own frontier note), serving-engine internals of the models themselves (link to 07).",
+      "key_points": [
+        "Core value: one OpenAI-compatible API over many providers, plus centralized API-key vault, virtual keys with per-key budgets/limits, retries and fallback, load balancing across deployments, response caching, structured logging, and cost tracking",
+        "Static routing strategies: pin, weighted/round-robin, latency-based (least-latency), cost-based, load-based (least-busy / fewest in-flight), and provider-priority fallback chains with cooldowns on failing deployments",
+        "Fallback mechanics: on 429/5xx/timeout, retry the next provider or deployment; this requires idempotency handling, and it is hard across streaming and tool-call responses where a partial stream has already been emitted",
+        "Real systems: LiteLLM (own breakdown), Portkey, Cloudflare AI Gateway, OpenRouter, Kong AI Gateway, Envoy AI Gateway; deployed either as a library in-process or as a standalone proxy/sidecar",
+        "Tradeoffs: an extra network hop (~1-10ms), the gateway becomes a potential single point of failure that must be HA, streaming/tool-call passthrough is fiddly, and providers diverge on params so not every feature is portable",
+        "Failure modes: gateway as un-replicated SPOF taking down all model traffic, the abstraction hiding provider-specific features you needed, and mis-tuned load balancing hot-spotting one deployment into rate limits"
+      ],
+      "links": [
+        "Breakdown - LiteLLM",
+        "Concept - Model Routing and Cascades",
+        "Concept - Rate Limiting and Quota Design",
+        "Pattern - Resilient LLM Request Handling",
+        "Concept - Semantic Caching",
+        "Concept - Cost Engineering for LLM Applications",
+        "Breakdown - vLLM"
+      ]
+    },
+    {
+      "title": "Concept - Rate Limiting and Quota Design",
+      "type": "concept",
+      "level": "core",
+      "scope": "Designing rate limits and quotas for LLM traffic on both the inbound (your users) and outbound (upstream provider) sides. IN: why limits are token-based not just request-based, the enforcement algorithms, distributed enforcement, priority/fair queueing, and respecting upstream provider limits. OUT: capacity autoscaling to add supply (own note), serving-layer admission/batching (link to 07).",
+      "key_points": [
+        "LLM limits are token-based (TPM) as much as request-based (RPM/concurrency) because compute and cost scale with tokens; you must estimate tokens pre-flight (input is known, output = a max_tokens reservation) then reconcile to actual",
+        "Concurrency limits often matter more than RPM: a single long generation holds a slot for seconds-to-minutes, so bounding in-flight requests/tokens protects the system better than a per-minute rate",
+        "Algorithms: token bucket (burst + refill), sliding-window log/counter, and GCRA; enforce across replicas with an atomic Redis counter (Lua/INCR) so limits are global, not per-pod",
+        "Upstream provider limits: respect provider 429s via Retry-After, watch x-ratelimit-remaining-tokens/requests headers, use exponential backoff with full jitter, and shape traffic to stay under your org's TPM/RPM tier",
+        "Fairness and priority: per-tenant quotas, weighted fair queueing, priority lanes (interactive > batch), and admission control that sheds the lowest-priority traffic first under saturation",
+        "Failure modes: reserving max_tokens when 95% of generations are short over-throttles the system; naive synchronized retries create a thundering herd that amplifies a 429 blip; no per-tenant cap yields a noisy-neighbor outage"
+      ],
+      "links": [
+        "Pattern - Resilient LLM Request Handling",
+        "Concept - LLM Gateways and Routing",
+        "Concept - Autoscaling LLM Inference",
+        "Concept - Cost Engineering for LLM Applications",
+        "Concept - Continuous Batching",
+        "Gotchas - LLM Production Operations"
+      ]
+    },
+    {
+      "title": "Concept - Model Deployment Patterns for LLMs",
+      "type": "concept",
+      "level": "core",
+      "scope": "Progressive-delivery patterns applied to model, prompt, and config changes, and what changes because LLM outputs have no ground-truth label. IN: shadow/mirror, canary, blue-green, and champion-challenger for LLMs, plus the proxy metrics used to gate rollout when there is no label. OUT: the statistical methodology of A/B testing (link to 13), client-side request resilience (own Pattern note), the GPU-infra rollout plumbing (own K8s note).",
+      "key_points": [
+        "Shadow/mirror: send production traffic to the new model in parallel without returning its output, then compare offline on cost, latency, output-format validity, and judge scores; catches latency/cost/format regressions with zero user risk before any canary",
+        "Canary: route a small ramping percentage (1 -> 5 -> 25 -> 100) to the new model/prompt while watching guardrail metrics (error rate, latency, refusal rate, thumbs-down, cost/req) with automatic rollback on threshold breach",
+        "Blue-green: two full environments with an instant alias flip and instant rollback, ideal for atomic model/prompt version swaps",
+        "What differs for LLMs: no label means you compare via LLM-as-judge (link to 13), pairwise output diffing, and proxy metrics (length distribution, refusal rate, schema-valid rate); non-determinism makes diffs noisy so you need enough samples to separate signal from seed noise",
+        "Champion-challenger / online A/B with real product metrics (task success, retention, escalation rate) as the ground-truth-adjacent signal that proxy metrics can't give you",
+        "Failure modes: canarying on latency/cost but missing a quality regression, a canary too small to surface rare-but-severe failures, and a prompt change that silently breaks a downstream parser because format validity wasn't a gate"
+      ],
+      "links": [
+        "Concept - Model Lifecycle and Versioning",
+        "Concept - Production Monitoring and Drift Detection",
+        "Concept - LLM-as-Judge",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Playbook - Incident Response for LLM Systems",
+        "Checklist - Production LLM Launch Readiness",
+        "Deep Dive - Designing an Eval Harness"
+      ]
+    },
+    {
+      "title": "Playbook - Incident Response for LLM Systems",
+      "type": "playbook",
+      "level": "core",
+      "scope": "An operational runbook for the LLM-specific incidents that classical SRE runbooks don't cover: provider outages, latency spikes, cost spikes, quality regressions, and safety incidents. IN: detection -> triage -> mitigation -> recovery with a symptom-to-cause branch table and the immediate mitigation levers. OUT: general SRE incident theory, eval methodology (link to 13), and pre-launch readiness (own Checklist note).",
+      "key_points": [
+        "Triage branch table by symptom: elevated provider 429/5xx -> gateway failover; latency spike -> separate TTFT vs TPOT, check queue depth and provider status page; cost spike -> check tokens/req, retry loops, single-tenant abuse; quality complaints -> diff live outputs against a pinned-snapshot golden set to detect silent model change and correlate with recent prompt/config deploys; safety incident -> tighten guardrails, block, preserve logs",
+        "Immediate mitigation levers to have pre-wired: per-feature kill switch/feature flag, provider fallback via the gateway, degrade to a smaller/cheaper model, cache-only mode, a static fallback response, and raising/lowering rate limits",
+        "Cost-spike specific response: cap or disable the offending chain, add/verify per-tenant budget enforcement, and inspect for retry storms or prompt-injection token amplification (link to 14)",
+        "Evidence preservation for postmortem: capture your request IDs plus provider request-id/system_fingerprint headers and full traces for the affected window before they age out of sampled logs",
+        "Verification of recovery: error budget stopped burning, p99 latency back under SLO, cost/req normalized, and the golden-set diff back to baseline",
+        "Reference incidents: major provider outages, silent model updates (link to the drift lore), and token-amplification incidents; each maps to a specific lever above"
+      ],
+      "links": [
+        "Checklist - Production LLM Launch Readiness",
+        "Pattern - Resilient LLM Request Handling",
+        "Concept - Production Monitoring and Drift Detection",
+        "Lore - When the Model Changed Under You",
+        "Concept - Prompt Injection",
+        "Reference - LLM Production SLOs and Latency Budgets",
+        "Gotchas - LLM Production Operations"
+      ]
+    },
+    {
+      "title": "Pattern - Resilient LLM Request Handling",
+      "type": "pattern",
+      "level": "core",
+      "scope": "The reusable client-side resilience design for calling model APIs that are flaky, slow, expensive, and occasionally non-idempotent. IN: timeouts, retries with backoff+jitter, hedged requests, circuit breakers, fallback chains, and idempotency/streaming-safe retry. OUT: the gateway product that packages these (own Gateway note), the rate-limit enforcement algorithms (own Rate-Limiting note).",
+      "key_points": [
+        "Timeout structure: use separate connect, time-to-first-token, and overall/stream-idle timeouts; long generations need a generous overall budget but a tight TTFT and idle timeout so you detect stalls instead of hanging for minutes",
+        "Retries: retry only transient/idempotent failures (429, 5xx, timeout before first token) with exponential backoff plus full jitter, a hard attempt cap, and respect for Retry-After; never blind-retry once tokens have streamed without an idempotency key",
+        "Hedged requests: fire a second request after the p95 latency mark to cut tail latency, cancel the loser; costs extra on the hedged fraction (a latency-for-cost trade) and needs idempotency to avoid double side effects",
+        "Circuit breaker: open on an error-rate threshold to a given provider so calls fast-fail to a fallback instead of piling onto a struggling upstream; half-open probe to detect recovery",
+        "Fallback chain: primary model -> secondary provider -> smaller/cheaper model -> cached/static response, degrading gracefully rather than hard-failing the user request",
+        "Known uses: the LiteLLM router (cooldowns + fallbacks), Bedrock/Vertex client retry patterns, and Hystrix/resilience4j-style breakers adapted to LLM calls",
+        "Failure modes: synchronized retries amplifying a provider blip into an outage (fix with jitter + breaker), double-charging on non-idempotent retries, and hedging quietly doubling the bill under load"
+      ],
+      "links": [
+        "Concept - LLM Gateways and Routing",
+        "Concept - Rate Limiting and Quota Design",
+        "Breakdown - LiteLLM",
+        "Playbook - Incident Response for LLM Systems",
+        "Concept - Nondeterminism in Production LLM Serving",
+        "Gotchas - LLM Production Operations"
+      ]
+    },
+    {
+      "title": "Reference - OpenTelemetry GenAI Semantic Conventions",
+      "type": "reference",
+      "level": "advanced",
+      "scope": "A lookup for the OpenTelemetry GenAI span and attribute conventions used to instrument LLM calls in a vendor-neutral way. IN: span naming, the gen_ai.* attribute set, prompt/completion capture events, metrics, and the (as-of-2026) stability status. OUT: general observability concepts (own Observability note), and vendor-specific SDK behavior (own Langfuse/LiteLLM breakdowns).",
+      "key_points": [
+        "Span naming and kind: operation-based names such as 'chat {model}', 'text_completion', 'embeddings', 'execute_tool'; LLM client spans use span kind CLIENT and wrap the provider call",
+        "Core request attributes: gen_ai.system (openai/anthropic/aws.bedrock/...), gen_ai.request.model, gen_ai.request.temperature, gen_ai.request.top_p, gen_ai.request.max_tokens; response side: gen_ai.response.model, gen_ai.response.id, gen_ai.response.finish_reasons",
+        "Token usage: gen_ai.usage.input_tokens and gen_ai.usage.output_tokens on the span (the authoritative billing counters when the provider returns them)",
+        "Prompt/completion content: historically log/span events (gen_ai.prompt, gen_ai.completion), moving toward opt-in content capture that is OFF by default for privacy; large text is attached as span events, not high-cardinality attributes",
+        "Metrics: gen_ai.client.token.usage and gen_ai.client.operation.duration as histograms, dimensioned by system/model/operation for cost and latency dashboards",
+        "Stability status (as of 2026): the GenAI conventions are still Experimental and actively evolving, with agent/tool-span additions in flight; instrumentors like OpenLLMetry (Traceloop) and OpenInference (Arize) emit to these, and Langfuse/Arize/Phoenix ingest them",
+        "Footnote: attribute names change between spec versions -- pin the semconv version your instrumentation targets"
+      ],
+      "links": [
+        "Concept - LLM Observability and Tracing",
+        "Breakdown - Langfuse",
+        "Concept - PII Redaction and Data Retention",
+        "Concept - Cost Engineering for LLM Applications",
+        "Gotchas - Agents in Production"
+      ]
+    },
+    {
+      "title": "Breakdown - LiteLLM",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "How LiteLLM works as the de-facto open-source LLM gateway and SDK. IN: the OpenAI-compatible translation layer, the Router (fallbacks, load balancing, cooldowns), the Proxy server (virtual keys, budgets, callbacks), and the maintained cost map. OUT: the general gateway concept (own Gateway note), and learned routing/cascade theory (own Routing note).",
+      "key_points": [
+        "Headline: a single Python SDK plus an optional proxy server exposing the OpenAI Chat Completions API over 100+ providers (OpenAI, Anthropic, Bedrock, Vertex, Azure, and local/vLLM), widely deployed as the default gateway layer",
+        "SDK core: completion() normalizes params, applies a provider-specific transformation, calls the provider, and normalizes the response and usage back to OpenAI shape; streaming is normalized into OpenAI-style chunks",
+        "Router: wraps multiple 'deployments' of a logical model with strategies (simple-shuffle, least-busy, latency-based, usage/TPM-based) plus per-deployment cooldowns on failures and fallback chains including a context-window-fallback to a larger-context model on overflow",
+        "Proxy server: a config.yaml model list, virtual API keys with per-key budgets and TPM/RPM limits, spend tracking persisted to Postgres, callbacks to Langfuse/Prometheus/OTel, guardrail hooks, and Redis/semantic caching",
+        "Clever parts: a maintained per-model token-pricing map that powers cost attribution, mid-flight budget enforcement, and pass-through endpoints; the deployment-abstraction + cooldown design is the reusable idea",
+        "What's dated / gotchas: param-translation lossiness for provider-specific features, the proxy as a scaling/SPOF concern, the pricing map lagging real price changes, and streaming error-handling edge cases",
+        "What to steal: the logical-model-over-many-deployments router with cooldowns, and a central pricing map as the single source of truth for cost"
+      ],
+      "links": [
+        "Concept - LLM Gateways and Routing",
+        "Pattern - Resilient LLM Request Handling",
+        "Concept - Model Routing and Cascades",
+        "Concept - Cost Engineering for LLM Applications",
+        "Breakdown - Langfuse",
+        "Breakdown - vLLM",
+        "Concept - Rate Limiting and Quota Design",
+        "Concept - Semantic Caching",
+        "Concept - LLM Observability and Tracing",
+        "Snippet - Token Cost Attribution and Budget Enforcement"
+      ]
+    },
+    {
+      "title": "Breakdown - Langfuse",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "How Langfuse implements open-source LLM observability at volume. IN: the trace/observation/session/score data model, the async ingestion pipeline and storage split, prompt management, and the evals/scores layer. OUT: the general observability concept (own Observability note), and the OTel wire conventions (own Reference note).",
+      "key_points": [
+        "Data model: a Trace contains nested Observations typed SPAN / GENERATION / EVENT; Sessions group related traces (multi-turn); Scores attach evaluation results; per-GENERATION cost and usage are computed from a model pricing table",
+        "Ingestion pipeline: the SDK batches events asynchronously to an ingestion API, which queues (Redis) to background workers that write to storage -- designed to absorb high event volume without blocking the app's request path",
+        "Storage split: Postgres for transactional/config data, ClickHouse (OLAP) for high-volume trace/observation analytics, Redis for the queue/cache, and blob storage (S3) for large prompt/response payloads",
+        "Prompt management: versioned prompts with labels (e.g., 'production'), fetched by label at runtime with a client-side cache and fallback, and linkage of each prompt version to the traces it produced",
+        "Evals layer: LLM-as-judge (link to 13) over sampled traces, human annotation queues, and dataset/experiment runs for offline eval; scores feed dashboards and regression tracking",
+        "Interop: ingests OpenTelemetry GenAI spans and is compatible with OpenInference/OpenLLMetry instrumentation",
+        "What to steal / what's dated: ClickHouse for trace analytics at scale and the prompt-linked-to-trace pattern are the transferable ideas; the cost is the maintained pricing map and the multi-service self-host footprint"
+      ],
+      "links": [
+        "Concept - LLM Observability and Tracing",
+        "Reference - OpenTelemetry GenAI Semantic Conventions",
+        "Concept - Model Lifecycle and Versioning",
+        "Concept - LLM-as-Judge",
+        "Breakdown - LiteLLM",
+        "Concept - Production Monitoring and Drift Detection",
+        "Concept - Cost Engineering for LLM Applications",
+        "Deep Dive - Designing an Eval Harness",
+        "Concept - HNSW",
+        "Concept - PII Redaction and Data Retention"
+      ]
+    },
+    {
+      "title": "Concept - GPU Orchestration on Kubernetes",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Running GPU-backed LLM inference workloads on Kubernetes. IN: the NVIDIA device plugin and GPU Operator, GPU requests/limits semantics, MIG vs time-slicing vs MPS sharing, node pools and topology-aware scheduling, gang scheduling, and model-weight loading at startup. OUT: GPU/kernel hardware internals (link to 08), serving-engine configuration (link to 07), and autoscaling policy (own Autoscaling note).",
+      "key_points": [
+        "GPUs are non-oversubscribable extended resources: nvidia.com/gpu is an integer where requests must equal limits, there is no fractional GPU by default, so a small model on a whole GPU wastes most of the card",
+        "Sharing options: MIG (hardware partitions on A100/H100, e.g. 7x 1g.10gb, memory+fault isolated), time-slicing (software oversubscription, no isolation, context-switch overhead), and MPS (spatial sharing); the axis is isolation vs utilization",
+        "GPU Operator automates the driver, container toolkit, device plugin, DCGM metrics exporter, and node feature discovery, avoiding manual driver/node hell across the fleet",
+        "Scheduling: dedicate GPU nodes with taints/tolerations + affinity; use NUMA/NVLink topology awareness for multi-GPU pods; use gang scheduling (Volcano/Kueue) so multi-GPU or multi-node inference pods all land together or none do",
+        "Model-weight loading dominates startup: 10s-100s of GB of weights over slow image pulls means cold starts of minutes; mitigate with PVC/model caches, image preloading, init containers, and weight streaming",
+        "Failure modes: GPU fragmentation leaving pods Pending despite free capacity, GPU Xid/ECC errors requiring node cordon+drain (link to hardware failures in 08), and DCGM health checks needed to detect a silently-degraded card"
+      ],
+      "links": [
+        "Concept - Autoscaling LLM Inference",
+        "Concept - GPU Memory Hierarchy",
+        "Reference - Memory Math for Transformers",
+        "Breakdown - vLLM",
+        "Concept - LLM Load Testing and Capacity Planning",
+        "Decision - Self-Hosting vs Managed LLM API",
+        "Gotchas - LLM Production Operations"
+      ]
+    },
+    {
+      "title": "Concept - Autoscaling LLM Inference",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Scaling LLM inference replicas up and down without wrecking latency or cost. IN: why CPU-based autoscaling fails for LLMs, the right scaling signals, KEDA/custom-metric wiring, the cold-start problem and scale-to-zero, and warm-floor + headroom policy. OUT: continuous-batching internals (link to 07), the K8s GPU plumbing (own K8s note), and capacity sizing from load tests (own Load-Testing note).",
+      "key_points": [
+        "Standard HPA on CPU is useless here: inference is GPU-bound and latency is highly non-linear near saturation, so scale on queue depth / pending requests / concurrent requests / GPU utilization or a TTFT-SLO breach instead",
+        "Wiring: KEDA with Prometheus or custom metrics, scaling on serving-engine signals like vLLM's num_requests_waiting and gpu_cache_usage_perc rather than on host CPU",
+        "Cold start is brutal: pulling weights, loading into VRAM, CUDA-graph capture, and warmup can take 1-10 minutes for large models, which makes naive scale-to-zero cause latency cliffs under bursts",
+        "Policy: keep a warm minimum floor plus fast-scale headroom, use predictive/scheduled scaling for known diurnal patterns, and back the system with a request queue + backpressure rather than assuming instant infinite scale",
+        "A generation holds a replica slot for seconds-to-minutes, so scale on in-flight work and overprovision for the tail; scaling metric lag must be shorter than cold-start time or you always scale too late",
+        "Failure modes: scale-thrash/flapping from a noisy signal, scaling too late because metric-lag > cold-start, and OOM on scale-up when the new replica's batch/context config doesn't fit the card"
+      ],
+      "links": [
+        "Concept - GPU Orchestration on Kubernetes",
+        "Concept - LLM Load Testing and Capacity Planning",
+        "Concept - Rate Limiting and Quota Design",
+        "Concept - Continuous Batching",
+        "Concept - KV Cache",
+        "Reference - LLM Production SLOs and Latency Budgets",
+        "Gotchas - LLM Production Operations"
+      ]
+    },
+    {
+      "title": "Concept - PII Redaction and Data Retention",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Handling sensitive data flowing through LLM pipelines and meeting retention/deletion obligations. IN: where PII leaks in an LLM stack, detection/redaction/pseudonymization mechanics, provider data-handling terms (ZDR, DPAs, residency), and retention/right-to-deletion across all derived stores. OUT: prompt-injection and data-exfiltration attacks (link to 14), safety content-filtering guardrails (link to 14), and privacy evaluation methodology (link to 13).",
+      "key_points": [
+        "Leak surfaces: logged prompts/completions in observability, cached responses, payloads sent to third-party providers, and embeddings in the vector DB -- embeddings are invertible enough to be treated as PII, not anonymous vectors",
+        "Redaction mechanics: regex + NER detection (Microsoft Presidio, spaCy, cloud DLP) to mask before logging and optionally before sending upstream, with reversible tokenization via a vault so the response can be re-hydrated",
+        "Provider data handling: zero-data-retention endpoints/agreements (OpenAI ZDR, Anthropic no-training-by-default with enterprise DPAs), a typical ~30-day default retention for abuse monitoring, BAAs for HIPAA, and regional endpoints (EU) for GDPR data residency",
+        "Retention and deletion: TTLs on trace/log stores, and data-subject deletion that must propagate across traces, semantic cache, AND the vector store; audit logs to prove it happened",
+        "Compliance context: SOC2/ISO27001 controls, signed DPAs, published sub-processor lists, and a documented data-flow map showing where user data can travel",
+        "Failure modes: PII embedded in cache keys, treating stored embeddings as anonymous, forgetting to propagate a deletion request to the vector store and cache, and defaulting to full-payload logging that quietly captures everything"
+      ],
+      "links": [
+        "Concept - LLM Observability and Tracing",
+        "Concept - Semantic Caching",
+        "Concept - Prompt Injection",
+        "Concept - Embedding Models",
+        "Reference - OpenTelemetry GenAI Semantic Conventions",
+        "Checklist - Production LLM Launch Readiness",
+        "Decision - Self-Hosting vs Managed LLM API"
+      ]
+    },
+    {
+      "title": "Snippet - Token Cost Attribution and Budget Enforcement",
+      "type": "snippet",
+      "level": "advanced",
+      "scope": "Runnable code that counts tokens, computes per-call cost from a pricing map, tags the call for attribution, and enforces a per-tenant monthly budget atomically across replicas. IN: authoritative-usage accounting, exact-model-id pricing, metadata tagging, and a Redis atomic budget check. OUT: the cost concept/theory (own Cost note), and gateway internals (own Gateway note).",
+      "key_points": [
+        "Use the provider-returned usage object for billing (authoritative), and a local tokenizer (tiktoken) only for a pre-flight estimate/reservation, noting that non-OpenAI providers tokenize differently so local counts are approximate",
+        "Pricing map keyed by exact model snapshot id (dated), computing cost = input/1e6 * in_price + output/1e6 * out_price, and modeling the cached-input discount tier separately",
+        "Attribution: attach tenant/user/feature/trace_id as metadata and emit it as OTel span attributes / metric labels so cost dashboards can slice by any dimension",
+        "Budget enforcement: an atomic Redis INCRBYFLOAT on a per-tenant monthly key with a TTL, checked before the call, rejecting or downgrading the request when over budget; pre-flight reserve on max_tokens then reconcile to actual so concurrent calls can't overspend the cap",
+        "Why written this way: usage-not-estimate for billing accuracy, an atomic Redis op because per-replica counters race and undercount, exact-model-id keying because floating aliases silently mis-price, and reserve-then-reconcile because you must gate before you know the true output length"
+      ],
+      "links": [
+        "Concept - Cost Engineering for LLM Applications",
+        "Concept - Rate Limiting and Quota Design",
+        "Concept - LLM Gateways and Routing",
+        "Concept - Byte-Pair Encoding",
+        "Breakdown - LiteLLM"
+      ]
+    },
+    {
+      "title": "Checklist - Production LLM Launch Readiness",
+      "type": "checklist",
+      "level": "advanced",
+      "scope": "A pre-flight verification list before shipping an LLM feature to production, grouped by concern. IN: atomic, objectively-verifiable checks across observability, cost, resilience, safety/compliance, quality/eval, and rollout. OUT: the incident runbook itself (own Playbook note), and deep eval-harness design (link to 13).",
+      "key_points": [
+        "Observability group: traces capture the prompt version + exact model id + token counts + cost; dashboards and alerts exist for latency/error/cost; request IDs and provider request-ids are logged for correlation",
+        "Cost group: max_tokens caps set; per-tenant budget/quota enforced; cost-per-request estimated with anomaly alerting; caching enabled wherever it is semantically safe",
+        "Resilience group: connect/TTFT/overall timeouts set; retries with jitter and an attempt cap; provider fallback configured; circuit breaker present; a per-feature kill switch/flag; a graceful-degradation path",
+        "Safety/compliance group: PII redaction on logs; injection/jailbreak guardrails in place (link to 14); ZDR/DPA signed where required; inbound rate limits set",
+        "Quality/eval group: offline eval passes a threshold (link to 13); a canary or shadow plan is defined; a regression eval runs in CI; user feedback capture (thumbs/regen) is wired",
+        "Rollout group: the model is a pinned dated snapshot (not a floating alias); N-1 rollback is ready and warm; the runbook is written; an on-call owner is named",
+        "Why-these-items: each check traces to a real incident class -- unpinned-model drift, a retry-storm bill, PII in logs, or an outage with no rollback path"
+      ],
+      "links": [
+        "Playbook - Incident Response for LLM Systems",
+        "Concept - Model Deployment Patterns for LLMs",
+        "Concept - PII Redaction and Data Retention",
+        "Concept - Cost Engineering for LLM Applications",
+        "Pattern - Resilient LLM Request Handling",
+        "Concept - Prompt Injection",
+        "Deep Dive - Designing an Eval Harness"
+      ]
+    },
+    {
+      "title": "Decision - Self-Hosting vs Managed LLM API",
+      "type": "decision",
+      "level": "frontier",
+      "scope": "Choosing between calling a hosted model API and serving open-weights models on your own GPUs. IN: the breakeven math, the decision criteria, the hybrid architectures, and the hidden costs that flip the naive calculation. OUT: which specific GPU/hardware to buy (link to 08), which serving engine to run (link to 07), and the fine-tune-vs-RAG-vs-prompt decision (link to 12).",
+      "key_points": [
+        "Breakeven math: compare API $/1M tokens against (GPU $/hr) / (tokens/hr throughput); an H100 at ~$2-3/hr sustaining some tokens/s yields a self-host $/M that only beats the API above a sustained utilization floor (~40-60%+) -- low or bursty volume almost always favors the API",
+        "Criteria that decide it: sustained volume and utilization, latency/tail control, data residency/compliance (on-prem, ZDR), model choice (open weights, custom fine-tunes, no closed-frontier equivalent), ops headcount/burden, provider rate-limit ceilings, and the need to serve many LoRA adapters (link to 12)",
+        "The utilization trap is the crux: idle GPUs burn money 24/7, so a workload has to be steady, not spiky, for self-host to win; 'we saved on tokens but hired an infra team and ran cards at 20%' is the classic loss",
+        "Hidden self-host costs: GPU-failure MTTR, autoscaling cold starts, keeping pace with new model releases, and the engineering to reach the throughput the breakeven assumed",
+        "Hybrid architectures: self-host a steady baseline with API burst-overflow, route by data sensitivity (PII on-prem, rest to API), or cascade cheap-local -> API-frontier (link to Routing)",
+        "Default (as of 2026): start on a managed API; move to self-host when volume is high and steady, compliance demands on-prem, or you need custom/open models -- and batch/offline workloads are the strongest self-host case because utilization is easy to keep high"
+      ],
+      "links": [
+        "Concept - Cost Engineering for LLM Applications",
+        "Concept - Model Routing and Cascades",
+        "Concept - GPU Orchestration on Kubernetes",
+        "Concept - LLM Load Testing and Capacity Planning",
+        "Concept - PII Redaction and Data Retention",
+        "Decision - Fine-Tuning vs RAG vs Prompting",
+        "Breakdown - vLLM",
+        "Reference - Memory Math for Transformers"
+      ]
+    },
+    {
+      "title": "Concept - Model Routing and Cascades",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Dynamically choosing which model handles each request to move along the cost/quality Pareto frontier. IN: cascades (cheap-first with verifier escalation), learned routers, the difficulty/confidence signals they use, and the verification methods that gate an accept. OUT: the gateway plumbing that executes a route (own Gateway note), the self-host-vs-API decision (own Decision note), and eval methodology for measuring router quality (link to 13).",
+      "key_points": [
+        "Cascade: try a cheap/small model first, accept its answer if a verifier or confidence check passes, else escalate to a stronger model; FrugalGPT (Chen et al. 2023) reported up to ~98% cost reduction at matched quality on some tasks via cascade + a scoring function",
+        "Learned router: a classifier predicts whether the weak model suffices for a query and routes to strong vs weak to hit a chosen point on the cost/quality curve; RouteLLM (LMSYS, 2024) trains this on preference data and reports large cost cuts at matched quality vs always-strong",
+        "Difficulty signals: query length/complexity, embedding cluster, presence of code/math, requested output length, and historical success on similar queries",
+        "Verification to accept a cheap answer: self-consistency, an LLM-judge (link to 13), schema/format validity (link to Reliable Structured Output), or a tool-result check",
+        "Tradeoffs: the router adds latency and its own failure mode (a misroute means either a quality drop or double cost after escalation), and it must be continuously recalibrated as model prices and capabilities shift",
+        "Real systems: RouteLLM, FrugalGPT, Martian, NotDiamond, Unify, and provider-side 'auto' routers (GPT-5-style internal routing, as of 2026)"
+      ],
+      "links": [
+        "Concept - LLM Gateways and Routing",
+        "Concept - Cost Engineering for LLM Applications",
+        "Decision - Self-Hosting vs Managed LLM API",
+        "Concept - LLM-as-Judge",
+        "Playbook - Reliable Structured Output",
+        "Concept - Speculative Decoding",
+        "Breakdown - LiteLLM"
+      ]
+    },
+    {
+      "title": "Concept - LLM Load Testing and Capacity Planning",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Load-testing LLM endpoints and sizing capacity from SLOs. IN: token-aware load generation, the metrics that matter (TTFT, TPOT/ITL, throughput, goodput), saturation/queueing behavior under continuous batching, and translating an SLO into replica count. OUT: the serving-engine batching internals (link to 07), roofline/hardware ceilings (link to 08), and autoscaling mechanics (own Autoscaling note).",
+      "key_points": [
+        "Metrics that matter: TTFT (prefill-bound, scales with input length), TPOT/inter-token latency (decode, memory-bandwidth bound), end-to-end latency, throughput (req/s and tokens/s), and goodput (requests that meet the SLO under load)",
+        "Load must be token-realistic: the distribution of input and output lengths drives everything, so fixed-size synthetic prompts give numbers that lie; use realistic length distributions with tools like vLLM's benchmark_serving, LLMPerf, GenAI-Perf, or k6",
+        "Saturation behavior: with continuous batching (link to 07), throughput rises with concurrency until KV-cache or compute saturates, then TTFT and queue wait explode -- the latency knee; the concurrency just below the knee is your safe operating point",
+        "Capacity from SLO: find the max concurrency where p99 TTFT/TPOT still meet the SLO, then replicas = peak_QPS x avg_hold_time / per_replica_safe_concurrency, plus headroom for cold-start and burst tail",
+        "Chunked prefill and the prefill/decode split shift the TTFT-vs-TPOT tradeoff and must be held constant across a benchmark (link to 07)",
+        "Failure modes: benchmarking with unrealistic lengths, reporting averages instead of p99, ignoring how TTFT degrades under concurrency, and planning with zero headroom so a small burst falls off the latency cliff"
+      ],
+      "links": [
+        "Concept - Autoscaling LLM Inference",
+        "Reference - LLM Production SLOs and Latency Budgets",
+        "Concept - Continuous Batching",
+        "Concept - KV Cache",
+        "Concept - The Roofline Model",
+        "Concept - GPU Orchestration on Kubernetes",
+        "Breakdown - vLLM"
+      ]
+    },
+    {
+      "title": "Reference - LLM Production SLOs and Latency Budgets",
+      "type": "reference",
+      "level": "unicorn",
+      "scope": "The real-world latency/SLO targets and budget decompositions teams hold for LLM apps by use case -- the numbers rarely written down. IN: TTFT/TPOT/end-to-end targets per modality, token-budget math, availability targets, and error-budget framing. OUT: how to measure or load-test them (own Load-Testing note), and serving-engine internals that produce them (link to 07).",
+      "key_points": [
+        "Latency targets by modality (as of 2026, folklore-grade targets teams actually hold): realtime voice needs TTFT ~300-500ms and TPOT under the speech rate (~50-80ms); interactive chat wants TTFT under ~1s (good) to ~2s (acceptable); agentic/batch tolerates seconds to minutes",
+        "TPOT vs perceived speed: human reading is ~5-8 tokens/s, so a TPOT of 20-50ms (20-50 tok/s) reads as fluid and streaming hides the total generation time; below reading speed feels laggy regardless of total latency",
+        "End-to-end budget decomposition: network + gateway hop + queue wait + prefill (TTFT) + decode (output_tokens x TPOT) + guardrail/eval overhead; a worked example budget table shows where a 2s target is actually spent",
+        "Throughput/cost anchors: tokens/s ranges per GPU class and the typical concurrency at the latency knee, as sizing rules of thumb",
+        "Availability: LLM app SLOs commonly sit at 99.5-99.9%, provider APIs have historically run ~99.x with notable multi-hour outages, so multi-provider fallback is how you buy an availability tier above any single provider; includes error-budget math",
+        "All volatile numbers are stamped (as of 2026) and footnoted as targets, not guarantees -- they are the tribal budgets teams negotiate, not published SLAs"
+      ],
+      "links": [
+        "Concept - LLM Load Testing and Capacity Planning",
+        "Playbook - Incident Response for LLM Systems",
+        "Concept - Autoscaling LLM Inference",
+        "Concept - KV Cache",
+        "Concept - Continuous Batching",
+        "Concept - Speculative Decoding"
+      ]
+    },
+    {
+      "title": "Gotchas - LLM Production Operations",
+      "type": "gotchas",
+      "level": "unicorn",
+      "scope": "Aggregated hard-won pitfalls across running LLM apps in production -- gateways, caching, cost, versioning, retries, streaming, and provider quirks. IN: the symptom-first pitfalls with cause/fix/detection for each. OUT: single-topic depth (each links to its own concept), and agent-specific pitfalls (link to Gotchas - Agents in Production).",
+      "key_points": [
+        "A floating model alias silently changed behavior overnight -> pin dated snapshots and run a golden-set canary probe; detection = continuous diff vs baseline",
+        "A retry storm amplified a provider blip into a self-inflicted outage and a 20x bill -> exponential backoff with full jitter + circuit breaker + idempotency keys; detection = retry-rate and cost/req spikes",
+        "The semantic cache served a confidently wrong answer (a false hit just above threshold) -> raise the threshold, key the cache on tenant and prompt version, and log hit-similarity for audit",
+        "Streaming retries double-charged and duplicated output -> never retry after the first token without an idempotency key; detection = duplicate completions in traces",
+        "max_tokens reservation throttled throughput because 95% of generations were short -> reserve near p95 output length, not max; detection = utilization far below rate-limit ceiling",
+        "Runaway bill from an unbounded agent loop / prompt-injection token amplification -> hard per-request and per-tenant token caps + loop-depth limits (link to 14); detection = tokens-per-request outliers",
+        "Cost estimates were wrong for non-OpenAI models because you used tiktoken -> bill from provider-returned usage, estimate only pre-flight",
+        "Prompt caching broke when a timestamp was appended to the system prompt (cache miss every call) -> keep the cacheable prefix byte-stable (link to Prompt Caching)",
+        "Provider rate-limit headers ignored -> honor Retry-After and watch x-ratelimit-remaining-tokens",
+        "Scale-to-zero caused a 5-minute cold-start outage under a burst -> keep a warm floor (link to Autoscaling)"
+      ],
+      "links": [
+        "Concept - Semantic Caching",
+        "Pattern - Resilient LLM Request Handling",
+        "Concept - Cost Engineering for LLM Applications",
+        "Concept - Prompt Caching",
+        "Concept - Autoscaling LLM Inference",
+        "Concept - Prompt Injection",
+        "Gotchas - Agents in Production",
+        "Lore - When the Model Changed Under You"
+      ]
+    },
+    {
+      "title": "Concept - Production Monitoring and Drift Detection",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Detecting quality and behavior drift in production LLM systems over time, where there is no ground-truth label. IN: the proxy/behavioral signals to monitor, scheduled canary probing against a pinned snapshot, statistical change-detection, and alerting discipline. OUT: raw telemetry capture (own Observability note), eval statistics/methodology (link to 13), and the incident response itself (own Playbook note).",
+      "key_points": [
+        "No ground truth in prod, so monitor proxy signals: output-length distribution, refusal/decline rate, JSON/schema-valid rate, tool-call error rate, latency, cost/req, and user feedback (thumbs-down, regeneration rate, human-escalation rate)",
+        "Drift sources to distinguish: a silent provider model update (link to the drift lore), a prompt/config deploy, input-distribution shift (a new user segment), a RAG-corpus change, and cache pollution -- each has a different fix",
+        "Canary probing: run a fixed golden set of prompts on a schedule against the live endpoint and diff outputs against a stored baseline (embedding similarity, judge score) to catch a silent provider change even when the model id is pinned",
+        "Statistical detection: control charts / CUSUM / Population Stability Index on the proxy metrics so you alert on a distribution shift over a window, not on a single non-deterministic sample (link to Statistical Rigor)",
+        "Online eval: run an async LLM-judge on sampled live traffic and track the score trend, while guarding against drift in the judge itself",
+        "Failure modes: alert fatigue from treating non-deterministic noise as signal, having no stored baseline to diff against, monitoring latency but never quality, and mistaking input drift for model drift and 'fixing' the wrong thing"
+      ],
+      "links": [
+        "Concept - LLM Observability and Tracing",
+        "Lore - When the Model Changed Under You",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Concept - LLM-as-Judge",
+        "Concept - Model Deployment Patterns for LLMs",
+        "Playbook - Incident Response for LLM Systems",
+        "Concept - Nondeterminism in Production LLM Serving"
+      ]
+    },
+    {
+      "title": "Lore - When the Model Changed Under You",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "War stories of provider model drift, silent updates, and deprecations breaking production systems, and the operational lesson each teaches. IN: the narratives plus the mechanical takeaway and evidence status. OUT: the how-to of drift detection (own Monitoring note) and version-pinning mechanics (own Lifecycle note).",
+      "key_points": [
+        "The 'GPT-4 got worse' saga: Chen, Zaharia & Zou (2023, Stanford/Berkeley, 'How Is ChatGPT's Behavior Changing over Time?') measured behavior shifts between the March and June 2023 snapshots (e.g., a large swing in prime-number-checking accuracy); the methodology was contested, but the point stands that snapshots drift",
+        "Silent updates to floating aliases: gpt-3.5-turbo and gpt-4-turbo default aliases changed formatting and refusal behavior overnight, and teams pinned to the alias saw downstream parsers and prompts break with no deploy on their side",
+        "Deprecation/sunset chaos: models retired on schedule (OpenAI deprecation notices, Azure retirement dates) force migrations, and the scramble is worst when a fine-tune's base model is being sunset",
+        "System-prompt and default-parameter changes on the provider side that shifted persona/verbosity without any version bump",
+        "The mechanical lesson: treat the model as an unstable third-party dependency, not a constant -- pin dated snapshots, keep a golden canary set, diff continuously, and budget engineering time for forced migrations",
+        "Evidence status: the Stanford paper is well-sourced but methodologically debated; the alias-change and deprecation anecdotes are well-documented, widely-reproduced folklore"
+      ],
+      "links": [
+        "Concept - Model Lifecycle and Versioning",
+        "Concept - Production Monitoring and Drift Detection",
+        "Concept - Nondeterminism in Production LLM Serving",
+        "Playbook - Incident Response for LLM Systems",
+        "Reference - Model Genealogy",
+        "Lore - The OPT-175B Logbook"
+      ]
+    },
+    {
+      "title": "Concept - Nondeterminism in Production LLM Serving",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "Why identical requests produce different outputs even at temperature 0, and what to do about it operationally. IN: the sources of serving nondeterminism, the batch-invariance problem, reproducibility strategies, and implications for testing/caching/evals. OUT: sampling-parameter mechanics (link to 07), floating-point representation details (link to 01), and batching internals (link to 07).",
+      "key_points": [
+        "Even greedy (temp=0) decoding is not deterministic: floating-point non-associativity means the reduction order in matmuls/reductions changes the last bits of the logits, and near-tie argmax decisions then flip, diverging the whole sequence from that token on",
+        "The batch-invariance problem: the same request produces different math depending on what else is in the batch, because batch size and concurrent sequences change kernel selection and reduction order -- so your output depends on your neighbors' traffic",
+        "Sources: non-deterministic GPU atomics/kernels, cuBLAS/attention kernel selection by shape, MoE expert routing under batching (link to 03), continuous batching mixing sequences (link to 07), tensor-parallel reduction order across GPUs, and provider-side load balancing across model versions and hardware generations",
+        "Thinking Machines' 'Defeating Nondeterminism in LLM Inference' (2025) showed batch-invariant kernels can make serving bitwise-deterministic, but at a throughput cost most production systems decline to pay",
+        "Provider seed params (OpenAI seed + system_fingerprint) reduce variance but don't guarantee reproducibility, and a changed fingerprint is itself a signal the backend changed under you",
+        "Operational implications: you cannot assert exact-match in tests (use semantic/property assertions), the semantic cache is inherently lossy, evals need multiple samples and confidence intervals (link to 13), and reproducing an incident may be impossible -- so log the full output, not just inputs",
+        "Failure modes: golden-file tests that flake forever, 'it worked in staging', and assuming a fixed seed reproduces across a provider backend change"
+      ],
+      "links": [
+        "Concept - Sampling and Decoding Parameters",
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Continuous Batching",
+        "Concept - Mixture of Experts Architecture",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Concept - Production Monitoring and Drift Detection",
+        "Pattern - Resilient LLM Request Handling"
+      ]
+    }
+  ]
+}

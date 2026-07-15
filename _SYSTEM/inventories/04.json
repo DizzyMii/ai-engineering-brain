@@ -1,0 +1,891 @@
+{
+  "domain": "04 - Training at Scale",
+  "slug": "training-at-scale",
+  "notes": [
+    {
+      "title": "Concept - Why Models Don't Fit on One GPU",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The memory budget of training and why a modern LLM exceeds a single GPU's HBM, motivating sharding and parallelism. IN: the four memory consumers, the ~16-20 bytes/param rule, activation memory, the two axes (shard-the-model vs shard-the-states). OUT: the parallelism mechanisms themselves (own notes) and exact per-tensor memory formulas (link to 08 Reference - Memory Math for Transformers).",
+      "key_points": [
+        "Four consumers of training memory: parameters (2 bytes bf16), gradients (2-4 bytes), optimizer states (Adam fp32 master + m + v = 12 bytes/param), and activations (batch x seq dependent). Adam mixed-precision totals ~16-20 bytes/param.",
+        "Concrete: a 7B model needs ~112-140 GB just for weights+grads+optimizer states, already exceeding an 80GB H100 before a single activation is stored; 70B is flatly impossible on one device.",
+        "Activation memory scales with batch x seq x layers x hidden and dominates at long context; gradient/activation checkpointing (recomputation) trades ~30% extra compute to drop activation memory to O(sqrt(layers)).",
+        "A single 80GB GPU caps trainable dense models near ~3-6B params without sharding; everything larger requires splitting either the tensors (TP/PP) or the redundant optimizer/param state across ranks (ZeRO/FSDP).",
+        "HBM capacity and bandwidth, not raw FLOPs, is usually the binding constraint — the memory wall, not the compute wall (foreshadows the roofline model).",
+        "Failure signatures: OOM at step 0 (static footprint too large) vs OOM after N steps (activation peak, optimizer-state lazy allocation, or allocator fragmentation) — different bugs, different fixes."
+      ],
+      "links": [
+        "Reference - Memory Math for Transformers",
+        "Concept - GPU Memory Hierarchy",
+        "Concept - Data Parallelism and ZeRO",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Concept - Mixed Precision Training",
+        "Concept - Adam and AdamW",
+        "The Roofline Model"
+      ]
+    },
+    {
+      "title": "Concept - Byte-Pair Encoding",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The BPE algorithm as used to tokenize LLM training corpora: greedy merge training, encoding by merge rank, and byte-level BPE. IN: the merge procedure, byte-level guarantee, pre-tokenization, vocab/sequence-length numbers. OUT: unigram/SentencePiece and vocab-size decisions (link Concept - Tokenizer Training), inference-time arcana (link Gotchas - Tokenizers), glitch tokens (link 18 Lore - Glitch Tokens).",
+      "key_points": [
+        "Training: start from bytes/characters, iteratively merge the most frequent adjacent pair into a new symbol, and record the merge order; final vocab = base symbols + N learned merges. Encoding replays merges greedily in rank order.",
+        "Byte-level BPE (GPT-2; original BPE from Sennrich et al. 2016 / Gage 1994) operates over the 256 byte values so every possible string is encodable with no UNK token; GPT-2 vocab = 50257.",
+        "Pre-tokenization splits text with a regex (whitespace/punctuation) before merging so merges never cross word boundaries; GPT-2 marks leading spaces with the special glyph 'G-with-dot' rather than a literal space.",
+        "Numbers: typical vocab 32k-256k; English compresses to ~3.5-4 chars/token, code and non-English are worse; the embedding + unembedding matrix costs vocab x hidden params, coupling tokenizer choice to model size.",
+        "Failure modes: whitespace and digit merges cause arithmetic errors; multilingual text under-segments (high fertility); some byte sequences are not perfectly invertible under naive normalization.",
+        "Non-obvious: BPE merges are frequency-greedy, not likelihood-optimal (unlike unigram LM); the tokenizer is frozen before pretraining and silently shapes loss, context length, and every downstream capability."
+      ],
+      "links": [
+        "Concept - Tokenizer Training",
+        "Gotchas - Tokenizers",
+        "Concept - Entropy and Cross-Entropy",
+        "Lore - Glitch Tokens",
+        "Concept - Pretraining Objectives",
+        "Snippet - Training a BPE Tokenizer"
+      ]
+    },
+    {
+      "title": "Concept - Gradient Accumulation and Microbatching",
+      "type": "concept",
+      "level": "surface",
+      "scope": "Splitting a large effective batch into microbatches whose gradients are summed before one optimizer step, to hit a target token batch on limited HBM. IN: the effective-batch formula, no_sync, the loss-normalization bug, interaction with clipping and loss scaling. OUT: pipeline scheduling of microbatches (link Concept - Tensor and Pipeline Parallelism), critical-batch theory (link Concept - Critical Batch Size).",
+      "key_points": [
+        "Effective batch = microbatch_size x grad_accum_steps x data_parallel_world_size; this is how a run targets a fixed token budget per step (e.g., 4M tokens) despite per-GPU memory limits.",
+        "Mechanism: run forward/backward per microbatch accumulating into .grad, then one optimizer.step() per accumulation window; in DDP wrap all but the last microbatch in no_sync() so gradient all-reduce fires once, not per microbatch.",
+        "The 2024 loss-normalization bug (surfaced by Unsloth/HF): averaging per-microbatch mean losses when microbatches contain unequal token counts (from padding or packing) silently mis-weights the gradient; correct fix is to sum per-token losses and divide by the global token count.",
+        "Numbers: LLM pretraining batches span 0.5M-16M tokens; grad-accum of 4-64 is common; more accumulation means fewer DP syncs per token (comm-cheaper) at identical total compute.",
+        "Interaction with mixed precision and clipping: unscale the loss-scaled gradient before clipping, and clip on the fully accumulated global-norm gradient, not per microbatch.",
+        "Failure mode: forgetting the 1/accum loss scaling or clipping per-microbatch silently changes the effective learning rate and destabilizes the run."
+      ],
+      "links": [
+        "Concept - Critical Batch Size",
+        "Concept - Data Parallelism and ZeRO",
+        "Concept - Mixed Precision Training",
+        "Concept - The Training Loop",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Concept - AdamW at Scale"
+      ]
+    },
+    {
+      "title": "Concept - Scaling Laws",
+      "type": "concept",
+      "level": "core",
+      "scope": "The power-law relationship of pretraining loss to compute, parameters, and data, and the compute-optimal allocation. IN: Kaplan vs Chinchilla, the L(N,D) form, IsoFLOP method, 20 tokens/param, the 6ND FLOP budget, inference-optimal overtraining. OUT: the repeated-data regime (link Concept - Data-Constrained Scaling Laws), emergent-abilities debate (link 18).",
+      "key_points": [
+        "Loss model L(N,D) = E + A/N^alpha + B/D^beta with Chinchilla fits alpha~0.34, beta~0.28; training compute approximated as C ~ 6ND FLOPs (2 for the matmul, x3 for fwd+bwd, per param per token).",
+        "Kaplan et al. 2020 over-weighted parameters because the LR schedule was not re-tuned per run; Chinchilla (Hoffmann et al. 2022) used IsoFLOP profiles plus a parametric fit and found N and D should scale roughly equally -> ~20 tokens/param at compute-optimal.",
+        "Gopher (280B params / 300B tokens) was badly undertrained; Chinchilla (70B / 1.4T) matched it with 4x fewer params at equal compute — the result that reset the field's param/token intuition.",
+        "Inference-optimal overtraining: Llama-3 8B on 15T tokens is ~1875 tokens/param, far past Chinchilla, deliberately trading extra training cost for a smaller/cheaper-to-serve model.",
+        "How to budget a run: from a compute number C, solve 6ND = C under the optimal N/D ratio (or your overtraining target) to get params and tokens, then wall-clock from tokens/sec.",
+        "Failure modes: extrapolating a fitted law outside its compute range; forgetting the constants depend on architecture/tokenizer/data; conflating pretraining-loss improvement with downstream benchmark gains (the loss is smooth, capabilities are not)."
+      ],
+      "links": [
+        "Concept - Data-Constrained Scaling Laws",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Concept - Data Mixtures",
+        "Concept - The Emergent Abilities Debate",
+        "Reference - Memory Math for Transformers",
+        "Concept - Critical Batch Size",
+        "Concept - Entropy and Cross-Entropy"
+      ]
+    },
+    {
+      "title": "Concept - Data Parallelism and ZeRO",
+      "type": "concept",
+      "level": "core",
+      "scope": "Replicated-model data parallelism and the ZeRO family that shards optimizer states, gradients, and parameters to cut per-GPU memory. IN: DDP all-reduce, ZeRO stages 1/2/3, communication volume per stage, offload. OUT: PyTorch FSDP as a distinct implementation (link Concept - Fully Sharded Data Parallel (FSDP)), all-reduce internals (link 08).",
+      "key_points": [
+        "Plain DDP keeps a full model replica per rank, all-reduces gradients (ring algorithm), and steps the optimizer locally; memory per GPU stays at full model+grad+optimizer, so DDP alone adds throughput but not capacity.",
+        "ZeRO (Rajbhandari et al. 2019, DeepSpeed): Stage 1 shards optimizer states across N ranks (/N), Stage 2 also shards gradients, Stage 3 also shards parameters (gathered just-in-time per layer during fwd/bwd), driving per-GPU state toward (model+grad+opt)/N.",
+        "Communication: ZeRO-1/2 keep all-reduce volume ~= DDP; ZeRO-3 replaces it with all-gather of params (each fwd and bwd) plus reduce-scatter of grads, ~1.5x DDP comm volume — the memory-for-bandwidth trade.",
+        "ZeRO-Offload / Infinity push optimizer states and params to CPU DRAM or NVMe, buying capacity at severe bandwidth cost (useful for fitting a model on few GPUs, not for max throughput).",
+        "Numbers: Adam optimizer state = 12 bytes/param (fp32 master + m + v); a 70B model's ~1.1TB of states sharded across 64 ranks is ~18GB/GPU under ZeRO-3.",
+        "Failure modes: comm becomes the bottleneck on slow interconnect; ZeRO-3 param-gather stalls the pipeline if not overlapped with compute; bucket sizing and prefetch depth need tuning to hide the all-gather latency."
+      ],
+      "links": [
+        "Concept - Fully Sharded Data Parallel (FSDP)",
+        "Concept - All-Reduce and Collective Operations",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Reference - Parallelism Strategies",
+        "Concept - Adam and AdamW",
+        "Pattern - 3D Parallelism Composition",
+        "Concept - Why Models Don't Fit on One GPU"
+      ]
+    },
+    {
+      "title": "Concept - Tensor and Pipeline Parallelism",
+      "type": "concept",
+      "level": "core",
+      "scope": "Intra-layer tensor parallelism (Megatron column/row split) and inter-layer pipeline parallelism (GPipe, 1F1B, interleaved), plus the pipeline bubble. IN: the TP all-reduce structure, PP schedules and bubble math, bandwidth vs latency sensitivity. OUT: sequence/context/expert parallelism (own notes), collective internals (link 08).",
+      "key_points": [
+        "Tensor parallelism (Shoeybi et al. 2019, Megatron-LM): the MLP is split column-parallel (first matmul) then row-parallel (second), so each block needs exactly one all-reduce in the forward and one in the backward; attention splits heads across ranks. TP comm rides on activations every layer, demands NVLink, and is usually kept <= 8 (within a node).",
+        "Pipeline parallelism partitions layers into stages; microbatches flow through, creating a fill/drain bubble of fraction (p-1)/(m+p-1) for p stages and m microbatches.",
+        "1F1B (PipeDream) interleaves one-forward-one-backward to cap activation memory; interleaved/virtual pipeline (Megatron) assigns multiple non-contiguous stages per device to shrink the bubble; zero-bubble and DeepSeek's DualPipe overlap further.",
+        "The core trade: TP has cheap-to-express but bandwidth-heavy activation all-reduces (fast link required), while PP has cheap point-to-point activation passes but pays the bubble and load-imbalance tax.",
+        "Numbers: large runs commonly use TP=8 with PP=8-16; raise microbatch count m >= ~4x pipeline depth to amortize the bubble; the last PP stage carries the loss/unembedding and the first carries embeddings, creating stage imbalance.",
+        "Failure modes: TP over a slow inter-node link collapses MFU; PP stage imbalance from embedding/loss layers; 1F1B still needs activation recomputation to fit long sequences; naive GPipe wastes memory storing all microbatch activations."
+      ],
+      "links": [
+        "Concept - Sequence and Context Parallelism",
+        "Concept - Expert Parallelism",
+        "Concept - All-Reduce and Collective Operations",
+        "Reference - Parallelism Strategies",
+        "Pattern - 3D Parallelism Composition",
+        "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)",
+        "Breakdown - Megatron-LM"
+      ]
+    },
+    {
+      "title": "Concept - Mixed Precision Training",
+      "type": "concept",
+      "level": "core",
+      "scope": "Training in reduced precision: bf16 vs fp16, fp32 master weights, loss scaling, and which ops stay in fp32. IN: the two 16-bit formats and their ranges, dynamic loss scaling, master-weight update, fp32-only ops, reduce dtype. OUT: fp8 training (link Concept - FP8 Training), float-format fundamentals (link 01 Concept - Floating Point for Deep Learning).",
+      "key_points": [
+        "fp16 has 5 exponent bits (range ~6e-5 to 65504) and underflows small gradients, so it needs loss scaling: multiply loss by S before backward, unscale before the step; a dynamic scaler halves S on inf/nan and grows it periodically.",
+        "bf16 has 8 exponent bits (fp32's dynamic range) but only 7 mantissa bits; it needs no loss scaling but is coarser, which is why modern LLM pretraining is almost universally bf16 and fp16 has largely disappeared from pretraining.",
+        "Master weights: the optimizer keeps an fp32 copy because accumulating tiny updates directly into bf16 weights loses them to swamping (the update rounds away); compute in bf16, accumulate/update in fp32.",
+        "Ops kept in fp32 for stability: the loss, softmax, layernorm/rmsnorm statistics, attention-softmax accumulation, and gradient reductions; matmuls run in bf16 on tensor cores. TF32 is a middle ground for nominally-fp32 matmuls.",
+        "Numbers: ~2x activation memory saving and ~2-8x tensor-core throughput vs fp32 on A100/H100; the all-reduce accumulation dtype matters — reducing in bf16 loses precision at scale, so reduce in fp32.",
+        "Failure modes: fp16 loss-scale collapse (repeated overflow drives S->0, halting progress); bf16 precision causing slow silent divergence in very deep or very long runs; running layernorm in bf16 rather than fp32 causing instability."
+      ],
+      "links": [
+        "Concept - FP8 Training",
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Training Stability and Loss Spikes",
+        "Concept - Tensor Cores",
+        "Concept - RMSNorm and LayerNorm",
+        "Concept - Data Parallelism and ZeRO",
+        "Concept - AdamW at Scale"
+      ]
+    },
+    {
+      "title": "Concept - Learning Rate Schedules for Pretraining",
+      "type": "concept",
+      "level": "core",
+      "scope": "The LR schedule shapes used in LLM pretraining and their hyperparameters. IN: warmup, cosine decay, warmup-stable-decay (WSD/trapezoidal), inverse-sqrt, peak/min-LR and warmup-length choices, annealing on quality data. OUT: optimizer internals (link Concept - AdamW at Scale), LR/batch coupling (link Concept - Critical Batch Size), muP LR transfer (link Concept - muP and Hyperparameter Transfer).",
+      "key_points": [
+        "Warmup: a linear ramp over ~0.5-4% of steps (often ~2000) while Adam's second-moment estimate is still uncalibrated; too short gives an early loss spike, too long wastes compute.",
+        "Cosine decay to ~10% of peak over the planned token budget; it requires knowing total steps in advance, and stopping early leaves you at a high LR with an artificially high loss.",
+        "WSD / trapezoidal (MiniCPM, Hu et al. 2024): warmup -> long constant phase -> short (10-20%) rapid decay; it matches cosine's final loss but lets you branch or continue from the stable phase and add data without recomputing the schedule.",
+        "The rapid decay phase is where much of the capability lands, and annealing on higher-quality or domain data during that phase (a data schedule) is now standard.",
+        "Peak-LR magnitudes: ~3e-4 for mid-size models, GPT-3 175B used 6e-5 with a huge batch; LR scales down with model width (muP) and up with batch size (roughly sqrt for Adam).",
+        "Failure modes: LR too high past warmup -> spikes/divergence; decaying to 0 vs 10% (10% often better for continued training); resuming a cosine run with the wrong remaining-steps count silently mis-schedules the rest of the run."
+      ],
+      "links": [
+        "Concept - AdamW at Scale",
+        "Concept - Critical Batch Size",
+        "Concept - muP and Hyperparameter Transfer",
+        "Concept - Data Mixtures",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Reference - LLM Pretraining Hyperparameters",
+        "Concept - Training Stability and Loss Spikes"
+      ]
+    },
+    {
+      "title": "Concept - AdamW at Scale",
+      "type": "concept",
+      "level": "core",
+      "scope": "The engineering of AdamW for LLM pretraining. IN: decoupled weight decay, beta/epsilon choices at scale, fused/foreach kernels, sharded optimizer state, global-norm gradient clipping, param-group exclusions. OUT: the base Adam update rule (link 02 Concept - Adam and AdamW), second-order methods (link Concept - Second-Order Optimizers at Scale), Muon (link Concept - Muon Optimizer).",
+      "key_points": [
+        "Decoupled weight decay (Loshchilov & Hutter 2017): AdamW applies decay directly to weights (theta -= lr*wd*theta) rather than folding it into the gradient, so decay strength is independent of the adaptive per-parameter scaling; typical wd = 0.1.",
+        "Betas at scale: beta1=0.9 with beta2=0.95 (not 0.999) is near-universal LLM folklore — a lower beta2 tracks the gradient-variance estimate faster and reduces spike sensitivity; GPT-3, OPT, and PaLM all use beta2~0.95. Epsilon 1e-8 is standard, with occasional 1e-15 experiments.",
+        "Memory: Adam stores fp32 m and v (8 bytes) plus the fp32 master weight (4 bytes) = 12 bytes/param; this is exactly the state ZeRO/FSDP shard, and it dominates footprint in low-activation regimes.",
+        "Engineering: fused or foreach kernels apply the update across all params in one launch; gradient clipping by global norm (usually 1.0); skip the step entirely on non-finite grads; separate param groups so weight decay is excluded from norms, biases, and often embeddings.",
+        "Failure modes: applying weight decay to layernorm gains/embeddings hurts; epsilon swamping in bf16; missing gradient clipping invites spikes; unsharded optimizer state OOMs at scale.",
+        "Non-obvious: excluding 1D parameters (norms, biases) from weight decay is standard but rarely written down; the beta2 choice, warmup length, and clip threshold together govern early-training stability."
+      ],
+      "links": [
+        "Concept - Adam and AdamW",
+        "Concept - Learning Rate Schedules for Pretraining",
+        "Concept - Training Stability and Loss Spikes",
+        "Concept - Muon Optimizer",
+        "Concept - Second-Order Optimizers at Scale",
+        "Reference - LLM Pretraining Hyperparameters",
+        "Concept - Data Parallelism and ZeRO"
+      ]
+    },
+    {
+      "title": "Concept - Pretraining Objectives",
+      "type": "concept",
+      "level": "core",
+      "scope": "The self-supervised objectives used to pretrain language models. IN: causal LM, masked LM, span corruption (T5), UL2, prefix-LM, and fill-in-the-middle (FIM), with their sample-efficiency tradeoffs and packing pitfalls. OUT: cross-entropy math (link 01 Concept - Entropy and Cross-Entropy), data mixing/ordering (link 05), post-training objectives (link 06).",
+      "key_points": [
+        "Causal LM: predict token t+1 from tokens <= t with teacher forcing and cross-entropy over the vocab; every position contributes a loss (dense signal), which is why decoder-only CLM won at scale.",
+        "Masked LM (BERT, Devlin et al. 2018) masks ~15% of tokens and predicts them bidirectionally — good for representations but ~7x less loss signal per sequence than CLM and not natively generative.",
+        "Span corruption (T5, Raffel et al. 2020) masks contiguous spans and predicts them with sentinel tokens in an encoder-decoder; UL2 (Tay et al. 2022) mixes R/S/X denoisers selected by a mode token.",
+        "Fill-in-the-middle (Bavarian et al. 2022): reorder a document into prefix/suffix/middle with sentinel tokens so a causal LM learns infilling (essential for code completion); PSM vs SPM formats, FIM rate ~50-90% with negligible AR-loss cost.",
+        "Prefix-LM sits between CLM and MLM by allowing bidirectional attention over the prompt region while remaining causal on the continuation.",
+        "Failure modes: FIM format mismatch between training and inference; document packing bleeding attention across concatenated docs (needs reset masks or EOS separators); computing loss over padding tokens; sentinel tokens not reserved in the tokenizer."
+      ],
+      "links": [
+        "Concept - Entropy and Cross-Entropy",
+        "Concept - Byte-Pair Encoding",
+        "Concept - Data Mixtures",
+        "Deep Dive - The Transformer",
+        "Concept - Supervised Fine-Tuning (SFT)",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Concept - Tokenizer Training"
+      ]
+    },
+    {
+      "title": "Concept - Tokenizer Training",
+      "type": "concept",
+      "level": "core",
+      "scope": "Choosing and training a tokenizer for pretraining. IN: BPE vs unigram LM (SentencePiece), vocab-size tradeoffs, normalization/pre-tokenization, digit and whitespace handling, multilingual fertility, reserved special tokens. OUT: the BPE merge algorithm itself (link Concept - Byte-Pair Encoding), inference-time failure arcana (link Gotchas - Tokenizers).",
+      "key_points": [
+        "Unigram LM (Kudo 2018, SentencePiece): start from a large candidate set and iteratively prune by EM to maximize corpus likelihood; it is probabilistic and supports subword regularization (sampling segmentations), unlike greedy BPE.",
+        "Vocab-size tradeoff: a larger vocab shortens sequences (cheaper compute per document) but enlarges the embedding+softmax matrix (vocab x hidden params and the output-softmax FLOPs) and leaves rare tokens undertrained; common points are 32k (Llama-2), 128k (GPT-4, Llama-3), and 256k (Gemma).",
+        "Fertility (tokens per word) is the quality metric; multilingual and code corpora need larger vocab to keep fertility low, and English-centric tokenizers impose a 2-4x token tax on other languages.",
+        "Normalization (NFKC), byte fallback, and pre-tokenization matter: whether digits are split individually (Llama) or grouped up to three (GPT-4) changes arithmetic behavior; reserve slots for chat-template and FIM sentinel tokens up front.",
+        "Numbers: a 128k vocab x 4096 hidden embedding is ~512M params (often tied input/output); tokenizers are trained on a representative multi-GB sample, not the full corpus.",
+        "Failure modes: undertrained rare tokens become glitch tokens (link 18); adding tokens after pretraining without embedding resize/retraining; digit grouping hurting math; a normalization mismatch between training and serving."
+      ],
+      "links": [
+        "Concept - Byte-Pair Encoding",
+        "Gotchas - Tokenizers",
+        "Lore - Glitch Tokens",
+        "Concept - Data Mixtures",
+        "Concept - Scaling Laws",
+        "Snippet - Training a BPE Tokenizer",
+        "Concept - Pretraining Objectives"
+      ]
+    },
+    {
+      "title": "Concept - MoE Training and Load Balancing",
+      "type": "concept",
+      "level": "core",
+      "scope": "The training dynamics unique to Mixture-of-Experts models. IN: top-k routing, auxiliary load-balance loss, router z-loss, aux-loss-free bias balancing, expert capacity and token dropping. OUT: MoE as an architecture (link 03 Concept - Mixture of Experts Architecture), the all-to-all comm mechanics (link Concept - Expert Parallelism).",
+      "key_points": [
+        "Top-k routing (GShard, Lepikhin et al. 2020; Switch, Fedus et al. 2021) sends each token to k experts; without balancing pressure the router collapses onto a few experts, starving the rest.",
+        "Auxiliary load-balance loss penalizes the product of the fraction of tokens routed to an expert and that expert's mean router probability (Switch's L_aux, coefficient ~0.01); a router z-loss penalizes large router logits for numerical stability.",
+        "Aux-loss-free balancing (DeepSeek-V2/V3, 2024) adds a per-expert bias to the routing logits, adjusted by a feedback controller toward equal load, avoiding the auxiliary-loss gradient that fights the LM objective — DeepSeek reports lower loss at equal balance.",
+        "Expert capacity factor (1.0-2.0) sets a per-expert token buffer; overflow tokens are dropped (skip the expert, pass through the residual), trading capacity memory against dropped-token quality; dropless implementations (MegaBlocks) use grouped GEMM instead.",
+        "Numbers: DeepSeek-V3 uses 256 routed + 1 shared expert, top-8, 671B total / 37B active; fine-grained experts plus shared-expert isolation; upcycling converts a dense checkpoint into an MoE init.",
+        "Failure modes: expert collapse, router instability without z-loss, silent quality loss from capacity drops, straggler experts stalling the all-to-all in expert parallelism, and an aux-loss coefficient set too high (hurts LM loss) or too low (imbalance)."
+      ],
+      "links": [
+        "Concept - Mixture of Experts Architecture",
+        "Concept - Expert Parallelism",
+        "Breakdown - DeepSeek-V3 Training",
+        "Concept - Training Stability and Loss Spikes",
+        "Concept - z-loss and Logit Soft-Capping",
+        "Concept - AdamW at Scale"
+      ]
+    },
+    {
+      "title": "Reference - Parallelism Strategies",
+      "type": "reference",
+      "level": "core",
+      "scope": "A lookup matrix of the parallelism dimensions used in distributed training. IN: for each of DP, ZeRO/FSDP, TP, PP, SP, CP, EP — what it shards, its collective/comm pattern, interconnect sensitivity, memory effect, typical degree, and primary failure mode. OUT: mechanistic explanations (own concept notes), collective-op internals (link 08).",
+      "key_points": [
+        "One row per strategy with columns: what it splits (params / grads / optimizer / activations / experts / sequence), collective used (all-reduce, all-gather, reduce-scatter, all-to-all, point-to-point), comm volume per step, interconnect need (NVLink vs InfiniBand), memory reduction, typical degree, and failure mode.",
+        "DP/DDP: replicate model, all-reduce grads, no memory relief. TP: split within layer, all-reduce activations, NVLink-bound, degree <= 8. PP: split across layers, p2p activations, bubble cost. ZeRO-3/FSDP: shard states, all-gather + reduce-scatter, ~1.5x DDP comm.",
+        "SP: shard the norm/dropout/residual region along sequence to cut activation memory, complements TP at no extra comm volume. CP: shard the sequence for attention via ring/all-gather (long-context). EP: shard experts, two all-to-all collectives per MoE layer.",
+        "Placement rule-of-thumb: TP within a node, PP and DP across nodes, EP orthogonal on the expert dimension, CP for long context; degrees multiply to the world size (world = DP x TP x PP x CP x EP).",
+        "Footnotes: comm volume in bytes/step per layer; TP costs 2x(fwd+bwd) activation all-reduce per layer; ZeRO-3 ~= 1.5x DDP volume; all-to-all is latency- and topology-sensitive.",
+        "Date-stamp: reflects 2026 practice across Megatron-Core, DeepSpeed, PyTorch FSDP2, and TorchTitan."
+      ],
+      "links": [
+        "Concept - Data Parallelism and ZeRO",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Concept - Sequence and Context Parallelism",
+        "Concept - Expert Parallelism",
+        "Concept - All-Reduce and Collective Operations",
+        "Pattern - 3D Parallelism Composition",
+        "Decision - Choosing a Parallelism Strategy"
+      ]
+    },
+    {
+      "title": "Snippet - Training a BPE Tokenizer",
+      "type": "snippet",
+      "level": "core",
+      "scope": "Runnable HuggingFace tokenizers code to train a byte-level BPE tokenizer with pre-tokenization, reserved special tokens, and individual-digit splitting, then verify the encode/decode round-trip and fertility. OUT: the BPE algorithm theory (link Concept - Byte-Pair Encoding) and vocab-size reasoning (link Concept - Tokenizer Training).",
+      "key_points": [
+        "Use the tokenizers library: a ByteLevel pre-tokenizer (add_prefix_space=True), a BpeTrainer with vocab_size, min_frequency, and special_tokens ([BOS], [EOS], [PAD], plus FIM sentinels), and a ByteLevel decoder.",
+        "Add a Split rule to isolate digits into single tokens, and show the GPT-2 regex as the alternative pre-tokenization pattern.",
+        "Demonstrate the encode round-trip, measure fertility (tokens/word) on a held-out sample, and save/load tokenizer.json.",
+        "Why-it's-written: byte-level guarantees no UNK token; special and sentinel token IDs must be reserved up front because adding them later forces an embedding resize; add_prefix_space must match between training and inference; train on a representative sample, not the whole corpus.",
+        "Expected output: printed vocab size, a sample tokenization showing the space marker glyph and single-digit tokens, and a fertility number to sanity-check the vocab choice."
+      ],
+      "links": [
+        "Concept - Byte-Pair Encoding",
+        "Concept - Tokenizer Training",
+        "Gotchas - Tokenizers",
+        "Concept - Pretraining Objectives"
+      ]
+    },
+    {
+      "title": "Deep Dive - Anatomy of a Pretraining Run",
+      "type": "deep-dive",
+      "level": "advanced",
+      "scope": "The end-to-end lifecycle of a large pretraining run, integrating the domain's owned mechanisms. IN: sizing from a compute budget, parallelism layout, the at-scale training loop, monitoring and intervention, failure/restart handling, and annealing to release. OUT: data-pipeline construction (link 05) and cluster provisioning (link 08); this note links rather than re-derives owned mechanisms.",
+      "key_points": [
+        "Sizing: from a compute budget C (GPU-hours x FLOPs/GPU x MFU) derive the 6ND token/param split via Chinchilla or an overtraining target, then estimate wall-clock from tokens/sec = batch_tokens / step_time and total cost.",
+        "Parallelism layout: pick DP x TP x PP x (EP/CP) for the model and cluster, then set microbatch and grad-accum to hit a target global batch (e.g., 4M tokens); target MFU 40-55% and distinguish MFU from HFU (hardware FLOPs utilization inflated by recompute).",
+        "The loop: a resumable, packed-sequence dataloader; forward/backward with activation recompute; global-norm clip; optimizer step; gradient all-reduce; and logging of loss, grad-norm, LR, tokens-seen, and MFU, with async checkpoints every N steps.",
+        "Monitoring and intervention: watch for loss spikes and grad-norm blowups and apply the rewind/skip-batches/lower-LR recovery; at 10k+ GPUs a node fails every few hours, so elastic restart from checkpoint is routine, not exceptional.",
+        "Architecture/walkthrough diagram (Mermaid): budget -> config -> warmup -> stable -> decay/anneal -> eval -> release. Evolution: GPT-3 -> PaLM -> Chinchilla-optimal -> inference-optimal overtraining (Llama-3) -> fp8 MoE (DeepSeek-V3).",
+        "Numbers: Llama-3 405B trained on ~16k H100s for ~54 days over ~15T tokens in bf16 with 4D parallelism; DeepSeek-V3 in ~2.788M H800 hours in fp8. Failure modes: a bad data shard triggering a spike, checkpoint corruption, silent gradient desync, non-determinism defeating reproducibility."
+      ],
+      "links": [
+        "Concept - Scaling Laws",
+        "Concept - Data Parallelism and ZeRO",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Concept - Mixed Precision Training",
+        "Concept - Learning Rate Schedules for Pretraining",
+        "Concept - Training Stability and Loss Spikes",
+        "Concept - Distributed Checkpointing",
+        "Decision - Choosing a Parallelism Strategy",
+        "The Roofline Model",
+        "Reference - Memory Math for Transformers",
+        "Concept - Data Mixtures",
+        "Lore - The OPT-175B Logbook",
+        "Breakdown - DeepSeek-V3 Training"
+      ]
+    },
+    {
+      "title": "Concept - Fully Sharded Data Parallel (FSDP)",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "PyTorch FSDP/FSDP2 internals and how they realize ZeRO-3-style sharding. IN: the all-gather/reduce-scatter unit, FlatParameter vs per-parameter DTensor sharding, wrapping policy, prefetch/overlap, mixed-precision and offload knobs, and differences from DeepSpeed ZeRO-3. OUT: the ZeRO algorithm itself (link Concept - Data Parallelism and ZeRO), collective internals (link 08).",
+      "key_points": [
+        "FSDP shards params/grads/optimizer across the DP group (equivalent to ZeRO-3): it all-gathers a unit's full params just before its fwd/bwd, frees them after, and reduce-scatters grads afterward; the unit granularity is set by the wrapping policy (typically per transformer block).",
+        "FSDP1 uses a FlatParameter (a unit's params concatenated into one flat tensor), which complicates per-parameter LR, optimizer groups, and state dicts; FSDP2 uses per-parameter DTensor sharding — cleaner, composable with TP via DeviceMesh — and is the 2024-2025 migration path used by TorchTitan.",
+        "Overlap is what makes it fast: prefetch the next unit's all-gather during the current unit's compute (forward and backward prefetch), tuned with backward_prefetch and limit_all_gathers.",
+        "Config knobs: MixedPrecisionPolicy (param/reduce/buffer dtypes — reduce in fp32!), sharding_strategy (FULL_SHARD, SHARD_GRAD_OP ~= ZeRO-2, HYBRID_SHARD for shard-within-node/replicate-across), CPUOffload, and composition with activation checkpointing.",
+        "Numbers: HYBRID_SHARD cuts inter-node comm by keeping the shard within a node and replicating across nodes; wrapping the whole model as one FSDP unit defeats overlap and peaks at full-model memory (a common anti-pattern).",
+        "Failure modes: wrong wrapping granularity (too coarse OOMs or kills overlap, too fine adds comm overhead); a bf16 reduce dtype losing gradient precision at scale; sharded state-dict pitfalls; combining with TP requiring a 2D device mesh."
+      ],
+      "links": [
+        "Concept - Data Parallelism and ZeRO",
+        "Concept - Distributed Checkpointing",
+        "Concept - All-Reduce and Collective Operations",
+        "Snippet - FSDP Minimal Setup",
+        "Pattern - 3D Parallelism Composition",
+        "Concept - Mixed Precision Training",
+        "Concept - GPU Memory Hierarchy"
+      ]
+    },
+    {
+      "title": "Concept - Sequence and Context Parallelism",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Two sequence-dimension parallelism techniques for training. IN: Megatron sequence parallelism (sharding the norm/dropout region to save activation memory, paired with TP) and context parallelism (ring/all-gather attention that shards the sequence for long-context training), plus causal load balancing. OUT: ring attention as a serving/kernel technique (link 08/18), attention math (link 03).",
+      "key_points": [
+        "Megatron sequence parallelism (Korthikanti et al. 2022): the regions TP leaves replicated (layernorm, dropout, residual add) are sharded along the sequence, converting the TP all-reduce into all-gather + reduce-scatter and cutting activation memory by ~the TP degree with no added comm volume — the standard companion to TP.",
+        "Context parallelism shards the sequence across CP ranks; because each query must attend to all keys, ring attention (Liu et al. 2023) passes KV blocks around a ring, overlapping the communication with the block-wise attention compute (or all-gathers KV directly).",
+        "Causal load balancing: a naive contiguous sequence split makes later ranks do more attention work under the causal mask, so zigzag/striped token assignment rebalances the per-rank cost.",
+        "Numbers: unfused attention activation memory scales ~O(seq^2) per layer, which CP (and FlashAttention's block-wise recompute) tames; CP degree multiplies the trainable context length toward 100k-1M tokens.",
+        "CP composes with FlashAttention (both are block-wise online-softmax) and with TP/SP, but the device-mesh ordering matters.",
+        "Failure modes: CP communication becoming the bottleneck when not overlapped; causal load imbalance; correctness bugs in the online-softmax rescaling across ring steps; RoPE position bookkeeping across shards."
+      ],
+      "links": [
+        "Concept - Tensor and Pipeline Parallelism",
+        "Deep Dive - FlashAttention",
+        "Concept - Attention Mechanism",
+        "Reference - Parallelism Strategies",
+        "Pattern - 3D Parallelism Composition",
+        "Concept - Rotary Position Embeddings (RoPE)"
+      ]
+    },
+    {
+      "title": "Concept - Expert Parallelism",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Distributing MoE experts across devices and the all-to-all communication it requires. IN: the dispatch/combine all-to-all, all-to-all bottlenecks and node-limited routing, load imbalance and stragglers, composition with other parallelism dimensions. OUT: MoE architecture (link 03) and the load-balancing losses (link Concept - MoE Training and Load Balancing).",
+      "key_points": [
+        "Expert parallelism places different experts on different GPUs; each MoE layer needs two all-to-all collectives — dispatch tokens to their expert's device and combine the results back — with comm volume proportional to tokens x hidden x top-k.",
+        "All-to-all is latency- and bandwidth-sensitive, and cross-node all-to-all over InfiniBand is the dominant MoE overhead; DeepSeek-V3 caps it with node-limited routing (a token's experts span <= M nodes) plus DualPipe overlap and custom communication kernels.",
+        "Load imbalance creates stragglers: an overloaded expert's device stalls the all-to-all barrier for everyone, so capacity dropping bounds worst-case load and couples training-time balance directly to systems efficiency.",
+        "Composition: EP is orthogonal to DP/TP/PP and is often combined as EP x DP over the expert dimension; grouped GEMM / MegaBlocks enables dropless expert compute; the all-to-all should be overlapped with the expert GEMM.",
+        "Numbers: DeepSeek-V3 (671B total / 37B active, 1 shared + 8-of-256 routed) runs EP across many GPUs with all-to-all consuming a meaningful fraction of step time.",
+        "Failure modes: all-to-all hangs/deadlocks, straggler stalls from imbalance, silent token dropping under capacity, EP+PP scheduling interactions, and NCCL all-to-all tuning on the specific fabric."
+      ],
+      "links": [
+        "Concept - MoE Training and Load Balancing",
+        "Concept - Mixture of Experts Architecture",
+        "Breakdown - DeepSeek-V3 Training",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Reference - Parallelism Strategies",
+        "Concept - All-Reduce and Collective Operations"
+      ]
+    },
+    {
+      "title": "Pattern - 3D Parallelism Composition",
+      "type": "pattern",
+      "level": "advanced",
+      "scope": "How to compose DP x TP x PP (and EP/CP) into a coherent device layout. IN: the world-size factorization, placement/ordering rules mapped to physical topology, DeviceMesh, memory/comm reasoning, and microbatch interaction. OUT: each dimension's internal mechanism (own concept notes); this is the composition design pattern.",
+      "key_points": [
+        "Problem: no single parallelism scales alone — DP hits a memory wall, TP hits the interconnect, PP hits the bubble — so the pattern factors world = DP x TP x PP x CP x EP and maps each factor onto the hardware topology.",
+        "Placement forces: TP needs the fastest link (NVLink, intra-node, degree <= 8); PP tolerates slow links (point-to-point activations, inter-node); DP is outermost (all-reduce, bandwidth-tolerant with overlap); CP handles long sequences; EP is orthogonal on the expert dimension.",
+        "DeviceMesh (PyTorch/Megatron): assign ranks so TP groups are intra-node, then compute per-GPU memory ~= sharded_states/(DP*shard) + activations/(TP*CP*PP), and set microbatch count m >= ~4x pipeline depth to amortize the bubble.",
+        "Known uses: Megatron-LM (Narayanan et al. 2021, 'Efficient Large-Scale LM Training on GPU Clusters'), DeepSpeed 3D, TorchTitan (FSDP2 + TP + PP), and DeepSeek-V3 (DP + EP + PP DualPipe).",
+        "Tradeoffs: more TP lowers per-GPU memory but raises comm and drops MFU past a node boundary; more PP is comm-cheap but adds bubble and activation memory; the search is a small grid guided by these rules, not brute force.",
+        "Failure modes: TP spanning nodes (MFU collapse), too few microbatches (huge bubble), mesh ordering mismatched to the fabric, and forgetting activation memory in the per-GPU budget."
+      ],
+      "links": [
+        "Concept - Tensor and Pipeline Parallelism",
+        "Concept - Data Parallelism and ZeRO",
+        "Concept - Fully Sharded Data Parallel (FSDP)",
+        "Concept - Expert Parallelism",
+        "Concept - Sequence and Context Parallelism",
+        "Decision - Choosing a Parallelism Strategy",
+        "Concept - GPU Memory Hierarchy",
+        "The Roofline Model"
+      ]
+    },
+    {
+      "title": "Concept - Critical Batch Size",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The gradient-noise-scale theory of batch size and its consequences for LLM pretraining. IN: the noise scale, diminishing returns past the critical batch, LR/batch coupling, batch-size ramping, the compute-vs-wall-clock Pareto. OUT: gradient-accumulation mechanics (link Concept - Gradient Accumulation and Microbatching), LR schedule shapes (link Concept - Learning Rate Schedules for Pretraining).",
+      "key_points": [
+        "The gradient noise scale B_noise ~= tr(H*Sigma)/(g^T H g) (approximated in practice via the ratio of gradient variance to gradient magnitude) marks where larger batches stop buying linear step-count speedups.",
+        "McCandlish, Kaplan et al. 2018 ('An Empirical Model of Large-Batch Training'): the critical batch grows during training (as the loss falls, the noise scale rises), so late training tolerates larger batches — motivating batch-size warmup (GPT-3 ramped from 32k to 3.2M tokens).",
+        "LR/batch coupling: the linear scaling rule holds for small batches, while Adam at large batch scales roughly as sqrt; the peak LR must track the batch size or the extra samples are wasted (or the run diverges).",
+        "Numbers: GPT-3's final batch was 3.2M tokens, PaLM ~1-4M; below the critical batch you are compute-efficient but slow, above it you are fast but burning compute for little per-step gain.",
+        "Failure modes: running far above the critical batch to fill a large cluster wastes compute (a common utilization trap); running far below it starves MFU; ramping the batch too fast triggers early instability.",
+        "Non-obvious: the 'right' batch depends on whether you optimize wall-clock or total compute, and the critical batch is a moving target you can deliberately exploit with a batch-size schedule."
+      ],
+      "links": [
+        "Concept - Gradient Accumulation and Microbatching",
+        "Concept - Learning Rate Schedules for Pretraining",
+        "Concept - Scaling Laws",
+        "Concept - AdamW at Scale",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "The Roofline Model"
+      ]
+    },
+    {
+      "title": "Concept - Training Stability and Loss Spikes",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The mechanisms behind pretraining instabilities and the interventions that tame them. IN: spike anatomy, qk-norm, embedding/logit control, beta2/LR/clip levers, precision effects, and the rewind-skip-lower-LR recovery. OUT: z-loss/soft-cap output tricks in depth (link Concept - z-loss and Logit Soft-Capping), the war stories (link Lore - The Loss Spike Chronicles), float-format basics (link 01).",
+      "key_points": [
+        "Spike anatomy: the gradient norm blows up, the loss jumps, and the run either self-recovers or diverges; spikes correlate with attention-logit growth, layernorm-gain growth, and occasionally a specific data batch.",
+        "Known stabilizers: qk-layernorm (normalize Q and K before attention — Dehghani et al. 2023 ViT-22B, OLMo-2), z-loss on the output softmax (PaLM, coeff ~1e-4), embedding-LR/embedding-norm control, lower beta2 (0.95), tighter gradient clipping, and pre-norm/residual-scaling choices.",
+        "Root causes: bf16 rounding accumulation over depth, attention entropy collapse (logits grow, softmax saturates), dead or exploding experts in MoE, garbage/repeated data, too-high LR after warmup, and un-normalized embeddings.",
+        "Recovery playbook: rewind to a pre-spike checkpoint, skip the offending data batches, temporarily lower the LR, then resume — the recipe used across OPT-175B, PaLM, and GLM-130B.",
+        "Numbers: spikes grow more frequent at larger scale and lower precision; GLM-130B used embedding-gradient shrink; PaLM documented ~20 spikes and the skip-batches-on-restart fix.",
+        "Failure modes: distinguishing a sharp optimizer/data spike from slow bf16 divergence, and from a hardware ECC/NaN masquerading as an optimization spike; over-clipping can hide a real data problem instead of fixing it."
+      ],
+      "links": [
+        "Concept - z-loss and Logit Soft-Capping",
+        "Lore - The Loss Spike Chronicles",
+        "Concept - Mixed Precision Training",
+        "Concept - AdamW at Scale",
+        "Concept - RMSNorm and LayerNorm",
+        "Playbook - Debugging a Diverging Training Run",
+        "Concept - MoE Training and Load Balancing",
+        "Lore - The OPT-175B Logbook"
+      ]
+    },
+    {
+      "title": "Concept - Distributed Checkpointing",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Saving and loading sharded model+optimizer state at scale. IN: sharded vs consolidated checkpoints, asynchronous checkpointing, full resumability (RNG/dataloader), reshard-on-load, and the checkpoint-interval math. OUT: the parallelism that produces the shards (own notes), storage hardware (link 08).",
+      "key_points": [
+        "The problem: a 405B run's fp32 optimizer state is multiple TB, so each rank saves only its own shard (torch.distributed.checkpoint / DCP, or Megatron/DeepSpeed formats); consolidating shards into a single file is a separate offline step.",
+        "Async checkpointing copies state to pinned CPU memory and writes it in a background thread, so training stalls for seconds rather than minutes; DCP's async_save overlaps the write with subsequent compute.",
+        "Resumability needs more than weights: optimizer moments, the LR-scheduler step, the dataloader position and shuffle seed, RNG states, and tokens-seen — omitting any produces a discontinuity spike or re-exposes data.",
+        "Reshard-on-load: loading a TP=8/PP=16 checkpoint into a different mesh (for continued pretraining or fine-tuning) requires resharding, which DTensor/DCP handle but naive flat checkpoints do not.",
+        "Numbers: the optimal checkpoint interval balances write cost against lost work on failure (Young/Daly: interval ~= sqrt(2 * MTBF * checkpoint_time)); at 16k GPUs with failures every few hours this drives frequent checkpoints.",
+        "Failure modes: a corrupted/partial checkpoint from a crash mid-write (needs atomic rename plus keep-last-N), missing RNG/dataloader state, OOM during consolidation, and slow storage bottlenecking the entire cluster during a save."
+      ],
+      "links": [
+        "Concept - Fully Sharded Data Parallel (FSDP)",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Checklist - Pre-Launch for a Large Training Run",
+        "Gotchas - Distributed Training",
+        "Concept - GPU Memory Hierarchy"
+      ]
+    },
+    {
+      "title": "Concept - FP8 Training",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Training in 8-bit floating point. IN: the E4M3/E5M2 formats, per-tensor/per-block scaling, delayed scaling, which tensors stay high-precision, fp32 accumulation, and the DeepSeek-V3 fine-grained recipe. OUT: fp8 for inference/quantization (link 07), float-format fundamentals (link 01), tensor-core hardware (link 08).",
+      "key_points": [
+        "Formats (Micikevicius et al. 2022, OCP FP8): E4M3 (more mantissa, range ~+/-448) for forward activations/weights and E5M2 (more range) for gradients; Hopper/Blackwell tensor cores run fp8 matmuls ~2x faster than bf16.",
+        "Scaling is everything because fp8's dynamic range is tiny: per-tensor scale factors, with delayed scaling (reuse an amax history from prior steps) vs current-tensor amax; DeepSeek-V3 uses fine-grained per-tile (1x128) and per-block (128x128) scaling to bound quantization error.",
+        "What stays high precision: fp32 master weights and optimizer states, layernorm, and softmax; critically, the fp8 matmul must accumulate in fp32 — Hopper tensor cores accumulate at reduced precision, so DeepSeek added an fp32 accumulation path via CUDA cores.",
+        "Numbers: DeepSeek-V3 was the first production-scale fp8-pretrained LLM (~2.788M H800 hours), running most GEMMs in fp8 with sensitive parts in bf16/fp32 and reaching near-bf16 loss with large throughput and memory wins.",
+        "Failure modes: an amax spike blowing the scale (overflow/underflow), reduced-precision accumulation error compounding over depth, sensitive layers (embeddings, output, first/last blocks) needing bf16, and calibration drift between the forward and backward passes.",
+        "Non-obvious: fp8 pretraining was folklore-unstable until per-block scaling plus fp32 accumulation made it production-viable in 2024-2025, and it is now the frontier cost default."
+      ],
+      "links": [
+        "Concept - Mixed Precision Training",
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Tensor Cores",
+        "Breakdown - DeepSeek-V3 Training",
+        "Concept - Post-Training Quantization Formats",
+        "Concept - Training Stability and Loss Spikes"
+      ]
+    },
+    {
+      "title": "Decision - Choosing a Parallelism Strategy",
+      "type": "decision",
+      "level": "advanced",
+      "scope": "A framework for picking parallelism degrees given model size, GPU count/HBM, interconnect, and context length. IN: the default decision flow, the inputs that drive it, a tradeoff matrix with numbers, flip conditions, and worked examples. OUT: the mechanics of each strategy (own concept notes) and the memory formulas (link 08 Reference).",
+      "key_points": [
+        "Default (80% case): if the model+states fit in one node, use FSDP/ZeRO alone; if too big for a node, add TP within the node (degree <= 8) plus FSDP across nodes; for very deep models on many nodes, add PP; for MoE add EP; for long context add CP.",
+        "Decision inputs: model params and optimizer bytes vs total HBM; intra- vs inter-node bandwidth (NVLink ~900 GB/s vs InfiniBand ~400 Gb/s); sequence length; dense vs MoE; and the GPU count.",
+        "Tradeoff matrix (strategy x memory-saved, comm-cost, MFU-impact, complexity) with numbers: TP kills MFU past a node boundary, PP adds bubble, ZeRO-3/FSDP adds ~1.5x comm, CP is for sequences beyond ~32k.",
+        "Flip conditions: a slow interconnect argues against TP (prefer PP + ZeRO); abundant NVLink (GB200 NVL72) makes higher TP viable; a tiny cluster may need ZeRO-Offload; inference-latency-driven shape choices differ from training-optimal ones.",
+        "Worked examples: 7B on 8xH100 (FSDP); 70B on 64 GPUs (FSDP + TP8); 405B on 16k (DP + TP8 + PP16 + SP); 671B MoE (DP + EP + PP DualPipe).",
+        "Failure modes: over-parallelizing a model that already fits (needless comm), placing TP across nodes, ignoring activation memory in the budget, and leaving no headroom for allocator fragmentation."
+      ],
+      "links": [
+        "Reference - Parallelism Strategies",
+        "Pattern - 3D Parallelism Composition",
+        "Concept - Data Parallelism and ZeRO",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Concept - Expert Parallelism",
+        "Reference - Memory Math for Transformers",
+        "Concept - GPU Memory Hierarchy",
+        "Deep Dive - Anatomy of a Pretraining Run"
+      ]
+    },
+    {
+      "title": "Breakdown - Megatron-LM",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "How NVIDIA's Megatron-LM implements large-scale transformer training and set the throughput standard. IN: its tensor parallelism (f/g operators), sequence parallelism, selective recompute, interleaved pipeline, and fused kernels. OUT: general parallelism theory (own concept notes); this reverse-engineers the specific framework.",
+      "key_points": [
+        "Headline: Narayanan et al. 2021 demonstrated ~1T-parameter training at ~52% MFU on 3072 A100s; Megatron-Core is the de-facto reference many labs fork.",
+        "Tensor parallelism design: column-parallel then row-parallel linears so each transformer block needs exactly two all-reduces in forward and two in backward, expressed as the conjugate f and g operators (f = identity fwd / all-reduce bwd, g = all-reduce fwd / identity bwd); attention is split by heads.",
+        "Sequence parallelism (Korthikanti et al. 2022) shards the TP-replicated norm/dropout regions along sequence to cut activation memory; selective activation recomputation recomputes only the attention block (the cheap-to-recompute, memory-heavy part) rather than everything.",
+        "The interleaved (virtual) pipeline schedule assigns multiple non-contiguous stages per device to shrink the bubble; a ZeRO-1-style distributed optimizer shards Adam state; PP point-to-point overlaps with DP all-reduce.",
+        "Clever parts: fused kernels (bias+GeLU, scaled masked softmax), the exact selective-recompute policy, the mesh mapping that keeps TP intra-node, and gradient-accumulation fusion.",
+        "What's dated / what to steal: FlatParameter-style sharding is being superseded by DTensor/FSDP2, but the f/g operator design, selective recomputation, and interleaved schedule remain the things to steal."
+      ],
+      "links": [
+        "Concept - Tensor and Pipeline Parallelism",
+        "Concept - Sequence and Context Parallelism",
+        "Pattern - 3D Parallelism Composition",
+        "Concept - Data Parallelism and ZeRO",
+        "Deep Dive - FlashAttention",
+        "Concept - All-Reduce and Collective Operations",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Concept - Tensor Cores"
+      ]
+    },
+    {
+      "title": "Snippet - FSDP Minimal Setup",
+      "type": "snippet",
+      "level": "advanced",
+      "scope": "A minimal runnable PyTorch FSDP2 (fully_shard) training step with per-block wrapping, mixed precision (bf16 compute, fp32 reduce), and activation checkpointing. OUT: FSDP internals (link Concept - Fully Sharded Data Parallel (FSDP)) and multi-node launch/topology (link 08).",
+      "key_points": [
+        "Show fully_shard (FSDP2) applied per transformer block and then to the root module, a MixedPrecisionPolicy(param_dtype=bf16, reduce_dtype=fp32), and a DeviceMesh for the DP dimension.",
+        "Include the training step (forward, loss, backward, optimizer.step) noting that FSDP handles all-gather/reduce-scatter transparently, plus the torchrun launch line.",
+        "Wrap blocks with checkpoint_wrapper for activation checkpointing and note the compute-for-memory trade.",
+        "Why-it's-written: wrap per block (not the whole model) so all-gather overlaps compute; reduce in fp32 to avoid gradient-precision loss at scale; apply sharding before torch.compile; save with DCP (sharded) rather than a full state_dict.",
+        "Expected output: per-step loss decreasing on a toy batch and ~1/N peak memory versus a single-GPU baseline."
+      ],
+      "links": [
+        "Concept - Fully Sharded Data Parallel (FSDP)",
+        "Concept - Data Parallelism and ZeRO",
+        "Concept - Distributed Checkpointing",
+        "Concept - Mixed Precision Training",
+        "Gotchas - Distributed Training"
+      ]
+    },
+    {
+      "title": "Checklist - Pre-Launch for a Large Training Run",
+      "type": "checklist",
+      "level": "advanced",
+      "scope": "The pre-flight verification before committing thousands of GPU-hours. IN: config/sizing sanity, numerics, data, checkpoint/restart, observability, and a short canary run. OUT: the run-time debugging procedure (link Playbook - Debugging a Diverging Training Run).",
+      "key_points": [
+        "Config/sizing group: token budget vs Chinchilla/overtraining target; global-batch and grad-accum arithmetic; LR-schedule total steps match the token budget; parallelism degrees multiply to world size; weight decay excluded from norms and embeddings.",
+        "Numerics group: bf16 vs fp8 decision made; reduce dtype fp32; loss/softmax/norm computed in fp32; gradient clip set; z-loss/qk-norm enabled if the architecture/history warrants.",
+        "Data group: shards enumerated and shuffled; packing/attention-reset masks verified; no eval-set contamination (link 13); dataloader resumable; BOS/EOS/pad handling checked.",
+        "Checkpoint/restart group: async checkpoint tested; a restart-from-checkpoint reproduces the loss exactly (RNG + dataloader state restored); atomic write with keep-last-N retention.",
+        "Observability group: loss/grad-norm/LR/MFU/tokens-seen dashboards; NaN/inf alerts; per-rank health; ETA and cost tracking.",
+        "Canary: run 500-2000 steps at the target config, confirm the MFU target (40-55%), no spike, and that checkpoint+resume works, before scaling up. Each 'why' item ties to a real incident (wrong remaining-steps on resume, a contaminated shard, a bf16-reduce divergence)."
+      ],
+      "links": [
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Playbook - Debugging a Diverging Training Run",
+        "Concept - Distributed Checkpointing",
+        "Concept - Training Stability and Loss Spikes",
+        "Concept - Mixed Precision Training",
+        "Concept - Benchmark Contamination",
+        "Gotchas - Distributed Training"
+      ]
+    },
+    {
+      "title": "Gotchas - Distributed Training",
+      "type": "gotchas",
+      "level": "advanced",
+      "scope": "The pitfalls of multi-GPU/multi-node training, ordered by pain. IN: NCCL hangs from collective mismatch, silent gradient desync, non-determinism, uneven data shards, and rank/mesh/env misconfiguration. OUT: single-GPU numeric issues (link Concept - Training Stability and Loss Spikes) and collective internals (link 08).",
+      "key_points": [
+        "NCCL hang on collective mismatch: one rank takes a data-dependent code path and issues a different number of collectives, so the job hangs until timeout. Detection: NCCL_DEBUG, the collated watchdog, and TORCH_NCCL_ASYNC_ERROR_HANDLING; fix: make control flow rank-invariant.",
+        "Silent gradient desync: a subtle bug (different dropout seed, an unsynced buffer, a missed all-reduce) lets ranks drift apart while training appears fine. Detection: periodically all-reduce a parameter checksum and assert equality.",
+        "Non-determinism: per-rank dataloader worker seeding, nondeterministic cuDNN kernels, and atomic reductions break reproducibility; deterministic mode plus per-rank seeded RNG fixes it at a throughput cost.",
+        "Uneven shards / last batch: unequal samples per rank deadlock DDP when one rank finishes early; use drop_last or the Join context, and DistributedSampler.set_epoch for correct reshuffling.",
+        "Rank/mesh/env misconfig: wrong WORLD_SIZE/RANK/LOCAL_RANK/MASTER_ADDR, a TP group that is not intra-node (silent MFU collapse), or mismatched CUDA/NCCL versions across nodes.",
+        "Each gotcha follows symptom -> cause -> fix -> detection, with hangs listed first because they burn the most wall-clock before anyone notices."
+      ],
+      "links": [
+        "Concept - Data Parallelism and ZeRO",
+        "Concept - All-Reduce and Collective Operations",
+        "Concept - Fully Sharded Data Parallel (FSDP)",
+        "Playbook - Debugging a Diverging Training Run",
+        "Concept - Distributed Checkpointing",
+        "Pattern - 3D Parallelism Composition"
+      ]
+    },
+    {
+      "title": "Concept - muP and Hyperparameter Transfer",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Maximal Update Parametrization (muP) and hyperparameter transfer from a small proxy to a large target. IN: the width-invariance the parametrization enforces, the specific scaling rules, the coordinate check, muTransfer in practice, depth-transfer caveats. OUT: standard init/LR (link 02), scaling laws for loss (link Concept - Scaling Laws).",
+      "key_points": [
+        "The problem muP solves: under standard parametrization the optimal LR shifts with model width, forcing a re-tune per size; muP makes activations and updates width-invariant so the LR (and other HPs) transfer unchanged.",
+        "Mechanism (Yang & Hu 2021, 'Tensor Programs V'): scale initialization variance and per-layer LR by fan-in factors, use 1/width attention-logit scaling (instead of 1/sqrt(d)), and scale output logits by 1/width; input, hidden, and output layers get different treatments.",
+        "Coordinate check: verify that activation coordinate magnitudes stay O(1) across widths at init and after a few steps — the empirical test that a muP implementation is correct.",
+        "In practice (muTransfer): tune LR/betas/init on a narrow proxy (e.g., width 256) and transfer to the full model; used by Cerebras-GPT and MiniCPM publicly, and reportedly for GPT-4-scale HP search, saving enormous tuning compute.",
+        "Numbers: LRs that transfer across 10-100x width; the specific multipliers (embedding LR, 1/d attention scaling); width transfer is solid, depth transfer is newer and shakier (depth-muP).",
+        "Failure modes: a partial/incorrect muP (some rules applied, not all) is worse than none; a silently failing coordinate check; interactions with weight decay and warmup; and schedules/depth that do not transfer."
+      ],
+      "links": [
+        "Concept - Learning Rate Schedules for Pretraining",
+        "Concept - Scaling Laws",
+        "Snippet - muP Coordinate Check",
+        "Concept - AdamW at Scale",
+        "Concept - Backpropagation",
+        "Reference - LLM Pretraining Hyperparameters",
+        "Concept - RMSNorm and LayerNorm"
+      ]
+    },
+    {
+      "title": "Concept - Data-Constrained Scaling Laws",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Scaling when unique data runs out. IN: repeating data (multi-epoch value decay), the reformulated law with a repetition-decay term, and the params-vs-repeats tradeoff under a fixed data budget. OUT: the compute-optimal Chinchilla law (link Concept - Scaling Laws), data curation/mixing (link 05).",
+      "key_points": [
+        "Muennighoff et al. 2023 ('Scaling Data-Constrained Language Models'): repeating data up to ~4 epochs is nearly as valuable as fresh data; beyond ~4 epochs the marginal value decays fast, and by ~16 epochs added repeats are near-worthless.",
+        "The law is reformulated with a decay term so repeated tokens count as an effective data volume below their nominal count; when data-bound, extra compute is better spent on parameters than on more repeats.",
+        "Practical levers under a data limit: repeat (<= ~4 epochs), add code/synthetic data (link 05), spend compute on params, or up-weight scarce high-quality data during the LR-decay phase.",
+        "Numbers: Chinchilla's 20 tokens/param assumes unique data; frontier runs at 15T+ tokens are exhausting high-quality web text, so repetition plus synthetic data are increasingly necessary as of 2026.",
+        "Failure modes: over-repeating drives memorization/overfitting and benchmark-contamination risk (link 13); conflating tokens-seen with unique-tokens; and repetition interacting badly with weak deduplication (link 05).",
+        "Non-obvious: this is the mechanistic reason the field pivoted to synthetic data and aggressive dedup — the data wall, not compute, is the binding constraint for frontier pretraining."
+      ],
+      "links": [
+        "Concept - Scaling Laws",
+        "Concept - Data Mixtures",
+        "Concept - Deduplication at Scale",
+        "Concept - Synthetic Training Data",
+        "Concept - Benchmark Contamination",
+        "Deep Dive - Anatomy of a Pretraining Run"
+      ]
+    },
+    {
+      "title": "Concept - Muon Optimizer",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The Muon optimizer: orthogonalizing momentum updates via Newton-Schulz iteration for 2D parameters. IN: the mechanism, why it helps, the Newton-Schulz coefficients and LR coupling, and its scale-up (Moonlight/Kimi). OUT: Adam/AdamW (link Concept - AdamW at Scale, 02) and other second-order methods (link Concept - Second-Order Optimizers at Scale).",
+      "key_points": [
+        "Mechanism (Jordan et al. 2024): for 2D weight matrices, take the momentum buffer and replace it with its nearest orthogonal matrix via a few Newton-Schulz iterations (approximating UV^T from the SVD), giving spectral-norm-controlled updates; embeddings, norms, and 1D params still use AdamW.",
+        "Why it works: it equalizes the update magnitude across singular directions (a cheap whitening/Shampoo-like effect) without storing a preconditioner, reporting ~2x compute-efficiency at small scale.",
+        "Practical details: it couples to weight decay and a per-matrix LR, needs a scale adjustment relative to AdamW's LR, uses quintic Newton-Schulz coefficients with ~5 iterations, and handles non-square matrices by orienting the iteration.",
+        "Numbers: Moonlight (Kimi, ~16B MoE, 2025) trained at scale with Muon, reporting ~2x token-efficiency and memory savings versus Adam (no second-moment buffer for 2D params, just momentum).",
+        "Failure modes: applying Muon to embeddings/output/1D params (breaks it), wrong LR scaling versus AdamW, Newton-Schulz instability from too few iterations or bad input scaling, and distributed orthogonalization across sharded matrices.",
+        "Non-obvious: Muon is a 2024-2025 frontier result still being validated at true frontier scale — promising, not yet the settled default; watch for scale-up caveats."
+      ],
+      "links": [
+        "Concept - AdamW at Scale",
+        "Concept - Second-Order Optimizers at Scale",
+        "Concept - Adam and AdamW",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Reference - LLM Pretraining Hyperparameters",
+        "Concept - Learning Rate Schedules for Pretraining"
+      ]
+    },
+    {
+      "title": "Concept - Second-Order Optimizers at Scale",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Preconditioned and sign-based optimizers for LLM training. IN: Shampoo/distributed Shampoo, SOAP, and Lion — their preconditioners/updates, memory and compute cost, and where they beat AdamW. OUT: AdamW engineering (link Concept - AdamW at Scale), Muon specifically (link Concept - Muon Optimizer).",
+      "key_points": [
+        "Shampoo (Gupta et al. 2018): a per-layer Kronecker-factored preconditioner (left L and right R factors for a weight matrix) with update L^(-1/4) G R^(-1/4), capturing curvature Adam ignores; distributed Shampoo (Anil et al. 2020) amortizes the inverse-root across steps and shards the factors.",
+        "SOAP (Vyas et al. 2024) runs Adam inside Shampoo's eigenbasis, combining Shampoo's preconditioner with Adam's cheap per-step update and fewer hyperparameters, competitive on wall-clock.",
+        "Lion (Chen et al. 2023, found by symbolic search): the sign of an interpolated momentum, so it stores one buffer (half of Adam's state), but needs a smaller LR (~3-10x) and larger weight decay; it sometimes matches AdamW and sometimes underperforms at scale.",
+        "Cost/benefit: Shampoo's preconditioner matmuls and inverse-roots add ~10-40% overhead plus extra memory (L, R per layer) but can cut steps-to-target — it won an MLCommons AlgoPerf training-algorithm track and is used in some Google production runs.",
+        "Numbers: the preconditioner is refreshed only every ~100+ steps, large matrices are blocked, and the eigh/inverse-root cost is the main overhead; Lion's memory is half of Adam's.",
+        "Failure modes: Shampoo numerical issues in the inverse-root (needs fp32/damping), block-size vs accuracy tradeoffs, Lion's LR/wd retuning (a naive Adam LR diverges), and stale preconditioners."
+      ],
+      "links": [
+        "Concept - AdamW at Scale",
+        "Concept - Muon Optimizer",
+        "Concept - Adam and AdamW",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Reference - LLM Pretraining Hyperparameters",
+        "Concept - Training Stability and Loss Spikes"
+      ]
+    },
+    {
+      "title": "Breakdown - DeepSeek-V3 Training",
+      "type": "breakdown",
+      "level": "frontier",
+      "scope": "How DeepSeek-V3 was trained so cheaply. IN: fp8 pretraining, aux-loss-free MoE, DualPipe, Multi-Token Prediction, and the co-designed systems stack. OUT: MoE architecture generalities (link 03) and inference-time MLA/serving (link 07).",
+      "key_points": [
+        "Headline: 671B total / 37B active MoE, 14.8T tokens, ~2.788M H800 GPU-hours (~$5.6M in compute) at near-frontier quality — the efficiency shock of late 2024.",
+        "FP8 training: fine-grained per-tile and per-block scaling plus fp32 accumulation via CUDA cores (working around Hopper's reduced-precision tensor-core accumulation), with most GEMMs in fp8 and sensitive parts in bf16/fp32.",
+        "Aux-loss-free load balancing: a per-expert bias adjusted by a controller instead of an auxiliary loss that fights the LM objective, plus a small sequence-wise balance term; 256 routed + 1 shared expert, top-8, with node-limited routing.",
+        "DualPipe: a bidirectional pipeline schedule that overlaps forward and backward across the pipeline to nearly eliminate the bubble and overlaps all-to-all EP communication with compute, using custom low-level communication kernels.",
+        "Multi-Token Prediction (MTP): auxiliary heads predict several future tokens during training for a denser signal and better representations, and the same heads enable speculative decoding at inference.",
+        "What to steal / what's dated: the fp8 recipe, aux-loss-free routing, and hardware-co-designed comm; caveats are that the H800's constrained interconnect shaped the design and reproducibility leans on their infra tricks."
+      ],
+      "links": [
+        "Concept - FP8 Training",
+        "Concept - MoE Training and Load Balancing",
+        "Concept - Expert Parallelism",
+        "Concept - Mixture of Experts Architecture",
+        "Concept - Tensor and Pipeline Parallelism",
+        "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)",
+        "Concept - Speculative Decoding",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Concept - Tensor Cores",
+        "Concept - Knowledge Distillation"
+      ]
+    },
+    {
+      "title": "Snippet - muP Coordinate Check",
+      "type": "snippet",
+      "level": "frontier",
+      "scope": "Runnable code that verifies a muP implementation by measuring activation coordinate magnitudes across model widths at init and after a few steps. OUT: the muP theory itself (link Concept - muP and Hyperparameter Transfer).",
+      "key_points": [
+        "Build the same model at several widths (e.g., 128/256/512/1024), apply muP scaling (init variance, per-layer LR, output multiplier), and run a few optimizer steps on a fixed batch and seed.",
+        "Record the mean absolute activation per layer per width; a correct muP keeps these ~constant across width (flat lines), while standard parametrization shows systematic growth or shrinkage with width.",
+        "Why-it's-written: the coordinate check is the only reliable catch for a broken muP (a single wrong multiplier passes unit tests but fails here); measure at step 0 and step ~5 (both matter); hold data and seed identical across widths so width is the only variable.",
+        "Expected output: a table or plot where muP curves overlap across widths and standard-parametrization curves fan out, giving a clear pass/fail read on the implementation."
+      ],
+      "links": [
+        "Concept - muP and Hyperparameter Transfer",
+        "Concept - AdamW at Scale",
+        "Concept - Learning Rate Schedules for Pretraining",
+        "Concept - Backpropagation"
+      ]
+    },
+    {
+      "title": "Gotchas - Tokenizers",
+      "type": "gotchas",
+      "level": "unicorn",
+      "scope": "Tokenizer pitfalls that silently corrupt training and eval, ordered by pain. IN: add-token/embedding-resize traps, train/inference normalization drift, double-BOS, digit handling, undertrained/glitch tokens, and encoding non-invertibility. OUT: glitch-token phenomenology (link 18 Lore - Glitch Tokens) and the training procedure (link Concept - Tokenizer Training).",
+      "key_points": [
+        "Add-token trap: appending special tokens after pretraining without resizing and initializing the embedding + unembedding (and retraining) yields garbage logits or index errors, because the new tokens have random embeddings the model never learned.",
+        "Train/inference normalization drift: a mismatch in NFKC, whitespace, or add_prefix_space between tokenizer training and serving silently re-tokenizes text and degrades quality; the classic double-BOS bug is a chat template and the tokenizer both prepending BOS.",
+        "Digit tokenization: grouping digits (GPT-4 groups up to three) versus splitting them (Llama, single digits) changes arithmetic ability, and left-to-right vs right-to-left chunking creates artifacts.",
+        "Undertrained/glitch tokens: tokens present in the vocab but nearly absent from training data (e.g., scraped usernames like ' SolidGoldMagikarp') keep near-random embeddings and trigger bizarre behavior; detect with an embedding-norm histogram (link 18).",
+        "Encoding edge cases: byte-level round-trips on invalid UTF-8, a partial multibyte sequence at a truncation boundary, and trailing-whitespace merges; changing the tokenizer silently invalidates prior eval comparisons.",
+        "Each gotcha follows symptom -> cause -> fix -> detection (e.g., assert re-encode(decode(x)) == x as a round-trip guard)."
+      ],
+      "links": [
+        "Concept - Tokenizer Training",
+        "Concept - Byte-Pair Encoding",
+        "Lore - Glitch Tokens",
+        "Concept - Pretraining Objectives",
+        "Concept - Benchmark Contamination",
+        "Snippet - Training a BPE Tokenizer"
+      ]
+    },
+    {
+      "title": "Lore - The Loss Spike Chronicles",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The war stories of pretraining instabilities across public runs and the folklore fixes they produced. IN: OPT-175B, PaLM, GLM-130B, and BLOOM spike accounts, the recover-and-skip recipe, and the mechanistic lesson. OUT: the stabilizer mechanisms in depth (link Concept - Training Stability and Loss Spikes) and the OPT logbook as history (link 19 Lore - The OPT-175B Logbook).",
+      "key_points": [
+        "OPT-175B (Zhang et al. 2022): the logbook's litany of hardware failures, loss divergences, LR lowerings, and fp16 loss-scale battles — the canonical honest account; here the focus is the spike-and-recover tactics, with the fuller history linked to 19.",
+        "PaLM (Chowdhery et al. 2022): ~20 loss spikes where no single bad batch was the culprit — restarting ~100 steps before the spike and skipping those batches avoided it, yet the same data trained fine later, showing spikes are an optimizer-state x data interaction, not just 'bad data'.",
+        "GLM-130B (Zeng et al. 2022): attributed instability to embedding-layer gradient growth and attention-softmax blow-up, and fixed it with embedding-gradient shrink and DeepNorm; it also documented fp16-vs-bf16 pain on non-NVIDIA hardware.",
+        "BLOOM / Megatron folklore: the 'restart, skip, lower LR' recipe entered common practice, and bf16 was adopted specifically to escape fp16 loss-scale collapse; qk-norm and z-loss became standard because of these episodes.",
+        "The mechanical lesson: a spike is where the second-moment estimate is stale relative to a sudden gradient direction, so lowering beta2, clipping, warmup, and skipping the batch each address a different part — the field's stabilizers are scar tissue from these runs.",
+        "Evidence status: the OPT logbook is verified/published; the PaLM and GLM accounts are well-sourced from their papers; the exact folklore recipes are well-sourced practitioner lore."
+      ],
+      "links": [
+        "Concept - Training Stability and Loss Spikes",
+        "Lore - The OPT-175B Logbook",
+        "Concept - Mixed Precision Training",
+        "Concept - AdamW at Scale",
+        "Concept - z-loss and Logit Soft-Capping",
+        "Playbook - Debugging a Diverging Training Run"
+      ]
+    },
+    {
+      "title": "Playbook - Debugging a Diverging Training Run",
+      "type": "playbook",
+      "level": "unicorn",
+      "scope": "The operational procedure when a live run's loss spikes, diverges, or NaNs. IN: triage, isolating data vs optimizer vs hardware vs numerics, and the recover-or-restart decision. OUT: the underlying stabilizer mechanisms (link Concept - Training Stability and Loss Spikes).",
+      "key_points": [
+        "Step 1 triage: classify the event — a sharp spike (optimizer/data), slow drift (numerics/bf16), or a NaN at a specific step (hardware ECC / bad tensor) — by reading grad-norm, loss, and per-rank health first.",
+        "Step 2 isolate data: replay the suspected batch from a clean checkpoint; if it does not reproduce (as PaLM found), it is an optimizer-state interaction; if it does, inspect the batch for repeated tokens, garbage docs, or an encoding bug.",
+        "Step 3 isolate hardware/numerics: a single-rank NaN implicates a GPU (ECC or silent data corruption), while an all-rank event implicates optimization; verify the reduce dtype is fp32 and layernorm runs in fp32.",
+        "Step 4 recover: rewind to a pre-spike checkpoint, skip N offending batches, optionally lower the LR temporarily, tighten the grad clip, or enable z-loss + qk-norm, then resume — with the expected observation for each action.",
+        "Step 5 escalate: on repeated spikes, apply a structural fix (lower peak LR, lower beta2, add stabilizers) and consider precision (move sensitive layers fp8->bf16); decide when to kill and re-launch versus babysit.",
+        "A branch table maps symptom -> likely cause -> fix jump; verification is that the loss rejoins its pre-spike trajectory within M steps."
+      ],
+      "links": [
+        "Concept - Training Stability and Loss Spikes",
+        "Lore - The Loss Spike Chronicles",
+        "Concept - Distributed Checkpointing",
+        "Gotchas - Distributed Training",
+        "Concept - Mixed Precision Training",
+        "Concept - AdamW at Scale",
+        "Checklist - Pre-Launch for a Large Training Run"
+      ]
+    },
+    {
+      "title": "Reference - LLM Pretraining Hyperparameters",
+      "type": "reference",
+      "level": "unicorn",
+      "scope": "A sourced lookup table of the actual hyperparameters real frontier runs used, with the folklore constants surfaced. IN: peak/min LR, warmup, token batch, betas/eps, weight decay, grad clip, precision, optimizer, vocab, tokens/param across GPT-3, Chinchilla, PaLM, OPT, Llama-1/2/3, DeepSeek-V3, and more. OUT: the reasoning behind each choice (link the optimizer/LR/precision concept notes).",
+      "key_points": [
+        "Rows are models; columns are params, tokens, tokens/param, peak LR, min LR, warmup (steps/tokens), global batch (tokens), beta1, beta2, epsilon, weight decay, grad clip, precision, optimizer, and vocab size — date-stamped and sourced per row.",
+        "Folklore constants surfaced: beta2 = 0.95 (GPT-3/OPT/PaLM) rather than 0.999; wd = 0.1; grad clip = 1.0; warmup ~0.1-2% of steps; min LR = 10% of peak; no weight decay on norms/embeddings; z-loss coeff ~1e-4.",
+        "The overtraining trend across rows: Chinchilla ~20 tokens/param -> Llama-3 8B ~1875 tokens/param (inference-optimal overtraining), and GPT-3's batch-size ramp from 32k to 3.2M tokens.",
+        "The precision column tracks the fp16 -> bf16 -> fp8 migration over 2020-2025; the optimizer column shows AdamW dominance with Muon and Shampoo as frontier experiments.",
+        "Footnotes clarify units (tokens vs sequences, peak vs constant LR, warmup in steps vs tokens) and mark 'undisclosed' where labs did not publish, keeping the table honest.",
+        "Every cell is labeled published vs folklore per the quality contract, so a reader knows what is verified versus practitioner lore."
+      ],
+      "links": [
+        "Concept - AdamW at Scale",
+        "Concept - Learning Rate Schedules for Pretraining",
+        "Concept - Scaling Laws",
+        "Concept - Mixed Precision Training",
+        "Concept - muP and Hyperparameter Transfer",
+        "Reference - Model Genealogy",
+        "Reference - Memory Math for Transformers",
+        "Concept - Critical Batch Size"
+      ]
+    },
+    {
+      "title": "Concept - z-loss and Logit Soft-Capping",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "The output-stabilization tricks that keep pre-softmax logits numerically well-conditioned. IN: z-loss (penalizing the log-partition function), final-logit and attention-logit soft-capping, the qk-norm relation, and the models that use each. OUT: broad loss-spike causes/recovery (link Concept - Training Stability and Loss Spikes), softmax basics (link 02).",
+      "key_points": [
+        "z-loss (PaLM, Chowdhery et al. 2022): add alpha * (log Z)^2 where Z = sum(exp(logits)) is the softmax normalizer, pushing log Z toward 0 so the denominator stays ~1; this prevents logit blow-up and improves bf16 stability, with alpha ~1e-4, and reappears as router z-loss in MoE.",
+        "Logit soft-capping (Gemma 2): bound final logits as cap * tanh(logits / cap) (cap ~30) and attention logits (cap ~50) so no single logit dominates — a bounded complement/alternative to z-loss.",
+        "Mechanism: unbounded logits saturate the softmax, which vanishes the gradient and overflows exp in fp16/bf16; z-loss and capping keep the pre-softmax distribution in a numerically safe, well-conditioned range.",
+        "QK-norm relation: normalizing Q and K before attention (qk-layernorm, used by OLMo-2 and ViT-22B) bounds attention logits structurally, an alternative to attention-logit capping — the design space is 'how to keep logits bounded'.",
+        "Numbers: z-loss coeff ~1e-4 to 1e-3; soft-cap 30/50; the real tradeoff is throughput — soft-capping breaks FlashAttention's fast path, which is why Gemma 2 later dropped attention soft-capping for kernel compatibility.",
+        "Failure modes: a z-loss coeff set too high over-regularizes and hurts LM loss, soft-capping is incompatible with fused attention kernels, and capping can mask a deeper LR/data instability rather than fix it."
+      ],
+      "links": [
+        "Concept - Training Stability and Loss Spikes",
+        "Concept - Softmax",
+        "Concept - MoE Training and Load Balancing",
+        "Concept - Mixed Precision Training",
+        "Deep Dive - FlashAttention",
+        "Concept - Attention Mechanism",
+        "Lore - The Loss Spike Chronicles"
+      ]
+    }
+  ]
+}

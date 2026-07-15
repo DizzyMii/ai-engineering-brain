@@ -1,0 +1,539 @@
+{
+  "domain": "17 - Classical ML",
+  "slug": "classical-ml",
+  "notes": [
+    {
+      "title": "Concept - Decision Trees",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The CART algorithm as the atomic learner under every tree ensemble this domain owns: recursive axis-aligned partitioning, split criteria, pruning, and why a single tree is high-variance. IN: greedy splitting, impurity measures, regression trees, missing-value handling, the inductive bias of axis-aligned splits. OUT: ensembling them (link to Bagging and Random Forests, Gradient Boosting) and neural architectures (owned by 02/03).",
+      "key_points": [
+        "Recursive binary partitioning: at each node pick the (feature, threshold) that maximizes impurity decrease; greedy and locally optimal because building the globally optimal tree is NP-hard (Hyafil & Rivest 1976)",
+        "Classification impurity: Gini 1 - sum(p_k^2) vs entropy -sum(p_k log p_k); Gini is cheaper (no log) and gives near-identical splits; regression trees split on variance / SSE reduction",
+        "CART (Breiman et al. 1984) uses binary splits + cost-complexity pruning R_alpha(T) = R(T) + alpha|T| and surrogate splits for missing values; contrast ID3/C4.5 (Quinlan) with multiway splits and information gain ratio",
+        "Axis-aligned splits produce piecewise-constant predictions that CANNOT extrapolate beyond the training range (flat outside) and fit rotated/linear boundaries poorly - the exact inductive bias that later explains why trees win on tabular and lose on images",
+        "A single tree is low-bias, high-variance: perturbing a few rows can flip the top split and reshape the whole tree; this instability is precisely what bagging exploits",
+        "Scale-invariant and monotone-transform invariant (splits only use rank order) so no feature scaling is needed; but greedy split selection is biased toward high-cardinality / continuous features",
+        "Failure modes: unbounded depth memorizes noise; class imbalance skews splits; instability makes single trees a poor production model - always ensembled in practice"
+      ],
+      "links": [
+        "Concept - Entropy and Cross-Entropy",
+        "Concept - Bagging and Random Forests",
+        "Concept - Gradient Boosting",
+        "Decision - Deep Learning vs Gradient Boosting for Tabular Data",
+        "Concept - Backpropagation",
+        "Gotchas - Gradient Boosting in Practice",
+        "Concept - Clustering and Dimensionality Reduction",
+        "Breakdown - XGBoost"
+      ]
+    },
+    {
+      "title": "Concept - TF-IDF and the Bag of Words",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The classical sparse text representation that remains a genuinely strong, near-free baseline, plus the bridge forward to dense embeddings. IN: bag-of-words counts, TF-IDF weighting, n-grams, the hashing trick, cosine similarity, sparse linear classifiers, and where it still beats neural methods in 2026. OUT: word2vec internals (link to Word2Vec and the Embedding Lineage), dense neural embedding training (owned by 11).",
+      "key_points": [
+        "Bag-of-words: a document becomes a sparse count vector over the vocabulary; word order is discarded; n-grams recover local order at the cost of dimensionality blow-up",
+        "TF-IDF weight = tf(t,d) * log(N/df(t)) with common variants (sublinear tf = 1+log(tf), smoothed idf); it down-weights ubiquitous terms and up-weights discriminative ones",
+        "Cosine similarity on L2-normalized TF-IDF vectors is the workhorse similarity; fed to a linear SVM or logistic regression it is still a top baseline for text classification - trains in milliseconds and is fully interpretable (per-term weights)",
+        "The hashing trick (feature hashing, Weinberger et al. 2009) maps tokens to a fixed number of buckets: constant memory, no stored vocabulary, streaming-friendly, collisions mostly harmless",
+        "Where it still wins in 2026: cold-start / low-data classification, keyword-heavy retrieval (BM25 is TF-IDF's probabilistic successor and the sparse half of hybrid search), and as a cheap router/guardrail before paying for an LLM call",
+        "Limits that motivated word2vec: no synonymy (car != automobile), enormous sparse dimensionality, and zero semantic generalization - the lineage forward to dense predictive embeddings",
+        "Failure modes: vocabulary explosion with n-grams, domain shift breaking learned term weights, and treating TF-IDF cosine as if it captured meaning rather than surface overlap"
+      ],
+      "links": [
+        "Concept - Word2Vec and the Embedding Lineage",
+        "Concept - Hybrid Search and Reciprocal Rank Fusion",
+        "Concept - Embedding Models",
+        "Concept - Cost Engineering for LLM Applications",
+        "Concept - Entropy and Cross-Entropy",
+        "Concept - Rerankers",
+        "Concept - Learning from Imbalanced Data"
+      ]
+    },
+    {
+      "title": "Concept - Gradient Boosting",
+      "type": "concept",
+      "level": "core",
+      "scope": "The mechanism behind the tabular-ML flagship: fitting an additive ensemble by gradient descent in function space. IN: functional gradient descent, pseudo-residuals, shrinkage, stochastic subsampling, the bias-reduction contrast with bagging, and the AdaBoost ancestry. OUT: system-specific engineering (link to Breakdown - XGBoost / Breakdown - LightGBM) and single-tree mechanics (link to Decision Trees).",
+      "key_points": [
+        "Boosting as gradient descent in function space (Friedman 2001, 'Greedy Function Approximation'): F_m(x) = F_{m-1}(x) + nu * h_m(x), where each weak learner h_m is fit to the negative gradient of the loss w.r.t. current predictions (the pseudo-residuals)",
+        "For squared loss the pseudo-residuals are ordinary residuals; for log loss they are (y - p). This 'plug in any differentiable loss' generality is exactly why GBM dominates heterogeneous tabular problems",
+        "Shrinkage / learning rate nu in ~0.01-0.3 regularizes by trading trees for accuracy; smaller nu with more trees generally generalizes better but costs compute - the classic nu-vs-M tradeoff",
+        "Stochastic gradient boosting (Friedman 2002): row subsampling (0.5-0.8) injects bagging-style regularization and speed inside the sequential boosting loop",
+        "Weak learners are shallow trees (depth 3-8 / 31-255 leaves); boosting reduces BIAS by sequential error correction, whereas bagging reduces VARIANCE in parallel - the defining contrast",
+        "AdaBoost (Freund & Schapire 1997) is the ancestor: the exponential-loss special case; margin theory explains boosting's surprising resistance to overfitting",
+        "Failure mode: unlike random forests, boosting DOES overfit as trees accumulate - early stopping on a held-out metric is mandatory, not optional",
+        "Contrast with backprop: gradient is taken in function space (append a new function) rather than parameter space (update weights) - a useful mental model for engineers coming from deep learning"
+      ],
+      "links": [
+        "Concept - Decision Trees",
+        "Concept - Bagging and Random Forests",
+        "Breakdown - XGBoost",
+        "Breakdown - LightGBM",
+        "Concept - Backpropagation",
+        "Concept - Entropy and Cross-Entropy",
+        "Decision - Deep Learning vs Gradient Boosting for Tabular Data",
+        "Gotchas - Gradient Boosting in Practice",
+        "Concept - Knowledge Distillation"
+      ]
+    },
+    {
+      "title": "Concept - Bagging and Random Forests",
+      "type": "concept",
+      "level": "core",
+      "scope": "The parallel-ensemble half of tree learning: variance reduction by averaging decorrelated trees. IN: bootstrap aggregation, feature subsampling, the correlation-variance identity, out-of-bag error, feature-importance estimators and their biases, and RF extensions. OUT: sequential boosting (link to Gradient Boosting) and single-tree mechanics (link to Decision Trees).",
+      "key_points": [
+        "Bagging (Breiman 1996): train B trees on bootstrap resamples and average (regression) or vote (classification); averaging reduces variance toward sigma^2/B only when trees are independent - which they are not, so raw bagging plateaus",
+        "Random forests (Breiman 2001) add per-split feature subsampling (sqrt(p) for classification, p/3 for regression) to DECORRELATE trees. The variance of the average is rho*sigma^2 + (1-rho)/B * sigma^2, so driving down pairwise correlation rho is the entire trick",
+        "Out-of-bag error: each tree omits ~36.8% of rows (1 - 1/e), so evaluating each row on the trees that never saw it yields a free cross-validation-quality estimate with no held-out set",
+        "Feature importance has two flavors: mean decrease in impurity (fast but biased toward high-cardinality / continuous features) vs permutation importance (Fisher et al. 2019, unbiased but misleading under correlated features) - a classic footgun",
+        "RF vs GBM: RF is embarrassingly parallel, hard to overfit, and needs almost no tuning; GBM is sequential, has a higher accuracy ceiling, and needs early stopping - RF is the great default baseline",
+        "Extensions: Extremely Randomized Trees (Geurts et al. 2006) randomize thresholds too for more variance reduction; quantile regression forests for intervals; isolation forests for anomaly detection",
+        "Failure modes: RF cannot extrapolate (flat outside training range), memory blows up with deep unpruned trees, and probability estimates are poorly calibrated (vote fractions are not probabilities)"
+      ],
+      "links": [
+        "Concept - Decision Trees",
+        "Concept - Gradient Boosting",
+        "Decision - Deep Learning vs Gradient Boosting for Tabular Data",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Concept - Data Parallelism and ZeRO",
+        "Concept - Probability Calibration",
+        "Concept - Causal Inference Basics",
+        "Gotchas - Gradient Boosting in Practice"
+      ]
+    },
+    {
+      "title": "Decision - Deep Learning vs Gradient Boosting for Tabular Data",
+      "type": "decision",
+      "level": "core",
+      "scope": "The recurring build choice for structured/tabular problems and its defensible default. IN: the decision flow, the mechanistic reasons trees win on tabular, the specific regimes where deep nets win, the neural-tabular contenders, and the cost/ops axis. OUT: general FT-vs-RAG-vs-prompting choices (link to domain 12) and the internals of each method (link to the owning notes).",
+      "key_points": [
+        "Default answer: on tabular data with heterogeneous features and up to ~100k-1M rows, gradient-boosted trees (XGBoost / LightGBM / CatBoost) beat deep nets on accuracy, wall-clock, and tuning effort - the empirical verdict of Grinsztajn et al. 2022 ('Why do tree-based models still outperform deep learning on tabular data?')",
+        "Three mechanisms trees win: (1) robustness to uninformative features (MLPs spread capacity across them), (2) piecewise-constant fits capture irregular/non-smooth target functions that NNs over-smooth, (3) trees are rotationally NON-invariant and real tabular axes are meaningful, so an MLP's rotational invariance is a liability",
+        "When deep learning wins: very high-cardinality categoricals, free-text or image columns (multimodal), very large datasets, a need for representation transfer / pretraining, online/streaming updates, or end-to-end differentiability with other neural components",
+        "Neural-tabular contenders and their record: FT-Transformer, TabNet, SAINT, TabTransformer, NODE (Gorishniy et al. 2021 benchmarks), and the in-context model TabPFN - most fail to reliably beat a well-tuned GBDT on small/medium data",
+        "Cost and ops axis: GBDT trains in seconds-minutes on CPU, ships as a few-MB model, supports monotonic constraints and SHAP interpretability; deep tabular needs a GPU, more data, and more tuning to match",
+        "Surprising nuance: a properly regularized MLP is far stronger than folklore admits (Kadra et al. 2021, 'regularization cocktails'); and GBDT+DL ensembles occasionally add a small Kaggle-scale lift",
+        "The edge case that flips it: when the tabular problem is really a text/graph problem in disguise (embeddings dominate signal), leave tree land entirely"
+      ],
+      "links": [
+        "Concept - Gradient Boosting",
+        "Breakdown - XGBoost",
+        "Breakdown - TabPFN",
+        "Decision - Fine-Tuning vs RAG vs Prompting",
+        "Concept - Scaling Laws",
+        "Concept - Vision Transformers",
+        "Concept - Cost Engineering for LLM Applications",
+        "Concept - Double Descent"
+      ]
+    },
+    {
+      "title": "Concept - Probability Calibration",
+      "type": "concept",
+      "level": "core",
+      "scope": "Making a classifier's scores mean what they say - that among predictions of 0.7, about 70% are positive - and the methods to enforce it. IN: reliability diagrams, ECE/Brier decomposition, Platt scaling, isotonic regression, temperature scaling, why boosting/SVM and modern nets miscalibrate, and how resampling destroys calibration. OUT: distribution-free coverage sets (link to Conformal Prediction).",
+      "key_points": [
+        "Calibrated means P(y=1 | score=p) = p; measured with reliability diagrams, Expected Calibration Error (binned |confidence - accuracy|), and the Brier score decomposition into reliability + resolution + uncertainty",
+        "Platt scaling (Platt 1999): fit a logistic sigmoid(a*f(x)+b) on a held-out set - ideal for the sigmoidal distortion of SVM/boosting scores, parametric, works with little data",
+        "Isotonic regression: non-parametric monotone fit via the pool-adjacent-violators algorithm; more flexible but needs thousands of points and can overfit into visible steps",
+        "Why models miscalibrate: margin-maximizers (boosting, SVM) push scores toward 0/1 (sigmoidal reliability curve), while modern deep nets are systematically OVER-confident (Guo et al. 2017, 'On Calibration of Modern Neural Networks') - temperature scaling (one scalar T on the logits) fixes most of it",
+        "Class imbalance + resampling silently destroys calibration: after SMOTE or undersampling, predicted probabilities are biased upward and must be recalibrated or prior-corrected via the log-odds shift log(pi/(1-pi))",
+        "Multiclass: temperature scaling on the softmax, Dirichlet or vector scaling; scikit-learn's CalibratedClassifierCV wraps a base estimator in CV folds to avoid fitting the calibrator on training scores (a leakage trap)",
+        "Calibration is not accuracy: predicting the base rate for everyone is perfectly calibrated and useless - you need resolution (sharpness) too; this is why the Brier decomposition matters"
+      ],
+      "links": [
+        "Concept - Softmax",
+        "Concept - Entropy and Cross-Entropy",
+        "Concept - Learning from Imbalanced Data",
+        "Concept - Conformal Prediction",
+        "Concept - Sampling and Decoding Parameters",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Gotchas - Gradient Boosting in Practice",
+        "Concept - Gradient Boosting"
+      ]
+    },
+    {
+      "title": "Concept - Learning from Imbalanced Data",
+      "type": "concept",
+      "level": "core",
+      "scope": "Training and evaluating classifiers when one class is rare, and the metric/method traps that make imbalance quietly ruin models. IN: why accuracy and ROC-AUC mislead, threshold moving, class weights / cost-sensitive loss, resampling (SMOTE and its critique), and the resample-inside-the-fold rule. OUT: probability recalibration after resampling (link to Probability Calibration).",
+      "key_points": [
+        "Accuracy lies under imbalance: 99% negatives means 'predict negative always' scores 99% accuracy with 0 recall; use PR-AUC over ROC-AUC when positives are rare because ROC-AUC is optimistic under skew (Davis & Goadrich 2006)",
+        "Threshold moving is usually the first and best lever: train normally, then move the decision threshold to optimize F1 or expected cost - it preserves calibration, unlike resampling",
+        "Cost-sensitive learning / class weights: reweight the loss (XGBoost scale_pos_weight = neg/pos ratio); focal loss (Lin et al. 2017) down-weights easy examples so the model focuses on the hard minority",
+        "SMOTE (Chawla et al. 2002) interpolates synthetic minority points along k-NN segments; variants Borderline-SMOTE and ADASYN target the boundary - but SMOTE distorts probability estimates, can synthesize noise in overlapping regions, and frequently fails to beat plain class weights ('To SMOTE or not to SMOTE', Elor & Averbuch-Elor 2022)",
+        "The cardinal pitfall: resampling must happen INSIDE each CV fold on the training split only - resampling before the split leaks synthetic neighbors across the boundary and inflates every score",
+        "Undersampling loses data but speeds training; EasyEnsemble and BalancedRandomForest combine sampling with ensembling to recover the discarded majority signal",
+        "Metrics that actually matter operationally: precision@k, recall at fixed precision, Matthews correlation coefficient, and an explicit cost matrix - and always recalibrate after any resampling"
+      ],
+      "links": [
+        "Concept - Probability Calibration",
+        "Concept - Gradient Boosting",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Concept - Synthetic Training Data",
+        "Concept - Conformal Prediction",
+        "Gotchas - Gradient Boosting in Practice",
+        "Concept - Entropy and Cross-Entropy",
+        "Concept - TF-IDF and the Bag of Words"
+      ]
+    },
+    {
+      "title": "Concept - Classical Time Series Forecasting",
+      "type": "concept",
+      "level": "core",
+      "scope": "The statistical forecasting toolkit that still beats or ties deep models on most real series, and how ML overtook it on large hierarchical data. IN: ARIMA/SARIMA, exponential smoothing/ETS, stationarity and the Box-Jenkins workflow, the tree-regression reframing, evaluation metrics, and the M-competition verdict. OUT: the leakage-safe validation of these models (link to Time Series Cross-Validation and Leakage).",
+      "key_points": [
+        "ARIMA(p,d,q) = autoregression on lags + differencing d to stationarize + moving average of past errors; Box-Jenkins identifies orders from ACF/PACF (PACF cuts off at p for pure AR, ACF cuts off at q for pure MA)",
+        "Stationarity is the load-bearing assumption: test with ADF/KPSS, remove trend by differencing and variance by log/Box-Cox; seasonal patterns need SARIMA(p,d,q)(P,D,Q)_s",
+        "Exponential smoothing / ETS: simple -> Holt (trend) -> Holt-Winters (seasonality), expressible in state-space form; in practice ETS often beats ARIMA and underpins many production forecasters",
+        "The M-competition verdict (Makridakis et al.): for a decade simple statistical methods and their COMBINATIONS beat complex ones; M4 (2018) was won by Smyl's hybrid ES-RNN, and M5 (2020, Walmart hierarchical retail) was won by LightGBM - the moment gradient boosting overtook pure statistics",
+        "The strong modern baseline is reframing forecasting as tabular regression: lag features, rolling means/stds, calendar/Fourier seasonality fed to LightGBM - usually beats ARIMA and Prophet on multi-series data",
+        "Evaluation: MASE (scaled against the naive forecast), sMAPE, and pinball/quantile loss for probabilistic forecasts; the seasonal-naive baseline is shockingly hard to beat and must always be reported",
+        "Failure modes: regime change / non-stationarity, over-differencing, look-ahead leakage from features computed over the full series, and applying continuous models to intermittent demand (use Croston)"
+      ],
+      "links": [
+        "Concept - Time Series Cross-Validation and Leakage",
+        "Concept - Gradient Boosting",
+        "Breakdown - LightGBM",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Concept - State Space Models and Mamba",
+        "Lore - Kaggle and the Reign of Gradient Boosting",
+        "Reference - Gradient Boosting Hyperparameters",
+        "Concept - Conformal Prediction"
+      ]
+    },
+    {
+      "title": "Reference - Gradient Boosting Hyperparameters",
+      "type": "reference",
+      "level": "advanced",
+      "scope": "A mid-task lookup mapping the same conceptual knob across XGBoost, LightGBM, and CatBoost with names, typical ranges, defaults, and what each controls. IN: learning rate, tree-complexity controls, sampling, regularization, categorical handling, imbalance, early stopping, backend flags. OUT: the order to tune them (link to Playbook - Tuning Gradient Boosted Trees) and the pitfalls (link to Gotchas - Gradient Boosting in Practice).",
+      "key_points": [
+        "Learning rate: eta (XGBoost) / learning_rate (LightGBM, CatBoost); library defaults 0.3 / 0.1 / 0.03, practical range 0.01-0.1; lower rate requires proportionally more boosting rounds",
+        "Tree complexity: max_depth (XGBoost, 3-10, level-wise) vs num_leaves (LightGBM, leaf-wise, KEEP < 2^max_depth, typ 31-255) vs depth (CatBoost oblivious trees, 6-10) - the single most important distinction between the libraries",
+        "Regularization: reg_alpha/reg_lambda (L1/L2 on leaf weights), min_child_weight (XGBoost, min Hessian sum in a leaf) vs min_child_samples/min_data_in_leaf (LightGBM), gamma / min_split_loss (minimum gain to split)",
+        "Row/column sampling: subsample + colsample_bytree/bylevel/bynode (XGBoost) vs bagging_fraction + bagging_freq + feature_fraction (LightGBM) - both add regularization and speed",
+        "Categorical: LightGBM native (categorical_feature, max_cat_threshold, cat_smooth), CatBoost ordered target statistics (one_hot_max_size), XGBoost enable_categorical (2.x); footnote: native handling can overfit high-cardinality IDs",
+        "Imbalance: scale_pos_weight (XGBoost) / is_unbalance or scale_pos_weight (LightGBM) / class_weights (CatBoost); note that setting these breaks probability calibration downstream",
+        "Early stopping: early_stopping_rounds + a matched eval_metric, with num_boost_round as an upper bound - the correct way to choose the number of trees",
+        "Backend / reproducibility: tree_method = hist / gpu_hist (XGBoost), device + max_bin (LightGBM), num_threads; date-stamped to XGBoost 2.x / LightGBM 4.x / CatBoost 1.2 (as of 2026)"
+      ],
+      "links": [
+        "Concept - Gradient Boosting",
+        "Breakdown - XGBoost",
+        "Breakdown - LightGBM",
+        "Playbook - Tuning Gradient Boosted Trees",
+        "Gotchas - Gradient Boosting in Practice"
+      ]
+    },
+    {
+      "title": "Concept - Clustering and Dimensionality Reduction",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The core unsupervised toolkit and, more importantly, the ways each method silently lies. IN: k-means, DBSCAN/HDBSCAN, GMM+EM, hierarchical clustering; PCA/SVD, t-SNE, UMAP; and how to choose and evaluate them. OUT: neural embedding models whose outputs you visualize (owned by 11) and the representations they learn.",
+      "key_points": [
+        "k-means is Lloyd's algorithm doing coordinate descent on within-cluster SSE; k-means++ seeding (Arthur & Vassilvitskii 2007) gives an O(log k) approximation guarantee. It assumes spherical, equal-variance clusters, is sensitive to feature scale and outliers, and needs k fixed in advance",
+        "Choosing k is unsolved in general: elbow on SSE, silhouette score, gap statistic - all heuristic and often ambiguous; BIC works for the probabilistic GMM case",
+        "DBSCAN (Ester et al. 1996) is density-based: finds arbitrary-shaped clusters plus a noise label, needs eps and minPts, and struggles with clusters of varying density - which HDBSCAN (Campello et al.) fixes by building a hierarchy",
+        "Gaussian Mixture Models via EM give SOFT assignments: E-step computes responsibilities, M-step updates means and covariances; models elliptical clusters but converges to local optima and can collapse into degenerate covariances",
+        "PCA is the eigendecomposition of the covariance matrix (equivalently the SVD of the centered data); components are directions of maximum variance - linear, requires scaling, interpretable, and the right tool for denoising/compression",
+        "t-SNE (van der Maaten & Hinton 2008) minimizes the KL divergence between Gaussian high-dim and Student-t low-dim neighbor affinities; perplexity 5-50. It FAILS as a distance metric: cluster sizes and inter-cluster distances are meaningless and the layout is stochastic (Wattenberg et al., 'How to Use t-SNE Effectively')",
+        "UMAP (McInnes et al. 2018) builds a fuzzy topological graph then optimizes a low-dim layout: faster than t-SNE with better global structure, but still a visualization tool, not a faithful metric or a feature extractor",
+        "Practitioner rule: PCA/UMAP for features and preprocessing, t-SNE/UMAP for pictures only - never read quantitative structure off a t-SNE plot"
+      ],
+      "links": [
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - KL Divergence",
+        "Concept - Embedding Models",
+        "Concept - Sparse Autoencoders",
+        "Concept - Superposition",
+        "Concept - Decision Trees",
+        "Concept - Learning from Imbalanced Data",
+        "Concept - Vision Transformers"
+      ]
+    },
+    {
+      "title": "Concept - Causal Inference Basics",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The engineering-relevant core of estimating treatment effects when you cannot randomize, and why predictive ML is not causal. IN: potential outcomes, confounding and the backdoor criterion, propensity scores/IPW, difference-in-differences, instrumental variables, RDD, and heterogeneous-effect (uplift/CATE) estimators. OUT: RL reward modeling and policy optimization (owned by 06).",
+      "key_points": [
+        "Potential outcomes (Rubin causal model): the individual effect Y_i(1) - Y_i(0) is fundamentally unobservable (one counterfactual is always missing), so we estimate averages such as the ATE = E[Y(1) - Y(0)]",
+        "Confounding is why correlation is not causation; Pearl's backdoor criterion over a DAG says adjust for variables that block backdoor paths, but do NOT adjust for colliders (adjusting a collider induces bias) or mediators (that blocks the very effect you want)",
+        "Propensity score e(x) = P(T=1 | x) (Rosenbaum & Rubin 1983): use for matching, stratification, or inverse-propensity weighting (1/e); requires overlap/positivity and unconfoundedness (untestable). Doubly-robust / AIPW combines an outcome model and a propensity model so either being right suffices",
+        "Difference-in-differences relies on the parallel-trends assumption; naive two-way fixed effects is biased under staggered adoption (Goodman-Bacon 2021) - a live methodological correction",
+        "Instrumental variables use an exogenous instrument that affects treatment but not the outcome directly (relevance + exclusion), estimated via 2SLS; regression discontinuity exploits a cutoff as local randomization",
+        "Heterogeneous treatment effects / uplift modeling (CATE): S-, T-, and X-learners (Kuenzel et al. 2019) and causal forests with honest splitting (Wager & Athey 2018); evaluate with Qini and uplift curves, not accuracy - targeting WHO to treat is the industrial use case",
+        "Why ML engineers must care: A/B tests are not always possible, feature importance is not a causal effect, and naive ML on observational data optimizes prediction rather than intervention (Simpson's paradox is the trap)"
+      ],
+      "links": [
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Concept - Reward Models",
+        "Concept - Gradient Boosting",
+        "Concept - Bagging and Random Forests",
+        "Deep Dive - RLHF End to End",
+        "Concept - Learning from Imbalanced Data",
+        "Concept - Time Series Cross-Validation and Leakage",
+        "Concept - Conformal Prediction"
+      ]
+    },
+    {
+      "title": "Concept - Word2Vec and the Embedding Lineage",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The pivot from count vectors to dense predictive embeddings, and the theory linking 'neural' word2vec back to classical matrix factorization. IN: skip-gram/CBOW, negative sampling, the PMI-factorization result, GloVe, the analogy structure and its overhype, and subword extensions. OUT: modern contrastive embedding training and retrieval (owned by 11), transformer token/positional embeddings (owned by 03).",
+      "key_points": [
+        "word2vec (Mikolov et al. 2013): skip-gram predicts context words from a center word (CBOW is the reverse); the network is shallow and the learned embedding IS the hidden weight matrix - not a byproduct",
+        "Skip-gram with negative sampling (SGNS) replaces the expensive full softmax over the vocabulary with a logistic loss distinguishing the true context word from k noise words drawn proportional to unigram frequency^(3/4) - the 3/4 power is a famous folklore-tuned constant; hierarchical softmax is the alternative",
+        "Levy & Goldberg (2014) proved SGNS is implicitly factorizing a shifted positive PMI matrix (log[P(w,c)/(P(w)P(c))] - log k) - which reconnects 'neural' word2vec to classical count-based methods (LSA / SVD on PPMI) and demystifies it",
+        "The linear analogy structure (king - man + woman ~= queen) is real but overhyped: analogy accuracy depends on cosine geometry plus excluding the input words, and was later shown fragile and dataset-dependent",
+        "GloVe (Pennington et al. 2014) factorizes a global co-occurrence matrix via weighted least squares - the 'count vs predict' debate that SGNS-as-factorization largely dissolved",
+        "Why it still matters in 2026: the same objects power item2vec / node2vec, retrieval embeddings, and the input+output embedding layers of every transformer; static-vs-contextual embeddings is the conceptual bridge to BERT/GPT",
+        "Limits that drove successors: one vector per word (no polysemy) and no handling of out-of-vocabulary words - fastText adds character n-grams; contextual models solve polysemy"
+      ],
+      "links": [
+        "Concept - Embedding Models",
+        "Concept - Softmax",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - CLIP and Contrastive Vision-Language Training",
+        "Concept - TF-IDF and the Bag of Words",
+        "Concept - Byte-Pair Encoding",
+        "Deep Dive - The Transformer",
+        "Concept - Rerankers"
+      ]
+    },
+    {
+      "title": "Breakdown - XGBoost",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "Reverse-engineering the system that won hundreds of Kaggle competitions and became the tabular default (Chen & Guestrin 2016). IN: the regularized second-order objective, exact vs approximate split finding, the weighted quantile sketch, sparsity-aware splits, and the systems engineering. OUT: the general boosting idea (link to Gradient Boosting) and LightGBM's divergent design (link to Breakdown - LightGBM).",
+      "key_points": [
+        "Headline: XGBoost turned gradient boosting from a slow research method into a production system - a distributed, sparsity-aware, out-of-core library that dominated tabular ML 2015-2020 and is still a default in 2026",
+        "Regularized objective: adds Omega(f) = gamma*T + (1/2)*lambda*||w||^2 (leaf count + L2 on leaf weights) to the loss, giving explicit complexity control that most prior GBM implementations lacked",
+        "Second-order (Newton) boosting: uses both gradient g_i and Hessian h_i, so the optimal leaf weight is w* = -sum(g_i)/(sum(h_i)+lambda) and the split gain is (1/2)[G_L^2/(H_L+lambda) + G_R^2/(H_R+lambda) - (G_L+G_R)^2/(H_L+H_R+lambda)] - gamma",
+        "Split finding: exact greedy on sorted features, or the approximate algorithm using a weighted quantile sketch that proposes candidate thresholds at percentiles of the Hessian-weighted feature distribution (weighting by h_i is the genuinely clever detail)",
+        "Sparsity-aware split finding: learns a default direction per node for missing/zero entries in a single pass over the non-missing values - fast handling of one-hot sparsity and missing data without imputation",
+        "Systems tricks: the column block (compressed sparse column, pre-sorted) enables parallel split finding; cache-aware gradient prefetch; and out-of-core block compression + sharding for datasets larger than RAM - the reasons it was fast in 2016",
+        "What is dated: level-wise growth and exact splits are usually slower than LightGBM's histogram + leaf-wise approach on large data; XGBoost added hist, GPU, and native categorical support (2.x) to catch up",
+        "What to steal: Newton-step leaf weights, explicit leaf regularization, and the learned default-direction trick for missing values"
+      ],
+      "links": [
+        "Concept - Gradient Boosting",
+        "Breakdown - LightGBM",
+        "Concept - Decision Trees",
+        "Reference - Gradient Boosting Hyperparameters",
+        "Gotchas - Gradient Boosting in Practice",
+        "Playbook - Tuning Gradient Boosted Trees",
+        "Concept - GPU Memory Hierarchy",
+        "Concept - The Roofline Model",
+        "Concept - Floating Point for Deep Learning",
+        "Lore - Kaggle and the Reign of Gradient Boosting",
+        "Decision - Deep Learning vs Gradient Boosting for Tabular Data"
+      ]
+    },
+    {
+      "title": "Breakdown - LightGBM",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "Reverse-engineering Microsoft's histogram-based GBDT (Ke et al. 2017) and the two algorithmic ideas - GOSS and EFB - that made it faster than XGBoost on large data. IN: histogram binning + subtraction, leaf-wise growth, GOSS, EFB, native categorical splits, DART. OUT: the general boosting idea (link to Gradient Boosting) and XGBoost's exact-split lineage (link to Breakdown - XGBoost).",
+      "key_points": [
+        "Headline: LightGBM matched or beat XGBoost accuracy at several times the speed and lower memory, becoming the default for large tabular data and time-series-as-regression (it won the M5 forecasting competition)",
+        "Histogram-based split finding: continuous features are bucketed into ~255 bins once, so each split search is O(#bins) instead of O(#samples); the histogram subtraction trick computes a child's histogram as parent minus sibling, halving the work",
+        "Leaf-wise (best-first) growth vs XGBoost's level-wise: it always splits the leaf with maximum loss reduction, yielding deeper asymmetric trees with lower loss per leaf - but this overfits small/noisy data unless controlled by num_leaves and min_data_in_leaf",
+        "GOSS (Gradient-based One-Side Sampling): keep all large-gradient (under-trained) instances and randomly subsample small-gradient ones, up-weighting the kept small-gradient rows by (1-a)/b to keep the gain estimate near-unbiased - fewer rows, similar accuracy",
+        "EFB (Exclusive Feature Bundling): bundle mutually-exclusive sparse features (features that are rarely nonzero together, e.g. one-hot columns) into a single feature via a graph-coloring approximation, shrinking the effective dimensionality",
+        "Native categorical handling: sorts categories by their gradient statistic and finds the optimal partition into two groups (Fisher 1958), avoiding one-hot blowup - but high-cardinality categoricals overfit without cat_smooth / min_data_per_group",
+        "Boosting variants: DART (dropout meets MART) drops trees during boosting to reduce over-specialization; goss and rf modes",
+        "Failure modes: leaf-wise overfitting on small data, num_leaves set too high relative to depth, and max_bin set too low discarding signal - the classic LightGBM tuning traps"
+      ],
+      "links": [
+        "Concept - Gradient Boosting",
+        "Breakdown - XGBoost",
+        "Concept - Decision Trees",
+        "Reference - Gradient Boosting Hyperparameters",
+        "Gotchas - Gradient Boosting in Practice",
+        "Playbook - Tuning Gradient Boosted Trees",
+        "Concept - Classical Time Series Forecasting",
+        "Lore - Kaggle and the Reign of Gradient Boosting",
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Post-Training Quantization Formats",
+        "Decision - Deep Learning vs Gradient Boosting for Tabular Data"
+      ]
+    },
+    {
+      "title": "Gotchas - Gradient Boosting in Practice",
+      "type": "gotchas",
+      "level": "advanced",
+      "scope": "The aggregated pitfalls that make gradient-boosted-tree pipelines look great in the notebook and fail in production. IN: leakage, early-stopping mistakes, leaf-wise overfit, categorical/ID traps, extrapolation, misread importances, train/serve skew, imbalance-vs-calibration, and non-determinism. OUT: the correct tuning procedure (link to Playbook) and the leak-free encoding recipe (link to Snippet).",
+      "key_points": [
+        "Target leakage from features: mean/target encoding fit on the full dataset, aggregates that include the row's own target, or any feature computed with future information - produces a beautiful CV score that collapses live",
+        "Early stopping on the wrong thing: the eval_metric must match the business objective, and using the same split for early stopping and for final reporting leaks the validation set into the reported number",
+        "num_leaves >> 2^max_depth in LightGBM causes severe overfitting - the single most common leaf-wise-growth footgun",
+        "Categorical / high-cardinality traps: native handling or target encoding of IDs overfits without smoothing and CV; XGBoost silently treating integer-coded categories as ordinal imposes a false ordering",
+        "Trees cannot extrapolate: predictions are flat outside the training range, which is dangerous for trending time series and any numeric feature that drifts out of range in production",
+        "Feature importance misread: default gain/split-count importances are biased toward high-cardinality and correlated features (which split credit arbitrarily) - use SHAP or permutation importance instead",
+        "Train/serve skew: different preprocessing, category maps, or missing-value encodings between training and serving flip the learned default directions and quietly degrade predictions",
+        "Imbalance handled via scale_pos_weight breaks probability calibration (scores no longer mean probabilities) - recalibrate afterward; and GPU/multithread histograms make splits non-reproducible unless you pin seeds and threads for audits"
+      ],
+      "links": [
+        "Concept - Gradient Boosting",
+        "Breakdown - XGBoost",
+        "Breakdown - LightGBM",
+        "Concept - Probability Calibration",
+        "Concept - Learning from Imbalanced Data",
+        "Concept - Time Series Cross-Validation and Leakage",
+        "Snippet - Leakage-Free Target Encoding",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Concept - Benchmark Contamination"
+      ]
+    },
+    {
+      "title": "Playbook - Tuning Gradient Boosted Trees",
+      "type": "playbook",
+      "level": "advanced",
+      "scope": "An end-to-end procedure for tuning XGBoost/LightGBM/CatBoost from a baseline to a squeezed final model without fooling yourself. IN: the ordered tuning sequence, what each step should move, when to stop, and the overfit/underfit branch table. OUT: the meaning of each hyperparameter (link to Reference) and the pitfalls that invalidate the whole exercise (link to Gotchas).",
+      "key_points": [
+        "Step 1: build a leak-free CV scheme FIRST (stratified k-fold, or time-aware forward-chaining for temporal data). Expected observation: stable fold scores; high fold variance means leakage or too little data - fix this before touching hyperparameters",
+        "Step 2: fix learning_rate = 0.1, set a large num_boost_round with early_stopping_rounds ~50, and let early stopping choose the number of trees - never grid-search n_estimators directly (it is coupled to the learning rate)",
+        "Step 3: tune tree complexity (max_depth / num_leaves plus min_child_weight / min_data_in_leaf) - the biggest lever; use Optuna/TPE Bayesian search over a grid where possible",
+        "Step 4: tune sampling (subsample / bagging_fraction and colsample_bytree / feature_fraction in 0.6-0.9) for regularization and speed",
+        "Step 5: tune regularization (reg_lambda, reg_alpha, gamma / min_split_loss) to close any remaining train/val gap",
+        "Step 6: lower learning_rate to 0.01-0.03 and refit with more rounds for the final accuracy squeeze; then recalibrate probabilities and, if imbalanced, tune the decision threshold",
+        "Verification: CV score improves while the train-val gap stays sane, and the improvement survives on a truly held-out test set (or nested CV) - not just the tuning folds",
+        "Branch table: val << train -> reduce leaves/depth, add regularization, more data or subsampling; underfit (both low) -> deeper trees / more rounds / lower min_data; noisy fold scores -> the CV scheme is leaking, return to step 1"
+      ],
+      "links": [
+        "Concept - Gradient Boosting",
+        "Reference - Gradient Boosting Hyperparameters",
+        "Breakdown - XGBoost",
+        "Breakdown - LightGBM",
+        "Gotchas - Gradient Boosting in Practice",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Concept - Time Series Cross-Validation and Leakage",
+        "Concept - Probability Calibration"
+      ]
+    },
+    {
+      "title": "Snippet - Leakage-Free Target Encoding",
+      "type": "snippet",
+      "level": "advanced",
+      "scope": "Runnable code for out-of-fold, smoothed target (mean) encoding of a high-cardinality categorical, the technique that beats one-hot on trees while avoiding the leakage that naive target encoding causes. IN: the K-fold OOF wrapper, Bayesian smoothing toward the global mean, and handling of unseen categories at test time. OUT: general encoding theory and other pitfalls (link to Gotchas - Gradient Boosting in Practice).",
+      "key_points": [
+        "Demonstrates out-of-fold encoding: each training row is encoded using only the folds that EXCLUDE it, so a row's own target can never leak into its own feature - the single most common Kaggle leakage bug",
+        "Bayesian smoothing shrinks rare categories toward the global mean: encoded = (n*category_mean + m*global_mean)/(n+m), where m is the smoothing strength that regularizes categories seen few times",
+        "Test/inference rows use the encoding fit on the full training set; unseen categories fall back to the global mean - a case naive implementations crash on",
+        "Header block states: dependencies (python 3.11, pandas 2.x, numpy, scikit-learn KFold), what it does, and expected output (a new numeric column with no target leakage and stable CV)",
+        "Why written this way: the OOF split is the leakage guard, the smoothing prior is the variance guard for rare levels, and separating fit (train folds) from transform (held-out fold) mirrors how it must run in a real pipeline",
+        "Contrast documented in comments: CatBoost's ordered target statistics solve the same leakage online via a random permutation and expanding-window means - a different answer to the identical problem"
+      ],
+      "links": [
+        "Concept - Gradient Boosting",
+        "Gotchas - Gradient Boosting in Practice",
+        "Breakdown - LightGBM",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Concept - Learning from Imbalanced Data"
+      ]
+    },
+    {
+      "title": "Breakdown - TabPFN",
+      "type": "breakdown",
+      "level": "frontier",
+      "scope": "Reverse-engineering the prior-fitted transformer that classifies tabular data by in-context learning in a single forward pass (Hollmann et al. 2022 ICLR; v2 in Nature 2025). IN: the PFN meta-learning recipe, in-context tabular inference as amortized Bayesian inference, the concrete size limits, and what transfers. OUT: the general tabular build decision (link to Decision - DL vs GBDT) and transformer internals (owned by 03).",
+      "key_points": [
+        "Headline: TabPFN does no per-dataset training - you feed the entire labeled training set plus the test rows into one transformer forward pass and read off predictions; it matched tuned GBDT on small datasets in under a second on a GPU",
+        "Prior-Fitted Network: the transformer is pretrained ONCE on millions of synthetic tabular datasets sampled from a prior over structural causal models / Bayesian neural nets; it learns to do inference, not to fit one function",
+        "It approximates the posterior predictive distribution under that prior - in-context learning as amortized Bayesian inference (Mueller et al. 2022, 'Transformers Can Do Bayesian Inference') - which is why the training set goes in the context, not the weights",
+        "v1 limits were severe: <=~1000 training rows, <=100 features, <=10 classes, numerical features only - a research artifact, but a striking existence proof",
+        "v2 (2025) extends to larger tables, regression, and native categorical/missing handling, and is competitive with tuned tree ensembles on small-to-medium data",
+        "Mechanism to steal: attention over the training set behaves like a learned kernel / nearest-neighbor, and permutation + feature-order invariance is baked into the architecture and training distribution",
+        "Why it matters and the skepticism: it challenges the 'train a model per dataset' dogma, but context-length scaling to large N, high dimensionality, and distribution shift remain open - it is still often paired with or behind GBDT rather than replacing it"
+      ],
+      "links": [
+        "Decision - Deep Learning vs Gradient Boosting for Tabular Data",
+        "Deep Dive - The Transformer",
+        "Concept - Attention Mechanism",
+        "Concept - Vision Transformers",
+        "Concept - Synthetic Training Data",
+        "Concept - Scaling Laws",
+        "Concept - Knowledge Distillation",
+        "Concept - Chain-of-Thought and Why It Works",
+        "Concept - Gradient Boosting",
+        "Concept - Conformal Prediction"
+      ]
+    },
+    {
+      "title": "Concept - Conformal Prediction",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Distribution-free uncertainty quantification that wraps ANY trained model to output prediction sets/intervals with finite-sample coverage guarantees. IN: split/inductive conformal, nonconformity scores, marginal vs conditional coverage, adaptive sets (APS/RAPS), conformalized quantile regression, and the distribution-shift edge. OUT: calibrating point-estimate probabilities (link to Probability Calibration).",
+      "key_points": [
+        "The guarantee: for exchangeable data, split conformal produces a set C(X) with P(Y in C(X)) >= 1 - alpha, finite-sample and model-agnostic, with no distributional assumptions (Vovk et al.; Angelopoulos & Bates 2021 tutorial)",
+        "Split/inductive conformal: on a held-out calibration set compute nonconformity scores s_i (e.g. |y - yhat| for regression, 1 - phat_y for classification), take qhat = the ceil((n+1)(1-alpha))/n empirical quantile, and output {y : s(x,y) <= qhat}",
+        "Marginal is not conditional coverage: the guarantee holds on average over the population, NOT per subgroup - a classifier can undercover a minority class while satisfying 90% marginal coverage; Mondrian / class-conditional conformal restores per-group coverage",
+        "Adaptive classification sets: APS and RAPS (Romano et al., Angelopoulos et al.) grow the set on hard inputs, so a large set is a built-in 'I don't know' rather than a silent wrong answer",
+        "Regression: conformalized quantile regression (Romano et al. 2019) yields adaptive-width intervals, whereas naive conformal gives constant-width intervals that are too wide where the model is confident",
+        "The failure mode and active frontier: exchangeability breaks under distribution shift, voiding the guarantee - weighted conformal, and adaptive conformal inference for time series (Gibbs & Candes 2021), are the current research edge",
+        "Relation to calibration: calibration fixes what the probabilities mean, conformal gives coverage sets around outputs - complementary, and increasingly used to wrap LLM outputs into guaranteed-coverage answer sets"
+      ],
+      "links": [
+        "Concept - Probability Calibration",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Concept - Learning from Imbalanced Data",
+        "Concept - Time Series Cross-Validation and Leakage",
+        "Concept - LLM-as-Judge",
+        "Concept - Cost Engineering for LLM Applications",
+        "Breakdown - TabPFN",
+        "Concept - Gradient Boosting"
+      ]
+    },
+    {
+      "title": "Concept - Time Series Cross-Validation and Leakage",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "The tribal knowledge of validating models on temporal and financial data without fooling yourself - the leakage traps that make backtests lie and the purging/embargo machinery that stops them. IN: forward-chaining CV, purged K-fold + embargo, feature look-ahead, group leakage, overlapping labels, and combinatorial purged CV. OUT: forecasting model mechanics (link to Classical Time Series Forecasting).",
+      "key_points": [
+        "Random K-fold on time series leaks the future into the past and produces optimistic scores that evaporate in production; use forward-chaining instead: train on [0, t], validate on (t, t+h], with an expanding or rolling window",
+        "Purged K-fold + embargo (Lopez de Prado, 'Advances in Financial Machine Learning' 2018): when a label spans time (e.g. a forward return), PURGE training samples whose label window overlaps the test window, and add an EMBARGO gap after the test set to kill leakage from serial correlation",
+        "Feature look-ahead leakage is the number-one backtest bug: rolling statistics, target encoding, normalization, and imputation fit over the whole series smuggle in future information - every transform must be causal (fit on past data only)",
+        "Overlapping labels break the IID assumption and inflate apparent significance; sample-uniqueness weighting, the deflated Sharpe ratio, and the probability of backtest overfitting (PBO) correct for it and for multiple-testing across strategy variants",
+        "Group leakage: the same entity/customer appearing in adjacent train and test periods, or duplicated events, leaks - you must split by group AND by time simultaneously",
+        "Even correct CV over-estimates future performance under regime change; combinatorial purged cross-validation (CPCV) returns a DISTRIBUTION of Sharpe ratios across many train/test path combinations rather than a single fragile number",
+        "The governing folklore, stated plainly: 'if your backtest looks too good, you have leakage' - experienced quants assume leakage until they have proven its absence"
+      ],
+      "links": [
+        "Concept - Classical Time Series Forecasting",
+        "Gotchas - Gradient Boosting in Practice",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Concept - Benchmark Contamination",
+        "Concept - Learning from Imbalanced Data",
+        "Concept - Conformal Prediction",
+        "Playbook - Tuning Gradient Boosted Trees"
+      ]
+    },
+    {
+      "title": "Lore - Kaggle and the Reign of Gradient Boosting",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The war story of how gradient-boosted trees conquered competitive ML and codified the tribal knowledge - CV discipline, stacking, leak-hunting - that academic papers only later validated. IN: XGBoost's rise, stacking/blending culture from the Netflix Prize forward, leaderboard shakeups, and where this knowledge actually lives. OUT: the boosting mechanism and system internals (link to the owning notes).",
+      "key_points": [
+        "What happened: after XGBoost's 2014-2016 breakout (Higgs Boson challenge, then a majority of tabular competitions), 'just XGBoost it' became a meme; LightGBM and CatBoost joined, and gradient boosting has remained the tabular king for a decade",
+        "Stacking and blending as a discipline: using out-of-fold predictions as meta-features to train a second-layer model, pioneered publicly in the $1M Netflix Prize (BellKor's Pragmatic Chaos, 2009) whose winning 100+ model blend was never deployed because it was too complex - the enduring lesson that leaderboard-optimal is not production-optimal",
+        "The public-vs-private leaderboard 'shakeup': teams that overfit the public split plummet on the private one, which produced the folk commandment 'TRUST YOUR CV, not the leaderboard'; adversarial validation (train a classifier to tell train from test) became the standard drift detector",
+        "Leak-hunting culture: entire competitions were decided by finding a leakage feature (row order, ID structure, timestamps), which is exactly how target-encoding leakage and strict CV hygiene got codified into practice before the literature caught up",
+        "The practical creed - careful feature engineering + gradient boosting + disciplined CV beats fancy models on tabular - was later validated academically by Grinsztajn et al. 2022",
+        "Where the knowledge lives: winning-solution writeups and public kernels on Kaggle are primary tribal-knowledge sources that rarely appear in papers - the field's folk university",
+        "Evidence status: competition results and winner writeups are well-sourced and public; the maxims ('trust your CV', 'assume leakage') are labeled, load-bearing folklore"
+      ],
+      "links": [
+        "Concept - Gradient Boosting",
+        "Breakdown - XGBoost",
+        "Breakdown - LightGBM",
+        "Decision - Deep Learning vs Gradient Boosting for Tabular Data",
+        "Concept - Time Series Cross-Validation and Leakage",
+        "Concept - Benchmark Contamination",
+        "Reference - Where Real AI Knowledge Lives",
+        "Lore - The OPT-175B Logbook"
+      ]
+    }
+  ]
+}

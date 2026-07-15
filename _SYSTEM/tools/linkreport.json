@@ -1,0 +1,19 @@
+{
+ "broken_links": [],
+ "orphans": [],
+ "below_minimum": [],
+ "lateral_violations": [],
+ "ladder_violations": [],
+ "missing_metadata": [],
+ "stats": {
+  "notes": 660,
+  "resolved_links": 7119,
+  "avg_out_links": 10.79,
+  "broken": 0,
+  "orphans": 0,
+  "below_minimum": 0,
+  "lateral_violations": 0,
+  "ladder_violations": 0,
+  "missing_metadata": 0
+ }
+}

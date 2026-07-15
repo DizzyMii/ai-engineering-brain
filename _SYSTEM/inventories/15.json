@@ -1,0 +1,798 @@
+{
+  "domain": "15 - Multimodal",
+  "slug": "multimodal",
+  "notes": [
+    {
+      "title": "Concept - Cross-Modal Representation Alignment",
+      "type": "concept",
+      "level": "surface",
+      "scope": "Orients the domain: how images, audio, and text get mapped into a common or fused representation, and the taxonomy of ways systems combine modalities. IN: the shared-embedding vs fuse-into-LM paradigms, fusion taxonomy (early/late/cross-attention/projector), why a shared space enables zero-shot transfer. OUT: the contrastive loss math (link CLIP note), specific VLM wiring (link VLM Architectures), diffusion conditioning (link Classifier-Free Guidance).",
+      "key_points": [
+        "The core problem: modalities differ in dimensionality, statistics, and token count; a model must project them into a common space where attention can operate across them",
+        "Two dominant paradigms: contrastive alignment into a shared metric space (CLIP-style dual encoders; best for retrieval/classification) vs fusion into a generative LM (VLMs; best for open-ended generation)",
+        "Fusion taxonomy with tradeoffs: early/pixel fusion (Fuyu — patches straight in), late fusion (separate encoders joined at the end), intermediate via cross-attention (Flamingo), via projector into the token stream (LLaVA); axes = param count, whether the LLM stays frozen, flexibility",
+        "Alignment is not identity: even trained shared spaces retain a modality gap where image and text embeddings occupy separate regions (forward-ref)",
+        "Why a shared space gives zero-shot: classification becomes 'which text embedding is nearest,' so a new class needs only a prompt, no retraining",
+        "Failure mode: naive concatenation of raw features without alignment training yields modality collapse — the 'blind' VLM that answers from text priors and ignores the image"
+      ],
+      "links": [
+        "Concept - CLIP and Contrastive Vision-Language Training",
+        "Concept - VLM Architectures",
+        "Concept - The Modality Gap in Contrastive Models",
+        "Concept - Vision Transformers",
+        "Concept - Embedding Models",
+        "Concept - Attention Mechanism"
+      ]
+    },
+    {
+      "title": "Concept - Vision Transformers",
+      "type": "concept",
+      "level": "core",
+      "scope": "How a transformer processes images by tokenizing them into patches. IN: patchify + linear projection, [CLS] token vs pooling, learned position embeddings and interpolation, ViT-B/L/H config numerology, the data-hunger tradeoff vs CNNs, DeiT distillation, self-supervised ViTs (MAE/DINOv2). OUT: the attention math itself (link Attention Mechanism), contrastive training (link CLIP), arbitrary resolution (link Any-Resolution Vision Encoding).",
+      "key_points": [
+        "Patchify: split image into non-overlapping P*P patches (P=16 typical, 224/16 -> 14x14 = 196 tokens), flatten each to 3P^2 values, linear-project to d; this is literally a strided conv with kernel=stride=P",
+        "Position: ViT uses learned 1D position embeddings (not RoPE); running at a new resolution needs 2D bicubic interpolation of the position grid — a common quiet source of degradation",
+        "[CLS] token vs mean-pooling: original ViT prepends a class token whose attention becomes a saliency map (attention rollout); many later models mean-pool instead",
+        "Data hunger: ViT-B underperforms ResNets below ~100M images (JFT-300M was the unlock, Dosovitskiy et al. 2021); DeiT (Touvron 2021) recovered ImageNet-only training via distillation from a CNN teacher plus heavy augmentation",
+        "Config numerology: ViT-B/16 = 12 layers, d=768, 12 heads, 86M params; ViT-L/14 = 304M; head-dim 64; halving patch size = 4x tokens = 16x attention FLOPs",
+        "Failure modes: quadratic cost in patch count; position-embedding interpolation artifacts at off-training resolutions; high-norm outlier tokens dumped in background patches that corrupt attention maps (forward-ref registers)",
+        "Self-supervised ViT features: MAE (He 2022) masked-patch reconstruction; DINO/DINOv2 (Caron 2021, Oquab 2023) yield strong dense features widely reused as VLM/generation encoders"
+      ],
+      "links": [
+        "Concept - Attention Mechanism",
+        "Deep Dive - The Transformer",
+        "Concept - Register Tokens and ViT Attention Artifacts",
+        "Concept - CLIP and Contrastive Vision-Language Training",
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Concept - Any-Resolution Vision Encoding",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning"
+      ]
+    },
+    {
+      "title": "Concept - CLIP and Contrastive Vision-Language Training",
+      "type": "concept",
+      "level": "core",
+      "scope": "Contrastive image-text pretraining that yields a shared embedding space usable zero-shot. IN: dual-encoder architecture, symmetric InfoNCE, learned temperature, in-batch-negative scaling, zero-shot classification via prompts, prompt ensembling, data curation (WIT/LAION/DataComp). OUT: the sigmoid variant (link SigLIP), the modality gap (link Modality Gap), using CLIP inside a VLM (link Vision-Language Connectors).",
+      "key_points": [
+        "Architecture: image encoder (ViT or ResNet) + text encoder (transformer), each projecting to a shared d-dim space; L2-normalize; compare by cosine similarity",
+        "Loss: symmetric InfoNCE over the N x N in-batch similarity matrix — softmax rows (image->text) and columns (text->image), cross-entropy against the diagonal; learned temperature tau (init 0.07, clamped) scales logits",
+        "Negatives are the other in-batch pairs, so quality scales with batch size (CLIP used 32,768); this coupling to a global batch is the central scaling pain that motivates SigLIP",
+        "Data: 400M image-text pairs (WIT); caption supervision is noisy but scale makes it work; DataComp/LAION showed data curation beats architecture for CLIP quality",
+        "Zero-shot: embed 'a photo of a {class}' per label and take max cosine; prompt templates + 80-prompt ensembling adds several ImageNet points; CLIP ViT-L/14 hits ~75% zero-shot ImageNet top-1",
+        "Failure modes: bag-of-words behavior / weak compositionality ('red cube on blue sphere'), poor counting/OCR/spatial relations, prompt-wording sensitivity, brittleness of the 'a photo of' template under distribution shift",
+        "Downstream reuse: the default VLM vision tower for years; its text encoder also conditions Stable Diffusion"
+      ],
+      "links": [
+        "Concept - Vision Transformers",
+        "Concept - SigLIP and the Sigmoid Contrastive Loss",
+        "Concept - The Modality Gap in Contrastive Models",
+        "Concept - Entropy and Cross-Entropy",
+        "Concept - Softmax",
+        "Concept - Embedding Models",
+        "Concept - VLM Architectures",
+        "Concept - Latent Diffusion"
+      ]
+    },
+    {
+      "title": "Concept - SigLIP and the Sigmoid Contrastive Loss",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The sigmoid pairwise loss that replaced softmax InfoNCE and became the default VLM vision tower. IN: sigmoid loss math, why it decouples from the global batch, the learnable bias term, chunked peer-to-peer negatives, SigLIP/SigLIP2 results and adoption. OUT: the general contrastive framing (link CLIP), encoder selection tradeoffs (link Decision - Choosing a Vision Encoder).",
+      "key_points": [
+        "Softmax InfoNCE needs a normalization over all negatives -> the full N x N matrix and a global all-gather across data-parallel ranks; sigmoid loss (Zhai et al. 2023, SigLIP) treats every image-text pair as an independent binary classification (positive on the diagonal, negative off) summing per-pair sigmoid BCE",
+        "Because the loss decomposes per pair, you can shard the batch, compute local blocks, and swap negatives peer-to-peer with a small all-gather — trains well at small batch and scales to huge batch without the softmax memory blowup",
+        "Learnable bias b is initialized strongly negative (e.g., -10) to counter the extreme negative:positive imbalance early in training when almost every pair is a negative",
+        "Results: SigLIP matches or beats CLIP at far smaller batch (e.g., 16k); SigLIP-So400m (shape-optimized, 400M) is a workhorse; SigLIP2 (2025) adds captioning and self-distillation objectives",
+        "Adoption: SigLIP-So400m at 384-448px is the vision tower in PaliGemma, Idefics2/3, and many 2024-25 open VLMs — strong features at higher resolution than CLIP-336",
+        "Nuance/failure: less batch-sensitive but still benefits from scale; the bias/temperature interaction needs care; inherits CLIP's weak compositionality"
+      ],
+      "links": [
+        "Concept - CLIP and Contrastive Vision-Language Training",
+        "Concept - Vision Transformers",
+        "Decision - Choosing a Vision Encoder for a VLM",
+        "Concept - Data Parallelism and ZeRO",
+        "Concept - Softmax",
+        "Concept - VLM Architectures"
+      ]
+    },
+    {
+      "title": "Concept - The Modality Gap in Contrastive Models",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "The empirical phenomenon that image and text embeddings in CLIP-like models occupy separate, non-overlapping cones of the shared space despite the contrastive objective. IN: the cone effect, gap-at-initialization, why contrastive loss preserves it, temperature's role, implications for retrieval and cross-modal arithmetic. OUT: the base contrastive training (link CLIP).",
+      "key_points": [
+        "Liang et al. 2022 ('Mind the Gap'): plot CLIP image vs text embeddings and they form two distinct cones; the mean image embedding and mean text embedding stay separated by a consistent offset even after training",
+        "Origin — the cone effect: deep nets at random init map inputs into a narrow cone, and two different encoders (image vs text) land in different cones; contrastive loss only needs the relative ordering (matched pair closer than mismatched), so it satisfies the objective while leaving a global offset intact",
+        "Temperature matters: low tau makes the loss focus on the hardest negatives, which does not pull the two modalities together globally, so the gap persists",
+        "You can shrink the gap by shifting one modality's embeddings, and this sometimes improves zero-shot accuracy and fairness metrics — evidence the gap is partly a nuisance artifact, not signal",
+        "Implications: cross-modal cosine similarities are not directly comparable to within-modal ones; naive 'image + (text_A - text_B)' arithmetic is unreliable; retrieval thresholds must be modality-aware; a VLM projector must learn to bridge this gap, not merely resize",
+        "Related framing: alignment/uniformity tradeoff (Wang & Isola 2020); helps explain why feeding raw CLIP features into an LLM underperforms a learned projection"
+      ],
+      "links": [
+        "Concept - CLIP and Contrastive Vision-Language Training",
+        "Concept - SigLIP and the Sigmoid Contrastive Loss",
+        "Concept - Vision-Language Connectors",
+        "Concept - Embedding Models",
+        "Concept - Superposition"
+      ]
+    },
+    {
+      "title": "Concept - Register Tokens and ViT Attention Artifacts",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "The discovery that ViTs stash high-norm outlier tokens in low-information background patches, corrupting attention maps and dense features, and the register-token fix. IN: the artifact phenomenon, high-norm 'massive activation' tokens, why they emerge, register tokens as fix, impact on DINOv2/dense prediction/interpretability. OUT: ViT fundamentals (link Vision Transformers).",
+      "key_points": [
+        "Darcet et al. 2023 ('Vision Transformers Need Registers'): attention maps of trained ViTs (supervised, CLIP, DINO) show a few patches in uniform background regions with anomalously high activation norm (~10x typical), producing noisy uninterpretable attention",
+        "Mechanism: the model recycles patches it deems low-information as storage for global image-level features (a computation scratchpad), overwriting local content — visible as norm spikes and hurting dense tasks (segmentation, depth) that need clean per-patch features",
+        "Fix: append a handful (4) of learnable 'register' tokens to the input, discarded at output; they give the model dedicated scratchpad slots, cleaning attention maps and improving dense downstream performance and interpretability",
+        "DINOv2 adopted registers; the phenomenon parallels attention sinks in LLMs and 'massive activations' (Sun et al. 2024) — both are somewhere to dump attention mass",
+        "Practical impact: if you build a VLM on raw ViT patch features, these outlier tokens inject noise into the LLM; interpretability of vision features must account for them; explains why some CLIP attention visualizations look broken",
+        "Non-obvious: this is the vision analog of the register/attention-sink story from StreamingLLM — a cross-modal recurrence of the same mechanism"
+      ],
+      "links": [
+        "Concept - Vision Transformers",
+        "Concept - Attention Sinks",
+        "Concept - The Modality Gap in Contrastive Models",
+        "Concept - Sparse Autoencoders",
+        "Concept - VLM Architectures"
+      ]
+    },
+    {
+      "title": "Concept - VLM Architectures",
+      "type": "concept",
+      "level": "core",
+      "scope": "The taxonomy and wiring of vision-language models that feed images into an LLM. IN: the three families (cross-attention/Flamingo, projector/LLaVA, early-fusion/native), where the vision encoder sits, frozen vs trained components, image-token budget, single vs interleaved multi-image. OUT: projector internals (link Connectors), specific systems (link LLaVA/Flamingo breakdowns), native depth (link Native and Any-to-Any), resolution handling (link Any-Resolution).",
+      "key_points": [
+        "Family A — cross-attention (Flamingo, Llama-3.2-Vision): vision features enter through added gated cross-attention layers interleaved in a frozen LLM; keeps LLM weights intact and scales to many images but adds params and complexity",
+        "Family B — projector/prefix (LLaVA, Qwen-VL, InternVL, most open VLMs): vision encoder -> connector (MLP/resampler) -> image tokens prepended into the LLM token stream as soft prompts; simplest and most popular; the LLM must be (partly) trained",
+        "Family C — early/native fusion (Fuyu, Chameleon, Gemini): no separate pretrained vision encoder; image patches linearly projected as tokens from scratch, or images tokenized to discrete codes; one transformer over mixed modalities",
+        "Key design axes: frozen vs unfrozen encoder/LLM; image-token count (one 336px CLIP image ~ 576 tokens, multi-tile can be thousands); whether image tokens attend bidirectionally within the image or causally; single vs interleaved multi-image/video",
+        "Training recipe (LLaVA-style): stage 1 aligns the projector on caption data (freeze encoder + LLM), stage 2 instruction-tunes (unfreeze LLM); stage-2 SFT data quality dominates final quality",
+        "Failure modes: the 'blind' VLM answering from language priors, OCR/small-text failure at low resolution, token-budget blowup killing context and latency, object/attribute hallucination"
+      ],
+      "links": [
+        "Concept - Vision-Language Connectors",
+        "Breakdown - LLaVA",
+        "Breakdown - Flamingo",
+        "Concept - Any-Resolution Vision Encoding",
+        "Concept - Native and Any-to-Any Multimodal Models",
+        "Deep Dive - The Transformer",
+        "Concept - Supervised Fine-Tuning (SFT)",
+        "Concept - KV Cache"
+      ]
+    },
+    {
+      "title": "Concept - Vision-Language Connectors",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The module that maps vision-encoder features into the LLM token space in projector-style VLMs. IN: linear vs MLP projector, Q-Former (BLIP-2), Perceiver resampler, pixel-shuffle/unshuffle token reduction, the token-count vs quality tradeoff, feature-layer choice. OUT: cross-attention fusion (link Flamingo), the encoder itself (link ViT/SigLIP).",
+      "key_points": [
+        "Simplest: a linear or 2-layer MLP projecting each patch feature to LLM d; LLaVA-1.5 switched linear -> MLP for a measurable bump; keeps one token per patch (576 for 336px)",
+        "Query-based resamplers: BLIP-2's Q-Former uses ~32 learned queries cross-attending to vision features to compress to 32 tokens but is hard to train and can bottleneck fine detail; Flamingo/Idefics Perceiver resampler is similar",
+        "Token reduction: pixel-shuffle/unshuffle (InternVL) merges a 2x2 patch neighborhood into one token (4x fewer tokens, restores channels); Qwen2-VL uses an MLP merger on 2x2 blocks — the main lever on the token-budget problem",
+        "Tradeoff: fewer tokens = cheaper LLM and more context room but lost OCR/fine detail; more tokens = better perception but worse latency and context pressure; resamplers empirically lose more detail than pixel-shuffle at the same token count",
+        "The connector must bridge the modality gap and the encoder-vs-LLM distribution mismatch — a nontrivial learned map, not a resize",
+        "Failure modes: an undertrained projector yields weak grounding; over-aggressive compression causes OCR collapse; feature-layer choice matters (LLaVA uses the penultimate ViT layer, not the last)"
+      ],
+      "links": [
+        "Concept - VLM Architectures",
+        "Concept - Vision Transformers",
+        "Concept - The Modality Gap in Contrastive Models",
+        "Concept - Any-Resolution Vision Encoding",
+        "Breakdown - LLaVA",
+        "Concept - Attention Mechanism",
+        "Concept - KV Cache"
+      ]
+    },
+    {
+      "title": "Concept - Any-Resolution Vision Encoding",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Techniques for feeding images of arbitrary size and aspect ratio to a ViT trained at fixed resolution. IN: AnyRes tiling (LLaVA-NeXT), dynamic tiling (InternVL), NaViT patch-n-pack, Qwen2-VL native dynamic resolution with 2D/M-RoPE, position-embedding interpolation, token-budget math. OUT: base ViT (link Vision Transformers), connector token reduction (link Connectors).",
+      "key_points": [
+        "Problem: CLIP/SigLIP ViTs are trained at 224-448px, but real images are high-res and varied aspect ratio; downsampling to 336 destroys small text and detail (OCR fails)",
+        "AnyRes/tiling (LLaVA-NeXT, InternVL): split the image into a grid of native-resolution tiles, encode each separately, add a downsized global thumbnail, concatenate tokens — e.g., 4 tiles + thumbnail = 5x576 ~ 2880 tokens for one image, which is why VLM context and latency blow up",
+        "Position-embedding interpolation: to run a fixed-grid ViT at higher res you bicubically interpolate the learned position grid; it works but degrades, which 2D-RoPE avoids",
+        "NaViT (Dehghani et al. 2023) 'patch n' pack': pack variable-resolution images into one sequence with masked attention (no padding waste) and factorized position embeddings — native aspect ratios and a large training-efficiency win",
+        "Qwen2-VL: native dynamic resolution with multimodal 2D rotary embeddings (M-RoPE), variable token count per image, unified image/video handling — a modern default; InternVL dynamic tiling picks an aspect-ratio-matched tile layout",
+        "Failure modes: tiling seams split text/objects across tiles (grounding errors); token budget explodes and starves the text context; aspect-ratio bucketing choices bias which images degrade"
+      ],
+      "links": [
+        "Concept - Vision Transformers",
+        "Concept - Vision-Language Connectors",
+        "Concept - Rotary Position Embeddings (RoPE)",
+        "Concept - VLM Architectures",
+        "Gotchas - Vision-Language Models",
+        "Concept - KV Cache"
+      ]
+    },
+    {
+      "title": "Breakdown - LLaVA",
+      "type": "breakdown",
+      "level": "core",
+      "scope": "The canonical open projector-style VLM and the training recipe that made it reproducible. IN: CLIP ViT-L + MLP + Vicuna wiring, two-stage training, GPT-4-generated visual instruction data, LLaVA-1.5/NeXT changes, exact configs and numbers. OUT: general VLM taxonomy (link VLM Architectures), connector variants (link Connectors).",
+      "key_points": [
+        "Architecture (Liu et al. 2023): frozen CLIP ViT-L/14 penultimate-layer features (576 tokens at 336px) -> projector -> Vicuna-7B/13B; original used a single linear layer, LLaVA-1.5 upgraded to a 2-layer MLP and 336px encoder",
+        "Data innovation: 'visual instruction tuning' — used text-only GPT-4 to synthesize multimodal instruction data from COCO captions and boxes (conversation, detailed description, complex reasoning), ~158K samples; this distillation trick is the real contribution",
+        "Two stages: (1) feature alignment — freeze encoder + LLM, train only the projector on 558K caption pairs; (2) end-to-end instruction tuning — unfreeze the LLM (keep encoder frozen), train on the 158K plus academic-task data; ~1 day on 8xA100 for 7B",
+        "LLaVA-1.5 result: SOTA on many VQA benchmarks with only ~1.2M total samples of public data — showed you do not need Flamingo-scale data",
+        "LLaVA-NeXT (1.6): AnyRes tiling for higher effective resolution, better OCR/reasoning, more SFT data",
+        "What is dated/wrong: frozen CLIP caps OCR and fine detail; 576-token images; weak grounding/counting; hallucination driven by strong LLM priors; benchmark-contamination concerns",
+        "What to steal: freeze-then-unfreeze staging, distilling instruction data from a stronger model, the MLP connector, penultimate-layer features"
+      ],
+      "links": [
+        "Concept - VLM Architectures",
+        "Concept - Vision-Language Connectors",
+        "Concept - CLIP and Contrastive Vision-Language Training",
+        "Concept - Supervised Fine-Tuning (SFT)",
+        "Concept - Synthetic Training Data",
+        "Concept - Knowledge Distillation",
+        "Concept - Any-Resolution Vision Encoding",
+        "Gotchas - Vision-Language Models",
+        "Concept - Benchmark Contamination",
+        "Playbook - Training a VLM from a Vision Encoder and an LLM"
+      ]
+    },
+    {
+      "title": "Breakdown - Flamingo",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "DeepMind's cross-attention VLM that set the interleaved few-shot multimodal template. IN: Perceiver resampler, gated cross-attention with tanh gating, frozen encoder + frozen Chinchilla LLM, interleaved image-text training, in-context few-shot multimodality. OUT: projector-style VLMs (link LLaVA), the resampler as a connector (link Connectors).",
+      "key_points": [
+        "Alayrac et al. 2022: freeze a pretrained vision encoder (NFNet) and a frozen Chinchilla LLM, then insert trainable GATED XATTN-DENSE layers between LLM blocks that cross-attend to visual features; only the new layers and the resampler train",
+        "Perceiver Resampler: maps a variable number of vision features to a fixed 64 visual tokens via learned latent queries, decoupling image resolution/count from LLM cost",
+        "tanh gating: cross-attention output is multiplied by tanh(alpha) with alpha initialized to 0, so at init the model is exactly the original LLM and the gates open during training — the stability trick that lets you graft modules onto a frozen LLM without wrecking it",
+        "Interleaved training on M3W (webpages with inline images) plus image-text pairs enables few-shot: show a few (image, answer) examples in context, then a new image; this in-context multimodal ability was the headline",
+        "Per-image causal masking: each text token attends only to the immediately preceding image, keeping interleaved sequences coherent",
+        "What is dated: NFNet encoder, no high-res/OCR focus; projector-style (LLaVA) became more popular for simplicity, but cross-attention returned in Llama-3.2-Vision precisely to keep the LLM frozen",
+        "What to steal: zero-init gating for grafting modules, the resampler for a fixed token budget, interleaved data for multi-image/few-shot"
+      ],
+      "links": [
+        "Concept - VLM Architectures",
+        "Concept - Vision-Language Connectors",
+        "Concept - Attention Mechanism",
+        "Concept - RMSNorm and LayerNorm",
+        "Breakdown - LLaVA",
+        "Concept - Chain-of-Thought and Why It Works",
+        "Concept - Native and Any-to-Any Multimodal Models",
+        "Concept - Scaling Laws"
+      ]
+    },
+    {
+      "title": "Concept - Native and Any-to-Any Multimodal Models",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Models that process and/or generate multiple modalities in one transformer without a bolted-on encoder. IN: early-fusion input (Fuyu, Chameleon), discrete multimodal tokenization, mixed-modal training instability and the norm fixes, unified generation (Chameleon output, Transfusion, GPT-4o), diffusion+AR hybrids. OUT: projector VLMs (link VLM Architectures), image-token internals (link VQ-VAE), diffusion internals (link Diffusion Models).",
+      "key_points": [
+        "Fuyu (Adept 2023): no vision encoder — image patches are linearly projected straight into a decoder-only LLM as tokens; radically simple and handles arbitrary resolution naturally",
+        "Chameleon (Meta 2024): early-fusion, tokenizes images to discrete VQ codes and interleaves them with text in one vocabulary, trained mixed-modal from scratch and able to output image tokens; reported serious training instabilities requiring QK-Norm and norm reordering to keep logits stable across modalities (the load-bearing tribal detail)",
+        "Transfusion (Meta 2024): a single transformer trained with LM cross-entropy on text tokens AND a diffusion loss on continuous image patches simultaneously — combines AR text with diffusion images and avoids the fidelity loss of VQ tokenization",
+        "GPT-4o / Gemini: natively multimodal, trained on interleaved modalities end-to-end; 4o does image and audio in and out at low latency (folklore: discrete audio tokens for realtime)",
+        "Core tension: discrete tokenization (VQ) unifies the objective but loses visual fidelity, while continuous + diffusion preserves fidelity but complicates the single-loss story — any-to-any is where this is actively fought out",
+        "Failure modes: modality competition (one loss dominates, the other modality is undertrained), logit-scale divergence across modalities needing norm tricks, a much larger vocabulary, and hard-to-design evaluation"
+      ],
+      "links": [
+        "Concept - VLM Architectures",
+        "Concept - VQ-VAE and Discrete Visual Tokenization",
+        "Deep Dive - Diffusion Models",
+        "Concept - Flow Matching",
+        "Deep Dive - The Transformer",
+        "Concept - RMSNorm and LayerNorm",
+        "Concept - Neural Audio Codecs and Residual Vector Quantization",
+        "Concept - Mixed Precision Training"
+      ]
+    },
+    {
+      "title": "Gotchas - Vision-Language Models",
+      "type": "gotchas",
+      "level": "advanced",
+      "scope": "Aggregated pitfalls when building, training, and serving VLMs, ordered by pain. OUT: diffusion-side pitfalls (link Gotchas - Diffusion Training and Sampling); eval methodology (link Evaluation notes).",
+      "key_points": [
+        "The blind VLM: model answers from language priors and ignores the image; detect with a counterfactual image-swap test; caused by weak alignment, too-strong LLM prior, or text-heavy SFT",
+        "Image-token budget blowup: AnyRes tiling produces thousands of tokens per image -> context overflow, slow prefill, and cost; symptom is truncated context and latency spikes",
+        "OCR/small-text failure at low resolution: 336px cannot read fine text; fix is higher resolution or tiling, but watch the token cost",
+        "Image-placeholder / chat-template mismatch: the number of <image> placeholder tokens must equal the projector's output token count, and the train vs inference template must match, or quality silently collapses",
+        "Object/attribute hallucination: names plausible-but-absent objects (POPE benchmark); worsened by strong LLM priors and by SFT data that describes prototypical scenes",
+        "Masking/padding bugs with multi-image batches: image tokens given a causal mask when they should be bidirectional; left-padding errors across a batch of different image counts",
+        "Frozen-encoder ceiling: CLIP features cap fine-grained perception no matter how much you SFT the LLM",
+        "Multi-image/video generalization: models trained on single images degrade on many images and lose temporal ordering; and eval is contamination- and prompt-format-sensitive (route to Evaluation)"
+      ],
+      "links": [
+        "Concept - VLM Architectures",
+        "Concept - Any-Resolution Vision Encoding",
+        "Concept - Vision-Language Connectors",
+        "Breakdown - LLaVA",
+        "Concept - KV Cache",
+        "Concept - Benchmark Contamination",
+        "Concept - Sampling and Decoding Parameters"
+      ]
+    },
+    {
+      "title": "Decision - Choosing a Vision Encoder for a VLM",
+      "type": "decision",
+      "level": "core",
+      "scope": "How to pick the vision tower for a VLM. IN: CLIP vs SigLIP vs DINOv2 vs combined (RADIO/feature fusion), resolution vs token budget, which feature layer, frozen vs tuned encoder. OUT: encoder internals (link ViT/CLIP/SigLIP), the connector (link Vision-Language Connectors).",
+      "key_points": [
+        "Default (as of 2025): SigLIP-So400m at 384-448px — strong language-aligned features, good OCR at higher resolution, efficient; this is the modern workhorse",
+        "CLIP ViT-L/14-336: the legacy default (LLaVA) — fine but weaker than SigLIP at comparable scale",
+        "DINOv2: best pure-vision dense/spatial features (segmentation, depth, grounding) but not language-aligned, so worse for VQA alone; combine with CLIP/SigLIP (Cambrian-1's spatial-vision aggregator, or RADIO distilling multiple teachers) for grounding-heavy tasks",
+        "Resolution vs token budget is the central tradeoff: higher res / tiling improves OCR and detail but multiplies tokens (see Any-Resolution), pressuring context and latency",
+        "Which layer: penultimate-layer features usually beat the last (the last is over-specialized to the contrastive objective) — the LLaVA finding",
+        "Frozen vs tuned encoder: freeze for stability and data efficiency; only unfreeze with an LR warmup and lots of data, at risk of catastrophic forgetting in the encoder",
+        "Decision flippers: OCR/document tasks -> high-res SigLIP or a doc-specialized encoder; grounding/robotics -> add DINOv2; tight latency/context -> aggressive token reduction and a smaller encoder"
+      ],
+      "links": [
+        "Concept - CLIP and Contrastive Vision-Language Training",
+        "Concept - SigLIP and the Sigmoid Contrastive Loss",
+        "Concept - Vision Transformers",
+        "Concept - Any-Resolution Vision Encoding",
+        "Concept - Vision-Language Connectors",
+        "Decision - Fine-Tuning vs RAG vs Prompting",
+        "Concept - VLM Architectures"
+      ]
+    },
+    {
+      "title": "Playbook - Training a VLM from a Vision Encoder and an LLM",
+      "type": "playbook",
+      "level": "advanced",
+      "scope": "End-to-end procedure to build a projector-style VLM from an off-the-shelf encoder plus LLM. IN: component selection, the two-stage recipe, data mix, freezing schedule, hyperparameters, verification probes. OUT: pretraining the base LLM (link Anatomy of a Pretraining Run), training the encoder (link CLIP/SigLIP).",
+      "key_points": [
+        "Select components: encoder (SigLIP/CLIP) + LLM (Qwen/Llama) + connector (MLP or pixel-shuffle); decide target resolution and token budget up front",
+        "Stage 1 alignment: freeze encoder + LLM, train only the connector on ~0.5-1M caption/interleaved pairs; expected observation = alignment loss drops steadily; deviation = a high plateau means projector LR too low or a feature-layer mismatch",
+        "Wire-check: choose the penultimate feature layer and verify image-token count equals the number of <image> placeholders in the chat template before any long run",
+        "Stage 2 instruction tuning: unfreeze the LLM (keep encoder frozen unless you have abundant data), SFT on high-quality multimodal instructions mixed with some text-only data to prevent language regression; LR ~2e-5 for the LLM, higher for the connector, ~1 epoch",
+        "Resolution: enable AnyRes tiling if OCR is needed and budget the resulting tokens against context and latency",
+        "Verify: run VQA + OCR + hallucination (POPE) probes and a counterfactual image-swap test to confirm the model actually uses the image",
+        "When it goes wrong: blind model -> better SFT data / check masking / raise image-token weight; OCR fails -> raise resolution; language skills regressed -> add text-only replay; loss NaN -> check bf16 and encoder-output normalization"
+      ],
+      "links": [
+        "Concept - VLM Architectures",
+        "Breakdown - LLaVA",
+        "Concept - Vision-Language Connectors",
+        "Concept - Supervised Fine-Tuning (SFT)",
+        "Concept - Any-Resolution Vision Encoding",
+        "Concept - Mixed Precision Training",
+        "Decision - Choosing a Vision Encoder for a VLM",
+        "Gotchas - Vision-Language Models"
+      ]
+    },
+    {
+      "title": "Reference - Vision Encoders and Multimodal Models",
+      "type": "reference",
+      "level": "core",
+      "scope": "Front-loaded lookup tables for vision encoders, VLMs, image/video generators, and audio models with specs, plus the token-count and latent-scaling formulas. OUT: mechanism explanations (link the concept notes).",
+      "key_points": [
+        "Vision encoders table: CLIP ViT-L/14-336 (304M, 576 tokens), SigLIP-So400m/384 (400M), DINOv2-L, EVA-CLIP — columns for params, native resolution, token count, objective, license",
+        "VLMs table: LLaVA-1.5/NeXT, Qwen2-VL, InternVL2, Idefics2/3, PaliGemma, Molmo, Llama-3.2-Vision — LLM base, encoder, connector type, max image tokens, fusion family",
+        "Image/video generation table: SD1.5, SDXL, SD3, FLUX.1, DALL-E 3, Imagen, Sora — params, latent channels, text encoder(s), default sampler, backbone (U-Net vs DiT/MMDiT), DDPM vs flow matching, date-stamped as of 2026",
+        "Audio table: Whisper (tiny 39M -> large-v3 1.55B, mel bins, languages), EnCodec/DAC (bitrate, codebooks, frame rate), VALL-E/XTTS/F5-TTS",
+        "Formulas: image tokens = (H/P)(W/P) / (pixel-shuffle factor)^2; tiling multiplier = tiles + 1 thumbnail; audio token rate = frame_rate x N_q codebooks",
+        "Footnoted constants: VAE latent scaling factors (SD 0.18215, SDXL 0.13025), latent channel counts (4 for SD1/SDXL, 16 for SD3/FLUX)"
+      ],
+      "links": [
+        "Concept - VLM Architectures",
+        "Breakdown - Stable Diffusion",
+        "Breakdown - Whisper",
+        "Concept - Vision Transformers",
+        "Reference - Memory Math for Transformers",
+        "Reference - Model Genealogy"
+      ]
+    },
+    {
+      "title": "Deep Dive - Diffusion Models",
+      "type": "deep-dive",
+      "level": "advanced",
+      "scope": "The full diffusion framework from DDPM math to sampling. IN: forward noising, reverse denoising, the simple loss, epsilon/v/x0 parameterizations, the score-matching connection, DDPM/DDIM, noise schedules and SNR, the SDE/ODE view. OUT: latent-space diffusion (link Latent Diffusion), guidance (link Classifier-Free Guidance), sampler depth (link Samplers), the flow-matching generalization (link Flow Matching), the DiT backbone (link Diffusion Transformers).",
+      "key_points": [
+        "Forward process: q(x_t|x_0) = N(sqrt(a_bar_t) x_0, (1 - a_bar_t) I) with a closed form to jump to any t; x_t = sqrt(a_bar_t) x_0 + sqrt(1 - a_bar_t) * epsilon, schedule beta_t giving a_bar_t",
+        "Reverse process: learn epsilon_theta(x_t, t) to predict the noise; the ELBO simplifies (Ho et al. 2020, DDPM) to L_simple = E || epsilon - epsilon_theta(x_t, t) ||^2, a denoising objective that drops the ELBO weighting and trains better",
+        "Score connection (Song & Ermon 2019/2021): epsilon-prediction is equivalent to estimating the score grad_x log p(x_t) up to scaling; diffusion is a discretized SDE, which is what enables deterministic ODE samplers",
+        "Parameterizations: epsilon-pred (standard), x0-pred, and v-pred (Salimans & Ho 2022, better at high noise and for distillation and zero-SNR); plus loss weighting choices like min-SNR-gamma (Hang 2023)",
+        "Sampling: ancestral DDPM (~1000 steps, slow) vs DDIM (Song 2021) deterministic non-Markovian at 20-50 steps; classifier-free guidance layers on top",
+        "Noise schedules: linear (DDPM), cosine (Nichol & Dhariwal 2021, better for small images), and the zero-terminal-SNR fix (forward-ref gotchas)",
+        "Architecture walkthrough (required): sinusoidal time embedding -> MLP, U-Net with residual blocks and self/cross-attention at low resolution, conditioning injection; include the forward+reverse diagram",
+        "Evolution (required): score matching -> DDPM -> DDIM -> latent diffusion -> classifier-free guidance -> v-pred/EDM (Karras 2022) -> flow matching/rectified flow -> DiT; note what flow matching replaces",
+        "Failure modes: too few steps = blur/artifacts; schedule/parameterization mismatch; exposure bias (train on real x_t, sample on estimates) compounds error"
+      ],
+      "links": [
+        "Concept - Latent Diffusion",
+        "Concept - Classifier-Free Guidance",
+        "Concept - Flow Matching",
+        "Concept - Diffusion Samplers and Schedulers",
+        "Concept - Diffusion Transformers (DiT)",
+        "Gotchas - Diffusion Training and Sampling",
+        "Concept - KL Divergence",
+        "Concept - Entropy and Cross-Entropy",
+        "Concept - Softmax",
+        "Snippet - DDPM Training and Sampling Loop",
+        "Concept - Backpropagation",
+        "Breakdown - Stable Diffusion"
+      ]
+    },
+    {
+      "title": "Concept - Latent Diffusion",
+      "type": "concept",
+      "level": "core",
+      "scope": "Running diffusion in a compressed VAE latent space instead of pixels — the Stable Diffusion architecture pattern. IN: the perceptual autoencoder, why latent (compute), cross-attention text conditioning, latent channels and the scaling constant, the two-stage train. OUT: DDPM math (link Diffusion Models), the specific SD family and history (link Stable Diffusion breakdown), samplers (link Samplers).",
+      "key_points": [
+        "Rombach et al. 2022 (LDM): train an autoencoder to compress images 8x (512x512x3 -> 64x64x4 latent), then run diffusion in that latent — ~48x fewer spatial elements makes training and inference tractable on consumer GPUs",
+        "The autoencoder is perceptual + adversarial (LPIPS loss + patch-GAN discriminator), not pixel-MSE, so latents preserve perceptual detail; comes in KL-regularized or VQ-regularized variants",
+        "Conditioning: text enters via cross-attention — CLIP/T5 text embeddings act as keys/values in the U-Net's cross-attention layers, which is how the prompt steers denoising",
+        "Latent scaling factor: latents are multiplied by a constant (SD 0.18215) so their variance is ~1 for the diffusion model — a magic number that silently breaks output if forgotten (forward-ref gotchas)",
+        "Why it dominated: it made open text-to-image feasible; essentially all image diffusion (SD/SDXL/SD3/FLUX) is latent diffusion",
+        "Failure modes: the VAE is the fidelity ceiling — fine text, faces, and hands are lost in the 8x compression; VAE decode artifacts (grid patterns, color shift); 4-channel latents limited detail, which is why SD3/FLUX moved to 16-channel latents"
+      ],
+      "links": [
+        "Deep Dive - Diffusion Models",
+        "Breakdown - Stable Diffusion",
+        "Concept - VQ-VAE and Discrete Visual Tokenization",
+        "Concept - Classifier-Free Guidance",
+        "Concept - Attention Mechanism",
+        "Concept - CLIP and Contrastive Vision-Language Training",
+        "Gotchas - Diffusion Training and Sampling"
+      ]
+    },
+    {
+      "title": "Concept - Classifier-Free Guidance",
+      "type": "concept",
+      "level": "core",
+      "scope": "The technique that trades diversity for prompt adherence in conditional diffusion. IN: joint conditional/unconditional training, the guidance extrapolation formula and scale, oversaturation at high scale and its fixes (dynamic thresholding, rescaling, limited-interval guidance), negative prompts. OUT: DDPM basics (link Diffusion Models), classifier-guidance history (mention only).",
+      "key_points": [
+        "Ho & Salimans 2022: train one model for both conditional epsilon_theta(x, c) and unconditional epsilon_theta(x, empty) by dropping the condition ~10% of the time; at sampling, extrapolate eps_hat = eps_uncond + w * (eps_cond - eps_uncond) with guidance weight w",
+        "Mechanism: pushes samples toward regions where the conditional is more likely than the unconditional, sharpening prompt adherence at the cost of diversity and mode coverage",
+        "Typical w: ~7.5 for SD, ~3-5 for SDXL; w=1 means no guidance; w>15 tends to oversaturate with blown highlights and artifacts",
+        "Oversaturation fixes: dynamic thresholding (Imagen, Saharia 2022) clamps the predicted x0 by percentile; guidance rescaling (Lin et al. 2023) rescales to match std; limited-interval guidance (Kynkaanniemi et al. 2024) applies CFG only in a middle-noise window for a large quality gain; also CFG++/APG",
+        "Replaced classifier guidance (Dhariwal & Nichol 2021), which needed a separate noise-robust classifier; CFG needs none",
+        "Negative prompts: swap the unconditional branch for an embedded negative prompt to steer away from it — purely an inference-time trick",
+        "Failure modes: high w -> oversaturation and reduced diversity ('deep-fried' look); guidance interacts with sampler and step count; few-step distilled models (LCM/Turbo) fold guidance into the weights"
+      ],
+      "links": [
+        "Deep Dive - Diffusion Models",
+        "Concept - Latent Diffusion",
+        "Concept - Diffusion Samplers and Schedulers",
+        "Gotchas - Diffusion Training and Sampling",
+        "Concept - KL Divergence",
+        "Concept - Sampling and Decoding Parameters",
+        "Concept - Flow Matching"
+      ]
+    },
+    {
+      "title": "Concept - Flow Matching",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The continuous-time generative framework (conditional flow matching / rectified flow) that underlies SD3, FLUX, and modern generators. IN: the CNF/ODE view, the conditional flow-matching objective, optimal-transport/rectified straight paths, velocity prediction, the relation to diffusion, few-step sampling. OUT: DDPM specifics (link Diffusion Models), the DiT backbone (link Diffusion Transformers).",
+      "key_points": [
+        "Idea (Lipman et al. 2022, CFM; Liu et al. 2022, rectified flow): learn a velocity field v_theta(x, t) that transports noise x_1 ~ N(0, I) to data x_0 along a probability path, then sample by solving the ODE dx/dt = v_theta",
+        "Conditional flow matching: regress v_theta against the conditional velocity of a simple per-sample path; with the linear/OT path x_t = (1-t) x_0 + t x_1 the target velocity is just (x_1 - x_0) — a dead-simple regression with no noise-schedule bookkeeping",
+        "Rectified flow: straight-line paths make the ODE easy to integrate in few steps; a 'reflow' procedure straightens trajectories further toward 1-2 step generation",
+        "Relation to diffusion: diffusion is a curved-path special case; flow matching generalizes it, typically giving straighter paths, fewer sampling steps, and more stable training",
+        "Adoption: SD3 uses rectified flow with logit-normal timestep sampling (and a resolution-dependent shift); FLUX likewise; the velocity/v-prediction view unifies with the EDM/score formulation",
+        "Why labs switched: a simpler objective, better observed scaling, fewer steps, and clean composition with DiT/MMDiT backbones",
+        "Failure modes: ODE-solver error at very few steps; the timestep-sampling distribution (logit-normal, high-res shift) matters a lot; path choice affects sample quality"
+      ],
+      "links": [
+        "Deep Dive - Diffusion Models",
+        "Concept - Diffusion Transformers (DiT)",
+        "Breakdown - Stable Diffusion",
+        "Concept - Diffusion Samplers and Schedulers",
+        "Concept - KL Divergence",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - Video Generation"
+      ]
+    },
+    {
+      "title": "Concept - Diffusion Samplers and Schedulers",
+      "type": "concept",
+      "level": "core",
+      "scope": "The numerical solvers and noise schedules that turn a trained diffusion/flow model into images in N steps. IN: DDPM/DDIM, DPM-Solver(++), Euler/Heun ancestral, Karras sigmas, step-count economics, ODE vs SDE, few-step distillation (LCM/Turbo/consistency). OUT: model training (link Diffusion Models), guidance (link Classifier-Free Guidance).",
+      "key_points": [
+        "Two families: stochastic samplers (ancestral, add noise each step — more diverse, need more steps) vs deterministic ODE samplers (DDIM, DPM-Solver, Euler — fewer steps, reproducible)",
+        "DDIM (Song 2021): non-Markovian deterministic, 20-50 steps; DPM-Solver / DPM-Solver++ (Lu et al. 2022): high-order ODE solvers giving good images in 10-20 steps, with ++ handling guidance and latent models better",
+        "Karras et al. 2022 (EDM): reframes the schedule as noise levels sigma; the 'Karras sigma' spacing improves low-step quality, paired with the 2nd-order Heun sampler",
+        "Step-count economics: quality saturates (SDXL is good at ~30 DPM++ steps); each step is one full backbone forward, and with CFG it is two forwards, so steps x 2 drives latency (route to serving)",
+        "Few-step distillation: LCM / LCM-LoRA (consistency distillation), SDXL-Turbo / ADD (adversarial diffusion distillation), and flow reflow reach 1-4 steps by folding guidance in",
+        "The scheduler must match training: v-pred vs epsilon-pred, and zero-terminal-SNR training requires a matching sampler and trailing-timestep selection or you get washed-out/dark images (route to gotchas)",
+        "Failure modes: too few steps = blur/artifacts; wrong sampler for the parameterization; ancestral noise at low steps = grain"
+      ],
+      "links": [
+        "Deep Dive - Diffusion Models",
+        "Concept - Classifier-Free Guidance",
+        "Concept - Flow Matching",
+        "Gotchas - Diffusion Training and Sampling",
+        "Concept - Knowledge Distillation",
+        "Concept - Sampling and Decoding Parameters",
+        "Concept - The Roofline Model"
+      ]
+    },
+    {
+      "title": "Concept - Diffusion Transformers (DiT)",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Replacing the diffusion U-Net with a transformer over latent patches. IN: patchify latents to tokens, adaLN-zero conditioning, clean scaling behavior, MMDiT dual-stream (SD3), Sora/FLUX usage, the attention-cost problem. OUT: DDPM math (link Diffusion Models), the flow-matching objective (link Flow Matching), video specifics (link Video Generation).",
+      "key_points": [
+        "Peebles & Xie 2023 (DiT): operate on latent patches as tokens through a plain transformer and show diffusion quality scales cleanly with transformer FLOPs (more Gflops -> lower FID) — the 'scaling laws for diffusion' moment",
+        "adaLN-zero conditioning: inject timestep + class/text via adaptive LayerNorm whose scale/shift/gate are predicted by an MLP from the conditioning, with the residual gate zero-initialized (same idea as Flamingo gating) — the key stability trick",
+        "MMDiT (SD3, Esser et al. 2024): separate weight streams for text and image tokens that attend jointly, giving much better text rendering and prompt adherence than cross-attention-only U-Nets",
+        "Why it won: U-Nets do not scale as gracefully, and transformers reuse all LLM infrastructure (FlashAttention, tensor/pipeline parallelism, better hardware utilization); FLUX, SD3, Sora, and PixArt are all DiT-based",
+        "Cost: attention is quadratic in token count, so high-res and video are expensive — this motivates latent compression and windowed/spatiotemporal attention",
+        "Failure modes: needs the zero-init gate for stable training; high-res token blowup; the 2D/3D positional encoding for patches must be chosen carefully (RoPE-2D/3D)"
+      ],
+      "links": [
+        "Deep Dive - Diffusion Models",
+        "Concept - Flow Matching",
+        "Concept - Latent Diffusion",
+        "Concept - Video Generation",
+        "Deep Dive - The Transformer",
+        "Deep Dive - FlashAttention",
+        "Concept - RMSNorm and LayerNorm",
+        "Concept - Scaling Laws",
+        "Breakdown - Stable Diffusion"
+      ]
+    },
+    {
+      "title": "Concept - ControlNet and Spatial Conditioning for Diffusion",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Adding spatial/structural control (edges, pose, depth) and image prompts to a pretrained diffusion model. IN: ControlNet trainable-copy + zero-convolution mechanism, T2I-Adapter, IP-Adapter (image prompt), how the base model stays intact, composition. OUT: text conditioning/CFG (link Latent Diffusion/CFG), LoRA fine-tuning (link LoRA).",
+      "key_points": [
+        "ControlNet (Zhang et al. 2023): clone the U-Net encoder into a trainable copy, feed it the control image (Canny/depth/pose), and inject its outputs into the frozen base via zero-initialized 1x1 convolutions ('zero convs')",
+        "Zero-conv trick: initialized to zero so at step 0 the ControlNet contributes nothing, leaving the base model unharmed and training stable; the connection grows as it learns — the same zero-init-gate idea as Flamingo and DiT",
+        "Keeps the large base frozen, so you train only the copy on modest per-condition data; the community produced many ControlNets (pose/depth/scribble/segmentation)",
+        "Alternatives: T2I-Adapter is a small side network (cheaper); IP-Adapter uses decoupled cross-attention for image prompts, treating a reference image as a soft condition — the basis of style/face transfer",
+        "Composition: multi-ControlNet stacking with per-condition scales; used heavily in production pipelines (product shots, pose-consistent characters)",
+        "Failure modes: control-vs-prompt conflict and leakage; zero-conv means early training looks like nothing is happening; over-strong conditioning overrides the prompt; control/latent resolution mismatch"
+      ],
+      "links": [
+        "Concept - Latent Diffusion",
+        "Deep Dive - Diffusion Models",
+        "Concept - Classifier-Free Guidance",
+        "Breakdown - Stable Diffusion",
+        "Deep Dive - LoRA",
+        "Concept - Attention Mechanism",
+        "Breakdown - Flamingo"
+      ]
+    },
+    {
+      "title": "Breakdown - Stable Diffusion",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "The Stable Diffusion model family as an engineered system across versions. IN: SD1.5/2/SDXL/SD3 components and exact specs, VAE, text encoders, U-Net vs MMDiT, refiner, conditioning embeddings, FLUX as the successor. OUT: the latent-diffusion concept (link Latent Diffusion), the release war story (link Lore).",
+      "key_points": [
+        "SD1.x: 860M U-Net, 4-channel 64x64 latent (8x VAE), frozen OpenAI CLIP ViT-L text encoder (77-token cap), epsilon-pred, linear schedule; trained on a LAION-2B aesthetic subset at 512px",
+        "SD2: switched to the OpenCLIP-H text encoder (which changed prompt behavior in ways users disliked), added a v-pred option, 768px",
+        "SDXL (Podell et al. 2023): 2.6B U-Net, TWO text encoders (CLIP-L + OpenCLIP-bigG concatenated), size/crop conditioning embeddings that fix SD1's cropped-subject artifacts, a separate refiner model, 1024px, latent scaling 0.13025",
+        "SD3 (Esser et al. 2024): MMDiT transformer with dual text/image streams, a rectified-flow objective, THREE text encoders (CLIP-L + CLIP-bigG + T5-XXL for legible text), and a 16-channel VAE — a large jump in typography and detail",
+        "FLUX.1 (Black Forest Labs 2024): DiT + flow matching, 12B, with guidance-distilled variants; the open SOTA as of 2025",
+        "The clever parts: latent compression, cross-attention conditioning, SDXL's size/crop conditioning, SD3's dual-stream MMDiT plus T5 for text, and 16-channel latents",
+        "What is dated/wrong: 4-channel latent detail loss, hands/text failures before SD3, the CLIP 77-token limit, and dataset/safety-filter controversies",
+        "What to steal: the VAE + conditioner + denoiser decomposition, size conditioning, and adding T5 for text rendering"
+      ],
+      "links": [
+        "Concept - Latent Diffusion",
+        "Deep Dive - Diffusion Models",
+        "Concept - Diffusion Transformers (DiT)",
+        "Concept - Flow Matching",
+        "Concept - CLIP and Contrastive Vision-Language Training",
+        "Lore - The Stable Diffusion Release and Its Aftermath",
+        "Concept - Classifier-Free Guidance",
+        "Reference - Vision Encoders and Multimodal Models",
+        "Concept - Diffusion Samplers and Schedulers",
+        "Gotchas - Diffusion Training and Sampling"
+      ]
+    },
+    {
+      "title": "Gotchas - Diffusion Training and Sampling",
+      "type": "gotchas",
+      "level": "unicorn",
+      "scope": "The arcane failure modes and folklore fixes in training and sampling diffusion models, ordered by pain. OUT: VLM-side pitfalls (link Gotchas - Vision-Language Models).",
+      "key_points": [
+        "Zero terminal SNR bug (Lin et al. 2023): standard schedules never reach SNR=0 at the last timestep, so the model always sees a little signal in training but pure noise at inference — a train/test mismatch that biases outputs toward medium brightness and prevents very dark or very bright images; the fix is all four of rescale-to-zero-terminal-SNR + v-pred + trailing-timestep selection + CFG rescale together",
+        "VAE latent scaling constant (0.18215 for SD, 0.13025 for SDXL): forget it and the diffusion model sees wrong-variance latents -> garbage or washed output",
+        "CFG oversaturation at high guidance -> dynamic thresholding / guidance rescale / limited-interval guidance",
+        "Exposure bias: training conditions on ground-truth x_t but sampling conditions on model estimates, so error compounds over steps; mitigated by input perturbation during training",
+        "EMA weights: sample from the EMA copy (decay ~0.9999), not the raw training weights — forgetting this yields visibly worse samples",
+        "Aspect-ratio bucketing: square-cropping every training image teaches center bias and cropped subjects (SDXL's crop-conditioning fix); bucket by aspect ratio instead",
+        "Min-SNR loss weighting (Hang et al. 2023): unweighted L_simple over-weights easy high-SNR steps; min-SNR-gamma speeds convergence",
+        "fp16 numerics: the SDXL VAE decodes to NaNs in fp16 (needs fp32 or the fixed VAE); and a v-pred model run with an epsilon-pred sampler produces broken images"
+      ],
+      "links": [
+        "Deep Dive - Diffusion Models",
+        "Concept - Classifier-Free Guidance",
+        "Concept - Diffusion Samplers and Schedulers",
+        "Concept - Latent Diffusion",
+        "Breakdown - Stable Diffusion",
+        "Concept - Mixed Precision Training",
+        "Concept - Floating Point for Deep Learning",
+        "Lore - The Stable Diffusion Release and Its Aftermath"
+      ]
+    },
+    {
+      "title": "Snippet - DDPM Training and Sampling Loop",
+      "type": "snippet",
+      "level": "advanced",
+      "scope": "A minimal runnable PyTorch DDPM: noise schedule precompute, one training step on the simple loss, and a deterministic DDIM sampling loop. OUT: the derivation and theory (link Diffusion Models).",
+      "key_points": [
+        "Precompute betas (linear), alphas, and alphas_cumprod (a_bar); show the buffers a real implementation caches",
+        "q_sample: x_t = sqrt(a_bar_t) * x_0 + sqrt(1 - a_bar_t) * epsilon — the closed-form forward that lets you jump to any t in one step",
+        "Training step: sample t ~ Uniform and epsilon ~ N(0, I), predict epsilon_theta(x_t, t), take MSE against epsilon (L_simple)",
+        "Sinusoidal timestep embedding feeding a tiny MLP so the model conditions on t",
+        "DDIM deterministic sampler loop over ~50 steps: predict epsilon, estimate x0, step to x_{t-1}",
+        "Why-written-this-way notes: L_simple drops the ELBO weighting (empirically better); predict noise rather than the image; DDIM enables few-step deterministic sampling; keep the net tiny because this is didactic (real models are U-Net/DiT)",
+        "Expected output: denoises Gaussian noise into toy 2D samples; loss plateaus around 0.03-0.05"
+      ],
+      "links": [
+        "Deep Dive - Diffusion Models",
+        "Concept - Diffusion Samplers and Schedulers",
+        "Concept - Classifier-Free Guidance",
+        "Concept - The Training Loop",
+        "Concept - Backpropagation"
+      ]
+    },
+    {
+      "title": "Lore - The Stable Diffusion Release and Its Aftermath",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The war story of open text-to-image, 2022-2024. IN: the SD1.4/1.5 open release, LAION-5B, compute/cost, the NovelAI leak, the community customization explosion, the SD3 license backlash, and the legal fallout. OUT: the architecture (link Stable Diffusion breakdown), the diffusion math (link Diffusion Models).",
+      "key_points": [
+        "Aug 2022: Stability AI + CompVis + Runway release SD 1.4 open weights (1.5 later via Runway) — the first high-quality open text-to-image, trained on a LAION-2B-en aesthetic subset for ~150k A100-hours (~$600k, well-sourced folklore)",
+        "LAION-5B: the open web-scraped image-text dataset that made it possible, later pulled after Stanford found CSAM in it (2023) — the data-provenance reckoning the field inherited",
+        "Oct 2022 NovelAI leak: NAI's anime-finetuned model and hypernetwork code leaked, seeding the anime-model and hypernetwork/embedding ecosystem overnight",
+        "Ecosystem explosion: AUTOMATIC1111 webui, DreamBooth (Ruiz et al. 2022) subject fine-tuning, textual inversion, then LoRA became the dominant customization method, with Civitai as the model bazaar",
+        "Governance drama: Runway-vs-Stability tension over who released 1.5; Stability's later financial troubles; the SD3 (2024) restrictive-license backlash that pushed the community toward FLUX from ex-Stability founders (Black Forest Labs)",
+        "Legal: Getty v. Stability and Andersen v. Stability artist suits — the training-data copyright fights shaping the field",
+        "The lesson: open weights + a cheap customization method (LoRA) + a hub is an unstoppable ecosystem, and dataset provenance is a liability you inherit; evidence status = releases/lawsuits verified, cost figures well-sourced folklore, NovelAI leak details public"
+      ],
+      "links": [
+        "Breakdown - Stable Diffusion",
+        "Concept - Latent Diffusion",
+        "Deep Dive - LoRA",
+        "Concept - Deduplication at Scale",
+        "Reference - Model Genealogy",
+        "Concept - Synthetic Training Data",
+        "Gotchas - Diffusion Training and Sampling"
+      ]
+    },
+    {
+      "title": "Concept - VQ-VAE and Discrete Visual Tokenization",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Turning images into discrete tokens via learned codebooks. IN: VQ-VAE quantization + commitment loss + straight-through estimator, VQGAN (perceptual+adversarial), codebook collapse and its fixes, FSQ/LFQ, why discrete tokens enable AR and any-to-any generation. OUT: continuous VAE latents (link Latent Diffusion), autoregressive/any-to-any use (link Native and Any-to-Any).",
+      "key_points": [
+        "VQ-VAE (van den Oord et al. 2017): encoder -> nearest-neighbor lookup in a learned codebook of K vectors -> decoder; the token is the codebook index, and the non-differentiable argmin is handled by the straight-through estimator (copy gradients past the quantizer)",
+        "Losses: reconstruction + codebook loss || sg[z_e] - e ||^2 + commitment loss beta || z_e - sg[e] ||^2 keeping encoder outputs near the chosen codes",
+        "VQGAN (Esser et al. 2021, 'Taming Transformers'): add an LPIPS perceptual loss and a patch-GAN discriminator for sharp high-res reconstructions from a compact codebook, whose tokens then feed an autoregressive transformer",
+        "Codebook collapse (the crux, tribal knowledge): most codes go unused ('dead codes') while a few dominate, wrecking utilization; fixes are EMA codebook updates, dead-code reinit/reset, and lower-dim L2-normalized codes (improved VQGAN), plus commitment-weight tuning",
+        "Modern escape: FSQ (Mentzer et al. 2023) replaces VQ with fixed scalar quantization of a few dims (no codebook, no collapse, near-full utilization); LFQ (MagViT-2) is binary/lookup-free with a huge vocabulary — both simpler and better-utilized",
+        "Why discrete: it lets images live in one AR transformer vocabulary (Chameleon, Parti, Image GPT) and enables any-to-any, but quantization loses fidelity versus continuous latents — the core tradeoff with diffusion",
+        "Failure modes: collapse, blurry reconstruction at high compression, discriminator instability, and the vocabulary-vs-utilization tradeoff"
+      ],
+      "links": [
+        "Concept - Latent Diffusion",
+        "Concept - Native and Any-to-Any Multimodal Models",
+        "Concept - Neural Audio Codecs and Residual Vector Quantization",
+        "Concept - Backpropagation",
+        "Concept - Byte-Pair Encoding",
+        "Concept - Vision Transformers",
+        "Deep Dive - Diffusion Models"
+      ]
+    },
+    {
+      "title": "Concept - Audio Spectrograms and Mel Features",
+      "type": "concept",
+      "level": "surface",
+      "scope": "How audio becomes a model input. IN: waveform sampling, STFT, magnitude spectrogram, the mel filterbank, log-mel, framing (window/hop), SpecAugment, the waveform-vs-spectrogram debate. OUT: discrete neural-codec tokens (link Neural Audio Codecs), the ASR model itself (link Whisper).",
+      "key_points": [
+        "Raw audio is a 1D waveform at 16kHz (speech) or 44.1-48kHz (music); 1 second = 16,000 samples — historically too long and redundant to model directly",
+        "STFT: slide a window (e.g., 25ms) with a hop (e.g., 10ms), FFT each frame -> a complex spectrogram; take magnitude -> a time x frequency 'image'; the hop sets the frame rate (10ms -> 100 frames/sec)",
+        "Mel scale: warp frequency to approximate human pitch perception (roughly linear below 1kHz, log above) via a mel filterbank; Whisper uses 80 log-mel bins (large-v3 uses 128)",
+        "Log compression: humans perceive loudness logarithmically, so log-mel compresses dynamic range and stabilizes training",
+        "SpecAugment (Park et al. 2019): mask time and frequency bands as augmentation — the standard ASR regularizer",
+        "Waveform-vs-spectrogram debate: spectrograms discard phase (needing Griffin-Lim or a neural vocoder to invert), while end-to-end waveform models (wav2vec 2.0, neural codecs) learn their own frontend — modern audio LMs use learned discrete codec tokens instead of mel (forward-ref)",
+        "Failure modes: phase loss makes reconstruction lossy; the window/hop choice trades time vs frequency resolution; a wrong sample rate silently wrecks the features"
+      ],
+      "links": [
+        "Breakdown - Whisper",
+        "Concept - Neural Audio Codecs and Residual Vector Quantization",
+        "Concept - Neural Text-to-Speech and Audio Language Models",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - Vision Transformers"
+      ]
+    },
+    {
+      "title": "Concept - Neural Audio Codecs and Residual Vector Quantization",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Learned codecs that compress audio into discrete tokens for generative audio models. IN: SoundStream/EnCodec/DAC architecture, residual vector quantization (RVQ), bitrate/codebook/frame-rate math, the tokens audio LMs consume, semantic vs acoustic tokens, the multi-stream decoding problem. OUT: spectrogram features (link Spectrograms), TTS/audio-LM usage (link Neural Text-to-Speech).",
+      "key_points": [
+        "SoundStream (Zeghidour et al. 2021) / EnCodec (Defossez et al. 2022) / DAC (Kumar et al. 2023): a conv encoder -> RVQ -> conv decoder trained with reconstruction + adversarial + feature-matching losses, streaming audio at 1.5-24 kbps",
+        "Residual Vector Quantization: quantize with codebook 1, take the residual, quantize with codebook 2, and so on — N_q codebooks (e.g., 8) of K=1024 entries each; more codebooks = higher fidelity/bitrate, and token rate = frame_rate x N_q (e.g., 75Hz x 8 = 600 tokens/sec)",
+        "This RVQ token stack is exactly what audio LMs model (24kHz EnCodec at ~75 frames/sec), predicting codebook indices",
+        "Semantic vs acoustic tokens (AudioLM, Borsos et al. 2022): semantic tokens (from w2v-BERT/HuBERT) capture content/prosody for long-range coherence, while acoustic tokens (from the codec RVQ) capture fidelity — a two-stage hierarchy",
+        "The multi-codebook problem: predicting N_q parallel streams needs special decoding — MusicGen's delay/interleaving pattern, VALL-E's AR-first-codebook-then-NAR-rest scheme",
+        "DAC improvements: factorized + L2-normalized codes (from improved VQGAN) reach near-100% codebook utilization at high compression",
+        "Failure modes: codebook collapse (as in VQ-VAE), the bitrate-fidelity tradeoff, awkward multi-stream decoding, and artifacts that differ between speech and music"
+      ],
+      "links": [
+        "Concept - VQ-VAE and Discrete Visual Tokenization",
+        "Concept - Neural Text-to-Speech and Audio Language Models",
+        "Concept - Audio Spectrograms and Mel Features",
+        "Concept - Native and Any-to-Any Multimodal Models",
+        "Concept - Byte-Pair Encoding",
+        "Breakdown - Whisper"
+      ]
+    },
+    {
+      "title": "Breakdown - Whisper",
+      "type": "breakdown",
+      "level": "core",
+      "scope": "OpenAI's weakly-supervised multilingual ASR model. IN: the encoder-decoder transformer, log-mel input, 680k-hour weak supervision, the multitask token format, timestamps, robustness, and the hallucination-on-silence failure. OUT: spectrogram basics (link Spectrograms), the generic transformer (link The Transformer).",
+      "key_points": [
+        "Radford et al. 2022: a vanilla encoder-decoder transformer; audio -> 80-channel log-mel in 30-second chunks -> conv stem -> encoder, and the decoder autoregressively emits text with special task tokens",
+        "The trick is scale + weak supervision: 680,000 hours of noisy web audio-transcript pairs (no hand labeling) across 96 languages; robustness comes from data diversity, not architecture, and it is zero-shot with no per-dataset fine-tuning",
+        "Multitask format: special tokens select the task — <|transcribe|> vs <|translate|>, a language token, and <|notimestamps|> or timestamp tokens quantized to 20ms interleaved with text; one decoder does many tasks via prompt tokens",
+        "Model sizes: tiny (39M) -> base -> small -> medium -> large-v3 (1.55B), where large-v3 uses 128 mel bins and more training data",
+        "Robustness: handles accents, noise, and jargon better than prior supervised ASR because of scale, approaching human-level on some benchmarks",
+        "Famous failure modes: hallucination on silence/non-speech (emits plausible text or repeats), repetition loops, timestamp drift, invented content during long silences, and weaker low-resource languages; 30s chunking loses long context and there is no speaker diarization",
+        "Practical fixes: VAD pre-filtering to avoid silence hallucination, faster-whisper (CTranslate2) for speed, and word-level timestamps via cross-attention alignment"
+      ],
+      "links": [
+        "Concept - Audio Spectrograms and Mel Features",
+        "Deep Dive - The Transformer",
+        "Concept - Attention Mechanism",
+        "Concept - Neural Text-to-Speech and Audio Language Models",
+        "Concept - Sampling and Decoding Parameters",
+        "Concept - Synthetic Training Data",
+        "Reference - Vision Encoders and Multimodal Models"
+      ]
+    },
+    {
+      "title": "Concept - Neural Text-to-Speech and Audio Language Models",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Modern speech synthesis and audio generation via codec language models and flow/diffusion. IN: codec-LM TTS (VALL-E), zero-shot voice cloning from a short prompt, AR vs NAR, flow/diffusion TTS (NaturalSpeech, E2/F5-TTS), audio LMs (AudioLM, MusicGen), and evaluation. OUT: codec token internals (link Neural Audio Codecs), spectrogram features (link Spectrograms).",
+      "key_points": [
+        "Two eras: the old two-stage acoustic model (Tacotron/FastSpeech -> mel) + vocoder (WaveNet/HiFi-GAN -> waveform), versus the new codec language models operating on RVQ tokens",
+        "VALL-E (Wang et al. 2023): treat TTS as a conditional codec-token LM — condition on text plus a 3-second audio prompt and autoregressively predict EnCodec tokens, giving zero-shot voice cloning from 3s of reference; AR for the first codebook, NAR for the rest (the multi-codebook trick)",
+        "Flow/diffusion TTS: NaturalSpeech 2/3, Voicebox, and E2/F5-TTS use flow matching on continuous features for fast non-autoregressive synthesis with better stability (fewer repetition/skip errors than AR)",
+        "AudioLM (Borsos et al. 2022): a semantic-then-acoustic token hierarchy for coherent long-form audio continuation (speech and piano) without text",
+        "MusicGen (Copet et al. 2023): a single-stage codec LM for music using a codebook-delay interleaving pattern, with text and melody conditioning",
+        "Evaluation: WER (via an ASR model) for intelligibility, speaker similarity for cloning, and MOS/CMOS for quality; the deepfake/consent problem is real and drives watermarking",
+        "Failure modes: AR TTS instability (skips, repeats, babbling on hard text), flat prosody, prompt speaker leakage, hallucinated words, and long-form drift"
+      ],
+      "links": [
+        "Concept - Neural Audio Codecs and Residual Vector Quantization",
+        "Concept - Audio Spectrograms and Mel Features",
+        "Concept - Flow Matching",
+        "Breakdown - Whisper",
+        "Concept - Native and Any-to-Any Multimodal Models",
+        "Concept - Sampling and Decoding Parameters",
+        "Concept - Jailbreak Taxonomy"
+      ]
+    },
+    {
+      "title": "Concept - Video Generation",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Generating video with diffusion/flow transformers. IN: spatiotemporal latents, the 3D/causal video VAE, spacetime patches (Sora), spatial+temporal attention factorization, temporal consistency, image-to-video, and the length/compute problem. OUT: image diffusion (link Diffusion Models), the DiT backbone (link Diffusion Transformers), the flow objective (link Flow Matching).",
+      "key_points": [
+        "Core problem: video = images + time, and naive per-frame generation flickers (no temporal consistency), so motion must be modeled jointly",
+        "Early approach: add temporal attention/conv layers to a pretrained image U-Net (AnimateDiff, VideoLDM, Stable Video Diffusion) — inflate 2D to 3D and train the temporal modules on video",
+        "Sora (OpenAI 2024): a DiT over spacetime patches — a 3D VAE compresses video in space AND time into latent patches, then a diffusion transformer denoises the whole clip, with variable duration/resolution/aspect ratio via NaViT-style patch packing ('world simulator' framing)",
+        "Attention factorization: full 3D attention is O((T*H*W)^2) and infeasible, so it is factorized into spatial + temporal (or windowed) attention to control cost — still the dominant expense",
+        "3D/causal video VAE: temporal compression (e.g., 4x time, 8x space) so a clip fits in latent, made causal so clips can be extended",
+        "Modern (2024-25): flow-matching DiTs — Sora, Kling, Veo, Meta Movie Gen (flow matching), CogVideoX, Mochi — with image-to-video and keyframe conditioning; cross-shot consistency remains hard",
+        "Failure modes: temporal flicker/morphing, object-permanence failures, physics violations, hands/faces, drift over long clips, enormous compute (minutes of GPU per clip), and unsolved evaluation (VBench)"
+      ],
+      "links": [
+        "Deep Dive - Diffusion Models",
+        "Concept - Diffusion Transformers (DiT)",
+        "Concept - Flow Matching",
+        "Concept - Latent Diffusion",
+        "Concept - Any-Resolution Vision Encoding",
+        "Deep Dive - FlashAttention",
+        "Concept - VQ-VAE and Discrete Visual Tokenization",
+        "Concept - Scaling Laws"
+      ]
+    }
+  ]
+}

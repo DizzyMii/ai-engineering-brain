@@ -1,0 +1,70 @@
+---
+tags: [concept, domain/trajectory, level/core]
+aliases: [AGI Timelines, HLMI Timelines, When AGI, Transformative AI Timelines]
+summary: "Credible AGI forecasts disagree by decades and use different definitions; the honest answer is a spread, not a date."
+---
+
+# Concept - The AGI Timeline Debate
+
+> **One-paragraph hook:** Ask five credible sources "when is AGI" and you get five different targets — because "AGI" doesn't mean one thing — measured five different ways, landing anywhere from 2027 to 2050+. That spread is not noise to be averaged away; the range itself, and who is making which claim with what incentive, is the actual information. Anyone who hands you a single date has already made an editorial choice you didn't see them make.
+
+## The mechanism
+
+Timeline disagreement starts before any forecasting happens, at the definition. "AGI," "HLMI" (human-level machine intelligence), "transformative AI," and "superintelligence" name different targets and get used interchangeably in public debate. OpenAI's charter language, Metaculus's operational resolution criteria for its AGI questions, and Morris et al.'s "Levels of AGI" framework (DeepMind, 2023) all specify meaningfully different bars — some requiring broad economic substitutability, some requiring a specific battery of tasks, some requiring self-directed goal pursuit. A large share of apparent timeline disagreement is not disagreement about the trajectory at all; it's people answering different questions with the same word (E2, comparing named definitional sources directly).
+
+Once a definition is fixed, three structurally different forecasting methods produce three structurally different kinds of number, and none of them are measurements — they're all E1-or-weaker estimates dressed in different clothes:
+
+1. **Expert surveys** aggregate stated beliefs from AI researchers. They move fast, tracking recent headlines more than any stable underlying model, and are sensitive to who responds.
+2. **Aggregator markets** (Metaculus, prediction markets) aggregate a self-selected forecasting community's continuously-updated probability estimates. They react faster than surveys and carry the biases of who chooses to bet.
+3. **Model-based methods** (Cotra's biological-anchors approach) build an explicit probabilistic model — here, of how much compute might be needed to match brain-scale computation — and propagate uncertainty through it. They're the most transparent about their own assumptions and, by their own authors' admission, the most fragile to small input changes.
+
+## In practice
+
+**Expert surveys.** Grace et al.'s AI Impacts survey of thousands of published AI researchers found the aggregate 50%-chance-of-HLMI date moved from 2060 (2022 survey) to 2047 (2023 survey) — a 13-year jump in one year (E2, Grace et al./AI Impacts 2023, n≈2,778 published researchers, single survey series with known response and selection bias). Earlier rounds (Müller & Bostrom 2016, Grace et al. 2018) put the median around 2061, so the 2023 jump is a discontinuity in the series, not a steady drift — read as evidence that survey point-estimates anchor hard to recent capability jumps (GPT-4 shipped between the 2022 and 2023 rounds) rather than tracking a stable underlying model.
+
+**Aggregator markets.** Metaculus's "weakly general AI" question (#3479) remains open as of 2026, with a community median around June 2028 (range roughly Nov 2026 to Mar 2032), down from ~2042 in early 2022; the strict resolution criteria — including an adversarial Turing-test element — are not yet judged met, so "weakly general" hasn't formally resolved even though the bar is far lower than most people mean by "AGI." Metaculus's harder, separate "AGI" question (#5121, requiring a Turing test, robotic manipulation, and benchmark thresholds), as of its February 2026 update, sits with a community median around 2033 (~25% by 2029, ~50% by 2033) (E2, prediction market, self-selected forecasting community, moving target — date-stamp any number quoted from this source).
+
+**Model-based.** Cotra's biological-anchors report (Open Philanthropy, 2020) modeled transformative AI arrival by anchoring compute requirements to estimates of the human brain's computation, spanning 20+ orders of magnitude of uncertainty in its inputs; the original model put a 50% chance of transformative AI around 2050-2052. Cotra's own "Two-Year Update" (2022) shortened the median to 2040 (15% by 2030, 35% by 2036, 60% by 2050) based on faster-than-expected scaling progress (E1, model, author-labeled as "fragile to parameter choices" in both versions — this is the report's own caveat, not external criticism).
+
+**The camps, named and unaveraged, per STANDARDS §8:**
+- *Short:* Dario Amodei's "Machines of Loving Grace" (Oct 2024) argued "powerful AI" — able to prove unsolved theorems, write difficult codebases from scratch, and act with broad autonomy — could arrive "as early as 2026," with Anthropic's own OSTP submission (March 2025) narrowing that to "late 2026 or early 2027" (E2, company-affiliated forecast — Amodei runs a lab that raises capital partly on this narrative, a conflict worth naming explicitly; the mechanics of how that fundraising narrative and capex commitments reinforce each other are worked out in [[Deep Dive - Circular Financing in the AI Buildout]]). Kokotajlo et al.'s *AI-2027* scenario made a similarly aggressive case, then walked its own headline milestone back to the early 2030s in a December 2025 revision — see [[Concept - Automated AI Research and Takeoff]] for the walk-back in full, and note it here because it's direct evidence about how the short camp's specific dates have performed.
+- *Long / skeptic:* Yann LeCun has argued LLMs are an architectural off-ramp — useful but missing the world-model and planning capacity needed for general intelligence, requiring a different paradigm rather than more scale on the current one. Gary Marcus has argued current systems hit a reliability ceiling (hallucination, brittle generalization) that scaling alone doesn't fix, closely related to [[Concept - The Capability-Reliability Gap]]. Neither publishes a competing point-date; both argue the short camp's timeline requires an architectural breakthrough that hasn't happened yet, which is a claim about mechanism, not just optimism.
+
+**Why the medians compressed.** GPT-4-class systems, reasoning models, and the [[Concept - METR Time Horizons|METR horizon trend]] pulled aggregate estimates in across nearly every method between 2022 and 2026. But survey and bio-anchors medians still land roughly two decades out (2040-2047) even after that compression — "AGI imminent" (sub-5-year) is a minority, front-running view concentrated among lab-affiliated forecasters and aggressive scenario authors, not the center of the credible distribution (E1, synthesis across the sources above).
+
+## Failure modes
+
+**Averaging the spread into a mean.** STANDARDS §8 bans this explicitly, and the mechanism failure is concrete: averaging a 2027 lab forecast with a 2047 survey median produces a number (~2037) that no source actually holds and that hides the fact that the two inputs disagree about mechanism, not just magnitude. Report the range and who holds each end.
+
+**Ignoring provenance and incentive.** A forecast from a lab racing to raise capital on an AGI-soon narrative and a forecast from an academic survey respondent with no financial stake are not interchangeable data points even if stated with equal confidence. Samotsvety Forecasting — a superforecaster group selected partly for engagement with AI — put roughly 28% probability on AGI by 2030 as of a January 2026 update (E1, small forecaster panel, n=8), running noticeably shorter than generic superforecasters but for a stated reason (direct experience with frontier systems), which is exactly the kind of provenance detail that should travel with the number.
+
+**Treating "AGI" as one target across sources.** Comparing Metaculus's "weakly general AI" resolution date to Amodei's "powerful AI" definition to Cotra's "transformative AI" threshold as though they're the same forecast produces an apples-to-timelines error before any actual disagreement about capability trajectories even enters the picture.
+
+## The non-obvious
+
+The single most informative fact in this debate is not any specific date — it's that the loudest short-timeline claims cluster inside organizations with fundraising and competitive incentives to say "soon," while forecasters who engage deeply with AI but lack that incentive (Samotsvety) run shorter than generic superforecasters yet still noticeably longer than lab-affiliated public statements, and academic survey medians sit two decades out even after their largest-ever single-year compression. Provenance is doing as much work as evidence. The practically useful move is not picking a winner but building for the range: if you're making a multi-year infrastructure or hiring bet, "somewhere between 2029 and 2050, with real disagreement about mechanism, not just speed" is the honest input, not whichever single number was most recently in a headline. [[Reference - The AI Forecasting Track Record]] is the place to go for how much to discount any single number in that range, and [[Reference - The Open Questions Ledger]] tracks this debate as one of several genuinely unresolved trajectory questions rather than a settled one.
+
+The evidence feeding both ends of the spread is weaker than it looks under close reading. Short-timeline arguments lean partly on [[Concept - Benchmark Saturation|climbing benchmark scores]] that are, per that note, largely noise once a benchmark saturates, and partly on whether capability jumps are genuine phase transitions or measurement artifacts — the same question [[Concept - The Emergent Abilities Debate]] asks about individual benchmarks, here applied to entire capability trajectories. [[Reference - Model Genealogy]] supplies the raw lab-to-lab capability record several of these forecasts extrapolate from, and [[Concept - Scaling Laws]] is the underlying empirical relationship the short camp extrapolates and the long camp argues will bend. On the bend side, [[Concept - The Data Wall]] is a concrete, named mechanism that could push timelines later than the compressed 2040s medians assume. And because a real capex bubble says nothing about whether the underlying technology is transformative, [[Deep Dive - Bubble or Boom]] is a parallel but analytically separate debate — don't let "the market looks overheated" quietly stand in for "AGI is far away," or vice versa. Finally, [[Lore - Failed AI Predictions]] is the historical reminder that both over-optimistic and over-pessimistic capability-timing calls have busted before, in both directions, which is the base rate this whole debate should be read against.
+
+## Connections
+- [[Concept - METR Time Horizons]] — the concrete capability curve that both compressed timeline estimates over 2022-2026 and that short-timeline extrapolations lean on most heavily.
+- [[Concept - Automated AI Research and Takeoff]] — the specific mechanism (AI automating AI R&D) the short camp's fastest scenarios depend on, including AI-2027's own walked-back dates.
+- [[Reference - The AI Forecasting Track Record]] — the calibration scorecard for weighing which of the methods described here to trust more.
+- [[Concept - Benchmark Saturation]] — one of the (weak) evidentiary inputs some short-timeline arguments lean on; saturated scores are less informative than they look.
+- [[Deep Dive - Bubble or Boom]] — a parallel debate (is the capex justified) that's often conflated with this one but is analytically separate — bubble and imminent-AGI are independent questions.
+- [[Concept - The Data Wall]] — a candidate mechanism that could push timelines later if pretraining scaling has less room left than the compressed medians assume.
+- [[Lore - Failed AI Predictions]] — the historical base rate for how confident capability-timing forecasts have performed, in both directions.
+- [[Reference - The Open Questions Ledger]] — this debate is one of the live, tracked, unresolved trajectory questions there.
+- [[Concept - Scaling Laws]] — the underlying empirical relationship that both the short camp (extrapolate it) and the long camp (argue it will bend) are arguing about.
+- [[Concept - The Emergent Abilities Debate]] — a related dispute about whether capability jumps are real phase transitions or measurement artifacts, which feeds directly into how much weight short-timeline forecasters put on recent jumps.
+- [[Reference - Model Genealogy]] — grounding for how fast frontier capability has actually moved lab-to-lab, the raw material several of these forecasts are extrapolating from.
+- [[Deep Dive - Circular Financing in the AI Buildout]] — the fundraising incentive behind lab-affiliated short timelines is not just rhetorical; this is the capital mechanism it feeds (cross-domain: economics).
+
+## Sources
+- Grace, Stein-Perlman, et al. / AI Impacts (2023) — *Thousands of AI Authors on the Future of AI*. The 2060→2047 median jump; n≈2,778 published researchers.
+- Morris et al. / DeepMind (2023) — *Levels of AGI*. A competing operational definition, evidence that "AGI" is contested before any date is attached.
+- Cotra / Open Philanthropy (2020, updated 2022) — *Forecasting Transformative AI from Biological Anchors* and *Two-Year Update on My Personal AI Timelines*. Median moved 2050-2052 → 2040; author-flagged fragility.
+- Amodei (Oct 2024) — *Machines of Loving Grace*; Anthropic OSTP submission (March 2025). The "late 2026/early 2027" powerful-AI claim, company-affiliated.
+- Kokotajlo, Lifland, Larsen, Dean, Alexander / AI Futures Project (April 2025, revised Dec 2025) — *AI 2027* and its walk-back.
+- Metaculus — community "weakly general AI" and follow-on AGI questions, ongoing aggregator data, medians as of 2026.
+- Samotsvety Forecasting (Jan 2026 update) — ~28% AGI-by-2030, n=8 superforecasters selected for AI engagement.

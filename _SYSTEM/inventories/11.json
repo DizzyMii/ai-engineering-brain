@@ -1,0 +1,724 @@
+{
+  "domain": "11 - Retrieval & RAG",
+  "slug": "retrieval-rag",
+  "notes": [
+    {
+      "title": "Concept - Retrieval-Augmented Generation",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The entry-point paradigm: augmenting a frozen LLM with retrieved external context at inference to reduce hallucination and add fresh/proprietary knowledge. IN: the retrieve-augment-generate loop, why parametric memory is insufficient, index-time vs query-time split, when to reach for RAG. OUT: architecture taxonomy (link Deep Dive - RAG Architectures), retrieval internals, and the fine-tune comparison (link Decision - Fine-Tuning vs RAG vs Prompting).",
+      "key_points": [
+        "The core loop: embed query -> ANN retrieve top-k passages -> concatenate into prompt -> generate grounded answer; contrast with pure parametric recall from weights",
+        "Original RAG (Lewis et al. 2020, Facebook): DPR retriever + BART generator, retrieval as a latent variable marginalized over documents; vs the modern 'frozen LLM + vector search' RAG which is architecturally simpler and now dominant",
+        "Why RAG exists: knowledge-cutoff staleness, private corpora the model never trained on, hallucination reduction via grounding, attribution/citations, and far cheaper than retraining",
+        "The two-phase structure: offline index-time (chunk, embed, index) vs online query-time (embed query, search, rerank, generate) — different cost/latency profiles",
+        "'Retrieval is the bottleneck, not generation': RAG is only as good as its retrieval; garbage retrieval yields confident wrong answers",
+        "When NOT to use RAG: reasoning-heavy tasks with no external facts, corpora that fit entirely in context, highly relational data better served by graph (link Breakdown - Microsoft GraphRAG)"
+      ],
+      "links": [
+        "Deep Dive - RAG Architectures",
+        "Concept - Semantic Search",
+        "Decision - Fine-Tuning vs RAG vs Prompting",
+        "Concept - Agent Memory Systems",
+        "Concept - Context Rot",
+        "Concept - Embedding Models"
+      ]
+    },
+    {
+      "title": "Concept - Semantic Search",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The retrieval paradigm of encoding queries and documents into a shared vector space and retrieving by geometric proximity via approximate nearest-neighbor search. IN: dense vector similarity, cosine vs dot product vs Euclidean, normalization, symmetric vs asymmetric search, the embed-index-search flow. OUT: how embedding models are trained (link Concept - Embedding Models), ANN index internals (link Concept - HNSW), and lexical scoring (link Concept - BM25 and Lexical Retrieval).",
+      "key_points": [
+        "Query and document mapped to the same d-dimensional space; relevance approximated by cosine similarity (q.d)/(|q||d|) or dot product; L2-normalized embeddings make dot product equal cosine",
+        "Why semantic beats lexical for synonymy/paraphrase ('car' vs 'automobile') and why it fails on exact-match, rare tokens, IDs, and code identifiers — the gap that motivates hybrid search",
+        "Symmetric search (query approx doc, e.g. STS) vs asymmetric (short query, long passage) — asymmetric needs prefixes like E5's 'query:' / 'passage:' or recall silently drops",
+        "Cosine vs dot vs Euclidean: for normalized vectors cosine and dot rank identically; unnormalized dot rewards magnitude, leaking document length into relevance",
+        "Exact/flat brute force is O(N*d) and exact — fine to roughly 1M vectors; beyond that approximate NN is required, trading recall@k for latency",
+        "top-k semantics and the k tradeoff: too small misses evidence, too large bloats the prompt and triggers lost-in-the-middle"
+      ],
+      "links": [
+        "Concept - Embedding Models",
+        "Concept - HNSW",
+        "Concept - Hybrid Search and Reciprocal Rank Fusion",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - Retrieval-Augmented Generation",
+        "Reference - Vector Database Landscape"
+      ]
+    },
+    {
+      "title": "Concept - Embedding Models",
+      "type": "concept",
+      "level": "core",
+      "scope": "Text embedding models purpose-built for retrieval: how they are trained, the model landscape, and how to choose and use one. IN: dual-encoder architecture, pooling, instruction prefixes, MTEB, dimensions, model families and their tradeoffs. OUT: contrastive loss mechanics (link Concept - Contrastive Learning for Text Embeddings), hard negatives (link Concept - Hard Negative Mining), matryoshka (link Concept - Matryoshka Representation Learning), and embeddings-as-representation basics (owned by Neural Networks).",
+      "key_points": [
+        "Dual/bi-encoder architecture: transformer encoder -> pooling (mean vs CLS vs last-token for decoder-based) -> L2-normalized vector; contrast with cross-encoder rerankers that jointly attend",
+        "Model families as of 2026: E5/multilingual-E5 (Microsoft), BGE and BGE-M3 (BAAI), GTE (Alibaba), Nomic-embed (open, 8k context), Jina v3, OpenAI text-embedding-3-small/large, Voyage, Cohere embed v3, Gemini embedding — open vs API tradeoffs",
+        "MTEB benchmark (Muennighoff et al. 2022): ~56 datasets across 7 task types; leaderboard overfitting is real, so MTEB rank does not equal your-domain performance",
+        "Instruction/prefix conditioning (E5 query:/passage:, BGE instructions); omitting the prefix silently tanks recall — a top production bug",
+        "Dimensions and cost: 384 (MiniLM) -> 768 -> 1024 -> 1536 (OpenAI large) -> 4096 (mistral-based); storage is N*d*4 bytes and higher d is not always better",
+        "Decoder-LLM-as-embedder trend: E5-mistral, gte-Qwen, LLM2Vec (bidirectional attention + contrastive tune) — strong but heavy to serve",
+        "Domain shift: general embedders fail on legal/medical/code jargon; fix via in-domain fine-tuning or code-specific models (voyage-code, jina-code)"
+      ],
+      "links": [
+        "Concept - Contrastive Learning for Text Embeddings",
+        "Concept - Hard Negative Mining",
+        "Concept - Matryoshka Representation Learning",
+        "Concept - Semantic Search",
+        "Concept - CLIP and Contrastive Vision-Language Training",
+        "Concept - Rerankers",
+        "Reference - Vector Database Landscape",
+        "Concept - Softmax"
+      ]
+    },
+    {
+      "title": "Concept - Chunking Strategies",
+      "type": "concept",
+      "level": "core",
+      "scope": "How to split documents into retrievable units and why chunk boundaries determine retrieval quality. IN: fixed-size/recursive/structural/semantic chunking, size and overlap tradeoffs, parent-document (small-to-big), table/code handling. OUT: context enrichment of chunks (link Concept - Contextual Retrieval), the embedding step (link Concept - Embedding Models), and evaluation of chunking choices (link Concept - RAG Evaluation).",
+      "key_points": [
+        "The fundamental tension: small chunks give precise embeddings but fragment context; large chunks preserve context but dilute the mean-pooled embedding signal and hit encoder max seq len (512 for BERT-based, 8k for Nomic/Jina)",
+        "Strategy taxonomy: fixed-size token/char + overlap; recursive character splitting (split on paragraph -> line -> sentence -> word); structural (Markdown/HTML headers, code AST); semantic chunking (embed sentences, split at cosine-distance breakpoints, per Kamradt)",
+        "Overlap of 10-20% avoids splitting mid-thought at the cost of duplicated storage",
+        "Small-to-big / parent-document retrieval: embed small child chunks but return the parent for generation, decoupling retrieval granularity from generation context",
+        "Proposition/atomic chunking (Chen et al. 2023, Dense X Retrieval): decompose into standalone factoids; higher index-time LLM cost",
+        "Chunk-size empirics: 256-512 tokens is a common default but there is no universal optimum — it depends on corpus, embedder, and query type and must be tuned against an eval set",
+        "Tables, code, and long entities break naive splitters; retrieving a table row stripped of its header is a canonical failure"
+      ],
+      "links": [
+        "Concept - Contextual Retrieval",
+        "Concept - Embedding Models",
+        "Concept - Byte-Pair Encoding",
+        "Deep Dive - RAG Architectures",
+        "Gotchas - RAG Pipelines",
+        "Concept - RAG Evaluation"
+      ]
+    },
+    {
+      "title": "Concept - BM25 and Lexical Retrieval",
+      "type": "concept",
+      "level": "core",
+      "scope": "The BM25 scoring function as a live retrieval mechanism and the sparse/lexical half of hybrid search. IN: TF saturation, IDF, length normalization, the k1/b parameters, inverted index mechanics, and where lexical beats dense. OUT: TF-IDF as historical NLP lineage (owned by Classical ML), learned sparse retrieval (link Concept - Learned Sparse Retrieval), and fusion with dense (link Concept - Hybrid Search and Reciprocal Rank Fusion).",
+      "key_points": [
+        "BM25 score = sum over query terms of IDF(t) * f(t,d)*(k1+1) / (f(t,d) + k1*(1 - b + b*|d|/avgdl)); term-frequency saturates via k1 (~1.2-2.0), length normalized via b (~0.75)",
+        "IDF = log((N - n_t + 0.5)/(n_t + 0.5)) upweights rare terms and handles the stopword problem for free",
+        "Inverted index mechanics: postings lists give O(query terms) lookup not O(corpus); this is why lexical scales to billions cheaply (Lucene, Tantivy)",
+        "Where lexical wins over dense: exact match, rare entities, product codes and IDs, out-of-domain jargon, numbers, and code identifiers — the keyword queries embedders blur together",
+        "BM25F for fielded documents; the empirical basis that exact-term recall complements semantic recall, motivating hybrid search",
+        "BEIR (Thakur et al. 2021) showed BM25 competitive with or superior to early dense retrievers out-of-domain — the hard baseline that keeps winning, with no training and no drift"
+      ],
+      "links": [
+        "Concept - Hybrid Search and Reciprocal Rank Fusion",
+        "Concept - Learned Sparse Retrieval",
+        "Concept - Semantic Search",
+        "Concept - Rerankers",
+        "Concept - RAG Evaluation",
+        "Reference - Vector Database Landscape"
+      ]
+    },
+    {
+      "title": "Concept - Hybrid Search and Reciprocal Rank Fusion",
+      "type": "concept",
+      "level": "core",
+      "scope": "Combining lexical (BM25) and dense retrieval into one ranked list, and the fusion methods that do it. IN: RRF, weighted score fusion, the score-normalization problem, convex combination, and why hybrid beats either arm alone. OUT: BM25 internals (link Concept - BM25 and Lexical Retrieval), dense internals (link Concept - Semantic Search), and reranking the fused list (link Concept - Rerankers).",
+      "key_points": [
+        "Why hybrid: dense and lexical fail on disjoint query types, so the union of candidates raises recall — strongest gains appear out-of-domain (BEIR)",
+        "The score-scale problem: BM25 scores are unbounded while cosine sits in [-1,1], so naive addition is invalid and requires fragile per-query normalization (min-max, z-score)",
+        "Reciprocal Rank Fusion (Cormack et al. 2009): RRF(d) = sum over systems of 1/(k + rank_i(d)) with k approx 60; it fuses on ranks not scores, so it is scale-free, robust, and needs no tuning — the default",
+        "Weighted convex combination: alpha*sim_dense + (1-alpha)*norm(BM25); needs per-corpus alpha tuning; implemented by Weaviate, Qdrant, Elasticsearch",
+        "The k constant dampens top-rank dominance: small k sharpens toward rank-1, large k flattens; the folklore default 60 comes straight from the paper",
+        "Standard pipeline: retrieve top-100 from each arm, fuse, then rerank the top-N with a cross-encoder — hybrid raises recall, the reranker fixes precision"
+      ],
+      "links": [
+        "Concept - BM25 and Lexical Retrieval",
+        "Concept - Semantic Search",
+        "Concept - Rerankers",
+        "Snippet - Reciprocal Rank Fusion",
+        "Concept - Learned Sparse Retrieval",
+        "Reference - Vector Database Landscape",
+        "Deep Dive - RAG Architectures"
+      ]
+    },
+    {
+      "title": "Concept - Rerankers",
+      "type": "concept",
+      "level": "core",
+      "scope": "Cross-encoder and LLM rerankers that re-score a candidate set for precision after first-stage retrieval. IN: cross-encoder architecture, why joint query-doc attention beats bi-encoders, the retrieve-then-rerank cascade, latency/cost, and the model landscape. OUT: first-stage retrieval (link Concept - Semantic Search), late interaction as a middle ground (link Concept - Late Interaction and ColBERT), and general eval methodology (owned by Evaluation).",
+      "key_points": [
+        "Cross-encoder: concatenate [query, doc] into one transformer and read out a relevance score; full cross-attention between query and doc tokens gives far higher precision than a bi-encoder's independent encoding, at the cost of one forward pass per candidate and no precompute",
+        "The cascade: a cheap recall-oriented retriever surfaces top 100-1000, then an expensive precision reranker scores them down to top 3-10; the reranker can only reorder what retrieval already surfaced, never fix recall misses",
+        "Model landscape (2026): Cohere Rerank v3, BGE-reranker-v2, Jina reranker, mixedbread mxbai-rerank, Voyage rerank, and the MonoT5/monoBERT lineage",
+        "LLM rerankers: RankGPT (listwise permutation generation), RankLLM — strong zero-shot but expensive, using sliding windows for long candidate lists",
+        "Latency budget: cross-encoders add tens to hundreds of ms; batch on GPU and rerank ~50-200 candidates, not thousands",
+        "Measured impact: adding a reranker is often the single highest-ROI RAG upgrade (large nDCG@10 gains), which is why 'just add a reranker' is standard advice",
+        "Long-document reranking needs chunk-and-max or long-context rerankers; token limits silently truncate and drop evidence"
+      ],
+      "links": [
+        "Concept - Late Interaction and ColBERT",
+        "Concept - Hybrid Search and Reciprocal Rank Fusion",
+        "Concept - Semantic Search",
+        "Concept - RAG Evaluation",
+        "Concept - Attention Mechanism",
+        "Concept - Cost Engineering for LLM Applications",
+        "Deep Dive - RAG Architectures"
+      ]
+    },
+    {
+      "title": "Reference - Vector Database Landscape",
+      "type": "reference",
+      "level": "core",
+      "scope": "A comparison matrix of production vector search systems and their index/filtering/scaling characteristics, opened mid-task to pick a store. IN: Pinecone, Weaviate, Qdrant, Milvus/Zilliz, pgvector, Chroma, LanceDB, Vespa, Elasticsearch/OpenSearch, Redis, Turbopuffer; index types, filtering model, hybrid support, quantization, hosting, scale. OUT: HNSW/IVF/DiskANN internals (link their notes) and embedding-model choice (link Concept - Embedding Models).",
+      "key_points": [
+        "Comparison columns: index algorithms supported (HNSW/IVF/PQ/DiskANN/ScaNN), max practical scale, metadata filtering strategy (pre vs post vs single-stage), hybrid/BM25 support, quantization support, hosting model (SaaS/self-host/embedded), CRUD/consistency, and cost model",
+        "pgvector: Postgres extension with HNSW and IVFFlat, transactional, SQL-native filtering, halfvec/bit for quantization; 'just use Postgres' wins under ~10M vectors when PG already exists",
+        "Qdrant (Rust): filterable HNSW with payload indexing, scalar/binary/product quantization, on-disk storage — the strongest filtering story",
+        "Weaviate: HNSW with native hybrid (BM25 + dense, RRF and relativeScore fusion); Milvus/Zilliz: segment architecture, GPU indexes (CAGRA), billion-scale",
+        "Pinecone: serverless managed with a proprietary index; Vespa: mature tensor + text engine with ranking expressions and real hybrid at scale",
+        "Embedded/local: Chroma, LanceDB (columnar Arrow), FAISS (a library not a DB); Turbopuffer and object-storage-backed cold tiers are the 2024-2026 cost trend",
+        "Elasticsearch/OpenSearch: Lucene HNSW with mature filtering and lexical, hybrid via RRF — the answer when you already run the ELK stack",
+        "Footnote: metadata-filtering strategy is the number-one differentiator; benchmark against ann-benchmarks but with YOUR filter and update patterns, not uniform synthetic data"
+      ],
+      "links": [
+        "Concept - HNSW",
+        "Concept - IVF and Product Quantization",
+        "Concept - Hybrid Search and Reciprocal Rank Fusion",
+        "Concept - Embedding Quantization",
+        "Reference - Memory Math for Transformers",
+        "Playbook - Building a Production RAG System"
+      ]
+    },
+    {
+      "title": "Concept - RAG Evaluation",
+      "type": "concept",
+      "level": "core",
+      "scope": "Measuring RAG quality across the retrieval and generation stages and the metrics/frameworks that do it. IN: retrieval metrics (recall@k, nDCG, MRR, context precision/recall), generation metrics (faithfulness, answer relevancy), RAGAS, golden-set construction, component vs end-to-end eval. OUT: general LLM-as-judge biases and statistical rigor (owned by Evaluation) and benchmark contamination (link Concept - Benchmark Contamination).",
+      "key_points": [
+        "Two-stage decomposition is mandatory: eval retrieval separately from generation, or a perfect generator on bad retrieval looks identical to a bad generator on the final answer and you cannot localize the failure",
+        "Retrieval metrics: recall@k (did the gold chunk appear), MRR (rank of first relevant), nDCG@k (graded, position-discounted), hit-rate; context precision/recall via LLM judgment when labels are absent",
+        "Generation metrics: faithfulness/groundedness (is every claim supported by retrieved context — the hallucination catch), answer relevancy, and context utilization; RAGAS (Es et al. 2023) operationalizes these with LLM-as-judge",
+        "Golden dataset: hand-labeled query -> relevant-chunk pairs; synthetic QA generation bootstraps coverage but tends to produce too-easy questions and risks answer leakage",
+        "RAG-specific robustness tests: needle-in-a-haystack, position-bias sweeps, and the distractor test (does adding an irrelevant chunk flip the answer)",
+        "End-to-end vs component divergence: nDCG gains from a reranker do not always move final answer quality if the generator ignores the extra context — measure both",
+        "Frameworks: RAGAS, TruLens, ARES, DeepEval; all inherit LLM-judge cost and bias caveats (link Concept - LLM-as-Judge)"
+      ],
+      "links": [
+        "Concept - LLM-as-Judge",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Deep Dive - Designing an Eval Harness",
+        "Concept - Rerankers",
+        "Gotchas - RAG Pipelines",
+        "Concept - Chunking Strategies",
+        "Deep Dive - RAG Architectures"
+      ]
+    },
+    {
+      "title": "Snippet - Reciprocal Rank Fusion",
+      "type": "snippet",
+      "level": "core",
+      "scope": "A complete, runnable implementation of RRF that fuses a BM25 result list and a dense result list into one ranking. IN: the RRF algorithm, the k constant, cross-list deduplication, optional per-list weights, a worked example. OUT: the retrieval that produces the input lists (link Concept - Hybrid Search and Reciprocal Rank Fusion) and reranking after fusion (link Concept - Rerankers).",
+      "key_points": [
+        "Pure-Python function taking multiple ranked lists of doc IDs and returning one fused ranking via 1/(k + rank) accumulation, k=60 default with an inline comment on why",
+        "Handle docs appearing in only one list; use 1-indexed rank and a stable descending sort on fused score",
+        "Optional per-list weights (weighted RRF) for when dense is trusted over lexical or vice versa",
+        "Show expected output on a tiny worked example with two overlapping lists so the reader can hand-verify",
+        "Why-it-is-written-this-way: ranks not scores keeps it scale-free; k dampens head dominance; a dict accumulation makes it O(total results)",
+        "Note the off-by-one: rank starts at 1 not 0 because k+0 would over-weight the top result and distort fusion"
+      ],
+      "links": [
+        "Concept - Hybrid Search and Reciprocal Rank Fusion",
+        "Concept - BM25 and Lexical Retrieval",
+        "Concept - Semantic Search",
+        "Concept - Rerankers"
+      ]
+    },
+    {
+      "title": "Decision - RAG vs Long-Context Windows",
+      "type": "decision",
+      "level": "core",
+      "scope": "When to retrieve versus stuff everything into a long context window, given million-token models. IN: the cost/latency/accuracy tradeoff, corpus-size thresholds, freshness, lost-in-the-middle, prompt-caching economics, and the retrieve-then-long-context hybrid. OUT: fine-tuning as the third option (link Decision - Fine-Tuning vs RAG vs Prompting), prompt-caching mechanics (link Concept - Prompt Caching), and serving-cost internals (link Concept - KV Cache).",
+      "key_points": [
+        "Decision axes: corpus size vs window size, query-per-corpus reuse (caching amortization), freshness/mutability, cost per query, latency, and attribution needs",
+        "Cost math: long context pays for all tokens every query (prefill compute scales with tokens, KV cache scales with tokens) unless prompt-cached; RAG pays cheap embedding + ANN plus a small context — compute the break-even",
+        "Lost-in-the-middle (Liu et al. 2023): recall degrades for mid-context information even at 100k+ tokens, so long context is not uniform attention and RAG curation can beat raw stuffing on multi-fact accuracy",
+        "Prompt caching flips the economics when the SAME large corpus is queried repeatedly (Gemini context caching, Anthropic prompt caching), narrowing but not closing the gap",
+        "Long-context wins on small bounded corpora (under ~200k tokens), whole-document multi-hop reasoning, low query volume, and full-doc coherence",
+        "RAG wins on large/growing corpora, high query volume, attribution requirements, cost sensitivity, and frequent updates",
+        "The mature 2026 hybrid: retrieve down to ~50k tokens then long-context read — RAG feeds the window rather than competing with it"
+      ],
+      "links": [
+        "Concept - Retrieval-Augmented Generation",
+        "Decision - Fine-Tuning vs RAG vs Prompting",
+        "Concept - Context Rot",
+        "Concept - Prompt Caching",
+        "Concept - KV Cache",
+        "Concept - Cost Engineering for LLM Applications",
+        "Lore - The RAG Is Dead Debate"
+      ]
+    },
+    {
+      "title": "Deep Dive - RAG Architectures",
+      "type": "deep-dive",
+      "level": "advanced",
+      "scope": "The taxonomy and evolution of RAG system designs from naive to advanced to agentic to graph. IN: naive RAG, advanced RAG (pre/post-retrieval optimization), modular RAG, iterative/recursive RAG, self-correcting RAG, and the GraphRAG family at the architecture level. OUT: specific query transforms (link Concept - Query Transformation for Retrieval), agentic-loop internals (link Concept - Agentic Retrieval), the GraphRAG system breakdown (link Breakdown - Microsoft GraphRAG), and agent orchestration (owned by Agents).",
+      "key_points": [
+        "Naive RAG: chunk -> embed -> retrieve top-k -> stuff -> generate, with its documented failure points (bad chunks, no reranking, no query understanding, context stuffing)",
+        "Advanced RAG pre-retrieval (query rewriting, HyDE, decomposition, routing) and post-retrieval (reranking, context compression, fusion) — each mapped to its owning note",
+        "Modular RAG (Gao et al. 2023 survey framing): swappable retrieve/rerank/read/route modules; RAG-Fusion combines multi-query with RRF",
+        "Iterative/recursive: FLARE (retrieve when generation confidence drops), IRCoT (interleave retrieval with chain-of-thought), RAPTOR (Sarthi et al. 2024, recursive summarization tree retrieved at multiple abstraction levels)",
+        "Self-correcting: Self-RAG (Asai et al. 2023, reflection tokens gate retrieve/critique) and CRAG (Yan et al. 2024, retrieval evaluator with web fallback)",
+        "GraphRAG lineage: entity-relationship graph plus community summaries to answer global/holistic questions that no single chunk contains",
+        "Architecture selection: match complexity to query type — most production systems are 'advanced RAG' (hybrid + rerank + query rewrite), not agentic; added complexity costs latency, money, and debuggability",
+        "Diagram required tracing the naive -> advanced -> modular -> agentic progression"
+      ],
+      "links": [
+        "Concept - Query Transformation for Retrieval",
+        "Concept - Agentic Retrieval",
+        "Breakdown - Microsoft GraphRAG",
+        "Concept - Rerankers",
+        "Concept - Hybrid Search and Reciprocal Rank Fusion",
+        "Concept - Chunking Strategies",
+        "Concept - Contextual Retrieval",
+        "Deep Dive - The Agent Loop",
+        "Concept - Chain-of-Thought and Why It Works",
+        "Concept - RAG Evaluation",
+        "Concept - Retrieval-Augmented Generation",
+        "Concept - Agent Memory Systems"
+      ]
+    },
+    {
+      "title": "Concept - HNSW",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Hierarchical Navigable Small World graphs, the dominant in-memory ANN index. IN: the layered proximity-graph structure, greedy search, construction, the M/ef_construction/ef_search parameters, memory cost, the recall-latency tradeoff, and filtering interaction. OUT: quantization of stored vectors (link Concept - Embedding Quantization), disk-based variants (link Breakdown - DiskANN), and deep filtered-search pathologies (link Gotchas - Vector Index Tuning).",
+      "key_points": [
+        "Structure: a multi-layer graph with sparse long-range top layers and a dense bottom layer containing all nodes; search descends layers doing greedy nearest-neighbor walks in roughly logarithmic hops (Malkov & Yashunin 2016/2018)",
+        "Skip-list analogy: upper layers are express lanes; a node's max level is drawn as roughly -ln(uniform)*mL so higher layers are exponentially sparser",
+        "Parameters: M (edges per node, 16-64; higher means better recall and more memory), ef_construction (build-time candidate list, 100-500), ef_search (query-time beam that trades recall against latency — the one runtime knob)",
+        "Memory: roughly d*4 + M*2*~8 bytes per vector; graph overhead is often 1.5-2x the raw vectors, which is why HNSW is RAM-hungry",
+        "Recall-latency curve is swept by ef_search; the 'recall cliff' means you must tune against a labeled set; 0.95-0.99 recall is typically achievable",
+        "Construction is incremental (supports adds) but deletes are hard — tombstones accumulate and the graph degrades, forcing periodic rebuilds; update-heavy workloads suffer",
+        "Filtering interaction: pre-filtering breaks graph connectivity (candidates become unreachable) while post-filtering wastes work; filtered-HNSW and ACORN-style approaches address it (link Gotchas - Vector Index Tuning)"
+      ],
+      "links": [
+        "Concept - IVF and Product Quantization",
+        "Breakdown - DiskANN",
+        "Gotchas - Vector Index Tuning",
+        "Concept - Semantic Search",
+        "Reference - Vector Database Landscape",
+        "Concept - GPU Memory Hierarchy",
+        "Reference - Memory Math for Transformers",
+        "Concept - Embedding Quantization"
+      ]
+    },
+    {
+      "title": "Concept - IVF and Product Quantization",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Inverted-file partitioning (IVF) and product quantization (PQ), the cluster-and-compress ANN family behind FAISS at scale. IN: IVF coarse quantizer and nprobe, PQ subvector codebooks, OPQ, IVFPQ, asymmetric distance computation, and the recall/memory tradeoff versus HNSW. OUT: graph indexes (link Concept - HNSW), disk-based indexes (link Breakdown - DiskANN), and scalar/binary quantization of full vectors (link Concept - Embedding Quantization).",
+      "key_points": [
+        "IVF: k-means partitions the space into nlist Voronoi cells; a query probes nprobe nearest cells (nprobe trades recall for speed), scanning inverted lists instead of all N vectors",
+        "Product Quantization (Jegou et al. 2011): split a d-dim vector into m subvectors, k-means each subspace into 256 centroids, store m bytes per vector — d=768 with m=96 is 96 bytes vs 3072 bytes raw, a 32x cut",
+        "Asymmetric Distance Computation (ADC): precompute query-to-centroid distance tables and sum per subvector to approximate distance without decompressing",
+        "OPQ (optimized PQ): learn a rotation so subspaces are balanced and decorrelated before quantizing, yielding meaningful recall gains",
+        "IVFPQ combines both — coarse IVF pruning plus PQ-compressed residuals — as FAISS's workhorse for billion-scale search in bounded RAM",
+        "Tradeoff vs HNSW: PQ gives massive memory savings but lower recall at equal latency, while HNSW gives higher recall for more memory; IVF is cheaper to build but weaker at equal memory",
+        "Residual/re-rank recovery: use a two-stage PQ shortlist then exact rescore with full vectors to recover precision"
+      ],
+      "links": [
+        "Concept - HNSW",
+        "Breakdown - DiskANN",
+        "Concept - Embedding Quantization",
+        "Concept - Semantic Search",
+        "Reference - Vector Database Landscape",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Reference - Memory Math for Transformers"
+      ]
+    },
+    {
+      "title": "Concept - Contrastive Learning for Text Embeddings",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The training objective that makes retrieval embeddings by pulling relevant pairs together and pushing negatives apart. IN: InfoNCE/contrastive loss, in-batch negatives, temperature, the batch-size effect, two-stage training, and the alignment/uniformity view. OUT: hard-negative mining specifically (link Concept - Hard Negative Mining), the vision-language version (link Concept - CLIP and Contrastive Vision-Language Training), and softmax mechanics (owned by Neural Networks).",
+      "key_points": [
+        "InfoNCE loss = -log( exp(sim(q,d+)/tau) / sum_i exp(sim(q,d_i)/tau) ): a softmax over one positive plus negatives, i.e. cross-entropy over similarities, with temperature tau (0.01-0.05) sharpening the distribution",
+        "In-batch negatives: other examples' positives in the batch act as free negatives, so a larger batch means more and harder negatives — why embedding training uses batch sizes of 1k-32k+ (with GradCache to fit memory)",
+        "Two-stage recipe (E5, BGE, GTE): (1) contrastive pretrain on billions of weakly-supervised pairs (title-body, QA, mined web pairs), then (2) supervised fine-tune on labeled retrieval data (MS MARCO, NLI) with hard negatives",
+        "Temperature's role: too high yields no separation, too low causes collapse and instability; it interacts tightly with L2 normalization",
+        "Cross-device negatives: all-gather positives across GPUs to enlarge the effective negative pool — the partition-function estimate improves with more negatives",
+        "Alignment and uniformity (Wang & Isola 2020) is the geometric objective contrastive learning optimizes; poor uniformity leaves the space anisotropic (link Concept - Embedding Space Geometry)"
+      ],
+      "links": [
+        "Concept - Hard Negative Mining",
+        "Concept - Embedding Models",
+        "Concept - CLIP and Contrastive Vision-Language Training",
+        "Concept - Softmax",
+        "Concept - Embedding Space Geometry",
+        "Concept - Entropy and Cross-Entropy",
+        "Concept - All-Reduce and Collective Operations",
+        "Concept - Matryoshka Representation Learning"
+      ]
+    },
+    {
+      "title": "Concept - Hard Negative Mining",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Selecting difficult negatives that sharpen retrieval embeddings, and the false-negative trap that ruins them. IN: mining strategies, in-batch vs mined negatives, false negatives, denoising, iterative (ANCE-style) mining, and cross-encoder distillation labels. OUT: the contrastive loss itself (link Concept - Contrastive Learning for Text Embeddings) and reranker distillation depth (link Concept - Rerankers).",
+      "key_points": [
+        "Why random/in-batch negatives are too easy: the model quickly separates obvious non-matches, so the useful gradient signal comes from hard negatives that are semantically close but wrong",
+        "Mining: retrieve top candidates with BM25 or the current dense model and take high-ranked non-gold as hard negatives; ANCE (Xiong et al. 2020) refreshes negatives from the model being trained via an async index",
+        "The false-negative catastrophe: mined 'negatives' are frequently unlabeled positives (MS MARCO labels are sparse), so training pushes genuinely relevant pairs apart — the symptom is recall plateauing or degrading",
+        "Denoising: sample from a rank window (e.g. 30-100 rather than the very top) and use a cross-encoder to relabel and filter false negatives, as in RocketQA (Qu et al. 2021)",
+        "Cross-encoder/reranker distillation as soft labels (teacher) is the standard modern recipe behind SOTA embedders",
+        "Hardness curriculum: too-hard negatives too early destabilize training; count and hardness per positive must be tuned"
+      ],
+      "links": [
+        "Concept - Contrastive Learning for Text Embeddings",
+        "Concept - Embedding Models",
+        "Concept - Rerankers",
+        "Concept - BM25 and Lexical Retrieval",
+        "Concept - Knowledge Distillation",
+        "Concept - Semantic Search"
+      ]
+    },
+    {
+      "title": "Concept - Late Interaction and ColBERT",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Token-level multi-vector retrieval that keeps per-token embeddings and scores via MaxSim, sitting between bi-encoders and cross-encoders. IN: ColBERT architecture, the MaxSim operator, the late-interaction tradeoff, ColBERTv2 compression, PLAID serving, storage cost, and the multimodal ColPali extension. OUT: single-vector dense retrieval (link Concept - Semantic Search), cross-encoder rerankers (link Concept - Rerankers), and the attention mechanism itself (owned by Architectures).",
+      "key_points": [
+        "Late interaction: encode query and document into per-token embedding matrices rather than one pooled vector; relevance = sum over query tokens of max over doc tokens of (q_i . d_j), the MaxSim operator, so each query token finds its best-matching document token",
+        "Why it beats single-vector: no information bottleneck from pooling into one vector, capturing term-level matching plus semantics; why it beats cross-encoders on cost: document embeddings are precomputed offline and only MaxSim runs at query time (Khattab & Zaharia 2020)",
+        "Storage blowup: one vector per token means 100-1000x more vectors than single-vector dense; ColBERTv2 (Santhanam et al. 2021) uses residual/centroid compression to cut it roughly 10x, still heavy",
+        "PLAID (Santhanam et al. 2022): centroid pruning plus fast candidate generation that made ColBERTv2 servable at low latency",
+        "Usage flexibility: ColBERT can act as a first-stage retriever (via candidate generation) or as a reranker over a shortlist",
+        "2024-2026 resurgence: ColPali applies late interaction over document-image patches from a VLM for visual document retrieval — the token-level indexing renaissance"
+      ],
+      "links": [
+        "Concept - Rerankers",
+        "Concept - Semantic Search",
+        "Concept - Attention Mechanism",
+        "Concept - Embedding Quantization",
+        "Concept - VLM Architectures",
+        "Deep Dive - RAG Architectures",
+        "Concept - Embedding Models"
+      ]
+    },
+    {
+      "title": "Concept - Query Transformation for Retrieval",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Rewriting or expanding the user query before retrieval to close the query-document gap. IN: HyDE, multi-query expansion, query decomposition, step-back prompting, routing, and RAG-Fusion. OUT: reranking retrieved results (link Concept - Rerankers), iterative retrieve-generate loops (link Concept - Agentic Retrieval), and chain-of-thought mechanics (link Concept - Chain-of-Thought and Why It Works).",
+      "key_points": [
+        "The vocabulary/asymmetry gap: short keyword queries embed poorly against verbose passages, and transformations bridge it",
+        "HyDE (Gao et al. 2022): the LLM generates a hypothetical answer/document and you embed THAT (not the raw query) to retrieve — the hallucinated doc lives in passage-space; strong zero-shot but fails when the model hallucinates wrong-domain terms",
+        "Multi-query / RAG-Fusion: generate N query paraphrases, retrieve each, and RRF-fuse — raises recall on ambiguous queries at N times the retrieval cost",
+        "Decomposition: break multi-hop or compound questions into sub-queries retrieved separately, required for 'compare X and Y' style questions",
+        "Step-back prompting (Zheng et al. 2023): ask a more general question first to retrieve underlying principles/context",
+        "Routing: classify the query to pick an index, a tool, or no retrieval at all — the gate that avoids injecting noise into simple queries and saves cost",
+        "Cost/latency: every transform adds an LLM call before retrieval, so it is justified only when the recall gain outweighs the added latency"
+      ],
+      "links": [
+        "Concept - Rerankers",
+        "Concept - Agentic Retrieval",
+        "Deep Dive - RAG Architectures",
+        "Concept - Chain-of-Thought and Why It Works",
+        "Concept - Hybrid Search and Reciprocal Rank Fusion",
+        "Concept - Semantic Search",
+        "Concept - RAG Evaluation"
+      ]
+    },
+    {
+      "title": "Concept - Contextual Retrieval",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Enriching chunks with document-level context before embedding/indexing to fix the isolated-chunk problem. IN: Anthropic's Contextual Retrieval (contextual embeddings + contextual BM25), the prompt-caching economics that make it viable, late chunking as an alternative, and measured recall gains. OUT: base chunking (link Concept - Chunking Strategies), prompt-caching mechanics (link Concept - Prompt Caching), and reranking (link Concept - Rerankers).",
+      "key_points": [
+        "The problem: a chunk like 'revenue grew 3%' loses which company and quarter, so both its embedding and its BM25 terms miss the context a reader needs — a classic silent retrieval failure",
+        "Anthropic Contextual Retrieval (2024): prepend an LLM-generated 50-100 token context blurb ('This chunk is from ACME's Q2 2023 10-K, discussing...') to each chunk before both embedding AND BM25 indexing",
+        "Prompt-caching economics: generating context per chunk is one LLM call per chunk, but caching the full document in the prompt makes it cheap (order of $1 per million tokens with caching) — this is what made it practical at scale",
+        "Reported results: contextual embeddings cut retrieval failures ~35%, adding contextual BM25 ~49%, and adding reranking ~67% (Anthropic's numbers)",
+        "Late chunking (Jina 2024): the alternative — embed a whole long document with a long-context model then pool per-chunk from the token embeddings, so each chunk embedding already 'saw' the whole document via attention, with no extra LLM calls",
+        "When it is worth it: high-value corpora where a retrieval miss is costly, trading index-time compute for query-time recall"
+      ],
+      "links": [
+        "Concept - Chunking Strategies",
+        "Concept - Prompt Caching",
+        "Concept - Rerankers",
+        "Concept - Hybrid Search and Reciprocal Rank Fusion",
+        "Concept - Embedding Models",
+        "Deep Dive - RAG Architectures",
+        "Gotchas - RAG Pipelines"
+      ]
+    },
+    {
+      "title": "Playbook - Building a Production RAG System",
+      "type": "playbook",
+      "level": "advanced",
+      "scope": "End-to-end procedure to stand up a production-grade RAG pipeline from a document corpus, with the decisions and checks at each stage. IN: ingest -> chunk -> embed -> index -> retrieve -> rerank -> generate -> evaluate -> monitor, with concrete defaults and observation checkpoints. OUT: deep component internals (link their notes) and LLMOps/observability-platform depth (link Concept - LLM Observability and Tracing).",
+      "key_points": [
+        "Step 0: build the eval set FIRST (50-200 real query->answer pairs); every later decision is measured against it, not against demo vibes",
+        "Ingest & chunk: pick a chunker by document type (structural for markdown/code, semantic for prose), start at 256-512 tokens with ~15% overlap, and handle tables and code specially — expected observation: spot-check that chunks are self-contained",
+        "Embed: choose a model via MTEB plus your-domain eval, respect max seq len and query/passage prefixes, batch-embed, and budget d*N*4 bytes of storage",
+        "Index: default to hybrid (dense HNSW + BM25) and pick the vector DB by filtering needs and scale (link Reference - Vector Database Landscape)",
+        "Retrieve -> rerank: hybrid top-100 -> RRF -> cross-encoder rerank -> top 3-5 chunks into context; deviation: recall@10 below ~0.7 points at chunking or the embedder, not the generator",
+        "Generate: use a grounding prompt with citations, instruct the model to abstain when context is insufficient, and use structured output for citations",
+        "Evaluate then monitor: score retrieval (recall@k, nDCG) and generation (faithfulness) on the golden set, iterate the weakest stage, then in production log queries + retrieved chunks + answers, track no-context and low-score rates, and feed drift back into the eval set"
+      ],
+      "links": [
+        "Concept - Chunking Strategies",
+        "Concept - Embedding Models",
+        "Concept - Hybrid Search and Reciprocal Rank Fusion",
+        "Concept - Rerankers",
+        "Concept - RAG Evaluation",
+        "Reference - Vector Database Landscape",
+        "Concept - LLM Observability and Tracing",
+        "Gotchas - RAG Pipelines",
+        "Playbook - Reliable Structured Output"
+      ]
+    },
+    {
+      "title": "Gotchas - RAG Pipelines",
+      "type": "gotchas",
+      "level": "advanced",
+      "scope": "Aggregated failure modes across the RAG pipeline from ingestion to generation, ordered by how much pain they cause. IN: retrieval failures, chunk/context bugs, generation-grounding failures, ordering/position effects, and eval blind spots. OUT: pure vector-index tuning pathologies (link Gotchas - Vector Index Tuning) and embedding-geometry issues (link Concept - Embedding Space Geometry).",
+      "key_points": [
+        "Retrieved-but-ignored: the gold chunk is retrieved yet the answer is wrong due to lost-in-the-middle position bias; fix by reranking and placing the best chunk first or last and reducing k; detect via a context-utilization metric",
+        "Confident hallucination despite retrieval: the model overrides context with its parametric prior; fix with a grounding/cite-or-abstain prompt and a faithfulness eval",
+        "Chunk-boundary amputation: a table split from its header or code split from its signature; fix with structural chunking or parent-document retrieval",
+        "Embedding-prefix omission (forgot query:/passage:) silently halves recall; detect with an A/B recall test",
+        "Distribution shift: a general embedder fails on domain jargon (low recall on domain terms); fix with hybrid search plus domain fine-tuning",
+        "Stale index and delete tombstones: updated docs with un-recomputed embeddings and accumulating deletes degrade quality; fix with reindexing and versioning",
+        "Near-duplicate flooding: duplicate chunks crowd out diverse evidence in top-k; fix with MMR or dedup; and over-retrieval noise where too-large k injects distractors that lower accuracy — more is not better",
+        "The demo-to-prod eval gap: tuned on vibes with no golden set; fix by building the eval set before tuning anything"
+      ],
+      "links": [
+        "Gotchas - Vector Index Tuning",
+        "Concept - Context Rot",
+        "Concept - RAG Evaluation",
+        "Concept - Chunking Strategies",
+        "Concept - Rerankers",
+        "Concept - Contextual Retrieval",
+        "Concept - Embedding Space Geometry"
+      ]
+    },
+    {
+      "title": "Concept - Matryoshka Representation Learning",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Training embeddings whose prefixes are themselves valid embeddings, enabling adaptive-dimension retrieval. IN: the MRL nested loss, truncation behavior, adaptive retrieval (shortlist on short dims then rescore on full), text-embedding-3 usage, and storage/latency wins. OUT: base contrastive training (link Concept - Contrastive Learning for Text Embeddings) and bit-level quantization (link Concept - Embedding Quantization).",
+      "key_points": [
+        "MRL (Kusupati et al. 2022): apply the loss at multiple nested prefix dimensions simultaneously (e.g. 64, 128, 256, ..., d) so the first m dimensions form a usable embedding for any m, front-loading information into the early dimensions",
+        "Adaptive retrieval: a cheap first pass with truncated 64-256 dims (fast ANN, less memory) then a rescore of the shortlist with full dims — large latency and memory savings at roughly the same recall",
+        "text-embedding-3 (OpenAI 2024) exposes this via a dimensions parameter to truncate 3072 down to 256 with graceful degradation; Nomic, mxbai, and Jina v3 are also MRL-trained",
+        "Must L2-renormalize after truncation; naively slicing without renormalizing breaks cosine similarity",
+        "Compounds with quantization: MRL dimension truncation times int8/binary bits multiplies compression",
+        "Tradeoff: a small accuracy loss under aggressive truncation buys 'one model, many operating points' — the frontier of adaptive-cost retrieval"
+      ],
+      "links": [
+        "Concept - Embedding Models",
+        "Concept - Contrastive Learning for Text Embeddings",
+        "Concept - Embedding Quantization",
+        "Concept - Semantic Search",
+        "Concept - HNSW",
+        "Reference - Vector Database Landscape"
+      ]
+    },
+    {
+      "title": "Concept - Learned Sparse Retrieval",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Neural models that produce sparse, vocabulary-indexed weight vectors, combining inverted-index efficiency with learned semantics. IN: SPLADE architecture, term expansion, the FLOPS regularizer, serving on inverted indexes, and comparisons to dense and BM25. OUT: BM25 (link Concept - BM25 and Lexical Retrieval), single-vector dense (link Concept - Semantic Search), and late interaction (link Concept - Late Interaction and ColBERT).",
+      "key_points": [
+        "SPLADE (Formal et al. 2021): use the MLM head over the vocabulary to produce a sparse weight per vocab term (most zero) with log-saturation and ReLU; document expansion adds related terms not in the text, fixing vocabulary mismatch while staying sparse",
+        "The FLOPS regularizer controls sparsity and thus efficiency, tuning how many nonzero terms remain — the index-size vs quality lever",
+        "Served on standard inverted indexes (Lucene, Anserini), so it stays cheap, scalable, and interpretable via visible term weights, unlike dense embeddings",
+        "vs BM25: learned weights plus expansion beat static IDF on many BEIR tasks; vs dense: no out-of-domain collapse and interpretable, but higher query latency than BM25",
+        "The sparse-neural family: DeepImpact, uniCOIL, and doc2query/docTTTTTquery (generate expansion terms then index with BM25)",
+        "Where it fits: hybrid systems use SPLADE as the lexical arm instead of or alongside BM25 — the efficiency-effectiveness sweet spot argument"
+      ],
+      "links": [
+        "Concept - BM25 and Lexical Retrieval",
+        "Concept - Hybrid Search and Reciprocal Rank Fusion",
+        "Concept - Semantic Search",
+        "Concept - Late Interaction and ColBERT",
+        "Concept - Embedding Models",
+        "Reference - Vector Database Landscape"
+      ]
+    },
+    {
+      "title": "Breakdown - Microsoft GraphRAG",
+      "type": "breakdown",
+      "level": "frontier",
+      "scope": "How Microsoft's GraphRAG builds and queries a knowledge graph plus community summaries to answer global questions naive RAG cannot. IN: entity/relation extraction, graph construction, Leiden community detection, hierarchical community summaries, local vs global search, and cost. OUT: the general RAG taxonomy (link Deep Dive - RAG Architectures) and agent orchestration (owned by Agents).",
+      "key_points": [
+        "What/why (2024, Microsoft Research): naive RAG fails sensemaking and global questions ('what are the main themes across this corpus') because no single chunk holds the answer, so GraphRAG builds explicit structure",
+        "Indexing pipeline: an LLM extracts entities, relationships, and claims from chunks into a knowledge graph, then Leiden hierarchical community detection partitions it, then an LLM writes a summary per community at each level",
+        "Query modes: global search does map-reduce over community summaries for corpus-wide questions, local search traverses an entity-centric neighborhood for specific-entity questions, and DRIFT hybridizes them",
+        "The headline cost: LLM extraction over the entire corpus is expensive (many index-time LLM calls) — the central tradeoff and why it targets high-value corpora",
+        "Clever parts: community summaries act as precomputed answers at multiple abstraction levels, map-reduce aggregates them, and claim/covariate extraction adds structured evidence",
+        "What's dated/wrong: high index cost, staleness on updates, and extraction errors that propagate; LazyGraphRAG (2024) slashes cost by deferring extraction to query time",
+        "What to steal: pre-aggregate structure for global questions, combine graph with vector retrieval, and note that even lightweight entity linking helps multi-hop",
+        "Diagram required: the index pipeline plus the local and global query paths"
+      ],
+      "links": [
+        "Deep Dive - RAG Architectures",
+        "Concept - Agentic Retrieval",
+        "Concept - Retrieval-Augmented Generation",
+        "Concept - Chunking Strategies",
+        "Concept - RAG Evaluation",
+        "Concept - Tool Use and Function Calling",
+        "Concept - Cost Engineering for LLM Applications",
+        "Concept - Knowledge Distillation",
+        "Deep Dive - The Agent Loop",
+        "Concept - Multi-Agent Orchestration"
+      ]
+    },
+    {
+      "title": "Concept - Agentic Retrieval",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Retrieval controlled by an LLM's decisions: whether to retrieve, what to query, evaluating results, and iterating. IN: Self-RAG, CRAG, FLARE, iterative retrieve-reason loops, retrieval-as-tool, and self-correction — the RAG-specific control logic. OUT: the general agent loop and orchestration (owned by Agents) and static query transforms (link Concept - Query Transformation for Retrieval).",
+      "key_points": [
+        "The shift from a static pipeline to LLM-controlled retrieval: the model decides IF, WHAT, and WHEN to retrieve mid-generation and whether the results suffice",
+        "FLARE (Jiang et al. 2023): generate, and when next-token confidence drops, pause and retrieve using the tentative sentence as the query — retrieve-on-demand",
+        "Self-RAG (Asai et al. 2023): trained reflection tokens (Retrieve, IsRelevant, IsSupported, IsUseful) let the model gate retrieval and self-critique groundedness",
+        "CRAG (Yan et al. 2024): a lightweight retrieval evaluator scores docs as correct/ambiguous/incorrect, triggering web-search fallback or knowledge refinement",
+        "Retrieval-as-tool: search exposed as a function the agent calls across multiple turns, queries, and sources — the modern 'deep research' pattern (link Concept - Tool Use and Function Calling)",
+        "Costs: multiple LLM plus retrieval round-trips add latency and money and introduce new failure modes (loops, over-retrieval, wrong-tool); justified only when accuracy gains pay for it",
+        "Boundary: reasoning and orchestration belong to the Agents domain; this note covers the retrieval-control specifics"
+      ],
+      "links": [
+        "Deep Dive - The Agent Loop",
+        "Concept - Tool Use and Function Calling",
+        "Deep Dive - RAG Architectures",
+        "Concept - Query Transformation for Retrieval",
+        "Concept - Model Context Protocol (MCP)",
+        "Concept - RAG Evaluation",
+        "Concept - Chain-of-Thought and Why It Works",
+        "Gotchas - RAG Pipelines"
+      ]
+    },
+    {
+      "title": "Breakdown - DiskANN",
+      "type": "breakdown",
+      "level": "unicorn",
+      "scope": "How DiskANN (the Vamana graph) serves billion-scale ANN from SSD with a small RAM footprint. IN: Vamana construction with alpha-pruning, the SSD layout, PQ-in-RAM plus full-vectors-on-disk, beam search with disk reads, caching, and streaming updates (FreshDiskANN). OUT: in-memory HNSW (link Concept - HNSW) and IVFPQ (link Concept - IVF and Product Quantization).",
+      "key_points": [
+        "Problem: HNSW needs all vectors plus the graph in RAM (hundreds of GB for a billion 768-d vectors); DiskANN (Subramanya et al. 2019, Microsoft) serves from SSD with only a few GB of RAM",
+        "Vamana graph: a single-layer graph built with alpha-pruning (alpha above 1 keeps longer-range edges for navigability), producing a higher-degree robust graph that reaches any node in few hops to tolerate disk latency",
+        "Layout: PQ-compressed vectors held in RAM for fast approximate distances during search, with full-precision vectors and adjacency lists on SSD read on demand; beam search batches SSD reads to amortize latency",
+        "Read-amplification tradeoff: each hop is a random SSD read (~100 microseconds on NVMe), so beam width and hot-node caching bound tail latency — NVMe, not HDD, is the enabler",
+        "FreshDiskANN: streaming inserts and deletes via an in-memory delta merged periodically into the on-disk index, solving the static-index limitation",
+        "Why it matters: billion-scale search at roughly 10x lower cost than all-RAM, adopted in Azure AI Search, Milvus, and Weaviate — the answer when vectors do not fit in RAM",
+        "Diagram required: RAM (PQ codes + graph cache) vs SSD (full vectors + adjacency) with the beam-search read path"
+      ],
+      "links": [
+        "Concept - HNSW",
+        "Concept - IVF and Product Quantization",
+        "Concept - Embedding Quantization",
+        "Reference - Vector Database Landscape",
+        "Concept - GPU Memory Hierarchy",
+        "Reference - Memory Math for Transformers",
+        "Concept - Semantic Search",
+        "Gotchas - Vector Index Tuning",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - Floating Point for Deep Learning"
+      ]
+    },
+    {
+      "title": "Concept - Embedding Space Geometry",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "The geometric pathologies of embedding spaces that silently degrade retrieval: anisotropy, hubness, dimensional collapse, and the cross-model cosine trap. IN: the cone effect, whitening, high-dimensional hubness, isotropy fixes, and why cosine magnitudes are not comparable across models. OUT: the contrastive training that shapes the space (link Concept - Contrastive Learning for Text Embeddings) and quantization (link Concept - Embedding Quantization).",
+      "key_points": [
+        "Anisotropy / representation degeneration (Gao et al. 2019; Ethayarajh 2019): raw transformer embeddings occupy a narrow cone so all cosine similarities are crushed toward high positive values and near-random pairs look 0.7+ similar",
+        "Why it matters for retrieval: a cone-shaped space separates poorly; contrastive training plus normalization (alignment/uniformity) partly fixes it but residual anisotropy remains",
+        "Whitening / isotropy post-processing (BERT-flow, whitening — Su et al. 2021): a linear transform to zero-mean identity-covariance that can help or hurt depending on the model",
+        "Hubness (Radovanovic 2010): in high dimensions a few hub vectors are the nearest neighbor to disproportionately many queries and pollute top-k universally; fixes include score normalization and CSLS-style corrections",
+        "The cross-model cosine trap: a cosine of 0.85 from model A and 0.85 from model B mean different things, so relevance thresholds are model-specific and must be recalibrated — the folklore '0.8 means relevant' is nonsense",
+        "Dimensional collapse: embeddings using only a subspace of d waste storage and capacity; better training and MRL mitigate it",
+        "Practical detection: plot the similarity distribution of random pairs — a healthy space centers near 0, an anisotropic one does not"
+      ],
+      "links": [
+        "Concept - Contrastive Learning for Text Embeddings",
+        "Concept - Embedding Models",
+        "Concept - Embedding Quantization",
+        "Concept - Semantic Search",
+        "Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Concept - Double Descent",
+        "Gotchas - RAG Pipelines"
+      ]
+    },
+    {
+      "title": "Concept - Embedding Quantization",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "Compressing embedding vectors (binary, int8, and hybrid) for cheap storage and fast search, with rescoring to recover accuracy. IN: scalar int8 quantization, binary embeddings and Hamming distance, the rescore/rerank recovery step, compression ratios, and MRL synergy. OUT: product quantization internals (link Concept - IVF and Product Quantization) and matryoshka dimension truncation (link Concept - Matryoshka Representation Learning).",
+      "key_points": [
+        "Scalar int8: map each fp32 dimension to int8 via per-dimension min/max for a 4x storage cut and minor recall loss; asymmetric variants keep the query in fp32",
+        "Binary embeddings: threshold each dimension at 0 for 1 bit per dimension (32x compression) with similarity via Hamming distance (XOR plus popcount) — extremely fast but lossy",
+        "The two-stage recovery (Cohere and mixedbread int8+binary rescoring, 2024): a binary or int8 shortlist (fast, tiny) then rescore the shortlist with fp32 or int8 vectors to recover 95%+ of full-precision recall at 4-32x less memory",
+        "Why it works: high-dimensional embeddings are robust to per-dimension precision loss — the ranking survives coarse quantization even when exact distances do not",
+        "Numbers: 1M x 1024-d fp32 is 4GB, int8 is 1GB, binary is 128MB — the memory lever that matters most for RAM-bound HNSW",
+        "Synergy with Matryoshka: truncate dimensions then quantize bits for multiplicative compression (e.g. 512-d int8 gives 8x)",
+        "Failure: naive binary without rescoring tanks recall on hard queries, so full vectors must stay on disk/cold for rescore, and thresholds need per-dataset calibration"
+      ],
+      "links": [
+        "Concept - IVF and Product Quantization",
+        "Concept - Matryoshka Representation Learning",
+        "Concept - HNSW",
+        "Concept - Floating Point for Deep Learning",
+        "Concept - Semantic Search",
+        "Reference - Vector Database Landscape",
+        "Concept - Post-Training Quantization Formats"
+      ]
+    },
+    {
+      "title": "Gotchas - Vector Index Tuning",
+      "type": "gotchas",
+      "level": "unicorn",
+      "scope": "The non-obvious production failures of ANN indexes: filtered search, recall cliffs, deletes, metric mismatch, and parameter folklore. IN: filtered-search graph disconnection, the ef_search recall cliff, delete/rebuild degradation, distance-metric mismatch, memory blowup, and the benchmark-vs-production recall gap. OUT: index algorithm internals (link Concept - HNSW, Concept - IVF and Product Quantization, Breakdown - DiskANN).",
+      "key_points": [
+        "Filtered search returns too few or wrong results: pre-filtering removes nodes from the HNSW graph so traversal cannot reach valid candidates (broken connectivity); fix with filterable HNSW/ACORN or IVF-with-filter, or over-fetch then post-filter; detect as recall drops when the filter gets selective",
+        "The recall cliff: ef_search set too low collapses recall non-linearly rather than gracefully; fix by sweeping ef_search vs recall on a labeled set and setting for a target recall — 'defaults are fine' burns people",
+        "Distance-metric mismatch: an index built for L2 while embeddings expect cosine (unnormalized) silently produces wrong rankings; fix by normalizing and using inner product, matching the model card",
+        "Delete degradation: HNSW tombstones accumulate, connectivity rots, and both recall and latency drift; fix with periodic full rebuilds and monitor the deleted-ratio",
+        "Memory blowup surprise: graph overhead from M edges roughly doubles raw-vector RAM and causes OOM at scale; fix by quantizing (link Concept - Embedding Quantization), moving to DiskANN, or planning M",
+        "ann-benchmarks recall does not equal your recall: public benchmarks use uniform data and no filters, while your skewed, filtered, updated workload behaves differently — always benchmark on your data and query mix",
+        "Over-indexing tiny corpora: building HNSW for 50k vectors when flat brute-force is both faster and exact — knowing when NOT to use ANN"
+      ],
+      "links": [
+        "Concept - HNSW",
+        "Concept - IVF and Product Quantization",
+        "Breakdown - DiskANN",
+        "Concept - Embedding Quantization",
+        "Reference - Vector Database Landscape",
+        "Gotchas - RAG Pipelines",
+        "Reference - Memory Math for Transformers"
+      ]
+    },
+    {
+      "title": "Lore - The RAG Is Dead Debate",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The recurring 'long context kills RAG' claim and why it keeps being both right and wrong. IN: the debate's history across context-window jumps, each side's arguments, what actually happened in practice, and the reframe to 'RAG feeds context'. OUT: the technical decision itself (link Decision - RAG vs Long-Context Windows) and context-degradation mechanics (link Concept - Context Rot).",
+      "key_points": [
+        "The story: each context-window jump (Claude 100k in 2023, GPT-4-128k, Gemini 1M/2M in 2024, 10M claims) triggered a fresh wave of 'RAG is dead' takes — the pattern of the claim repeating is the point",
+        "The steelman for long-context: no chunking bugs, no retrieval misses, full-document coherence, a simpler stack, and Gemini's near-perfect single-needle-in-a-haystack demos",
+        "Why RAG did not die: cost (pay for all tokens every call), latency (prefill scales with tokens), lost-in-the-middle degrading real multi-fact use, corpus sizes that dwarf any window, attribution needs, and freshness/updates",
+        "The prompt-caching plot twist: caching improved long-context economics for repeated-corpus workloads, narrowing but not closing the gap",
+        "The mid-2026 resolution: not either/or — retrieval curates what fills the window, so 'RAG is context engineering' and the framing was a category error",
+        "Evidence status: the mechanics (benchmarks, cost math, practitioner reports) are well-sourced; the 'dead' takes are labeled hype/folklore",
+        "The meta-lesson: single-needle benchmark demos mislead compared to real workloads with many facts, distractors, and position bias"
+      ],
+      "links": [
+        "Decision - RAG vs Long-Context Windows",
+        "Concept - Context Rot",
+        "Concept - Retrieval-Augmented Generation",
+        "Concept - Prompt Caching",
+        "Concept - KV Cache",
+        "Concept - Cost Engineering for LLM Applications"
+      ]
+    }
+  ]
+}

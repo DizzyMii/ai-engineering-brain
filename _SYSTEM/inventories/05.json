@@ -1,0 +1,556 @@
+{
+  "domain": "05 - Data Engineering",
+  "slug": "data-engineering",
+  "notes": [
+    {
+      "title": "Concept - Common Crawl and Web Data at Scale",
+      "type": "concept",
+      "level": "surface",
+      "scope": "What Common Crawl is and why it is the raw material under nearly every open pretraining corpus: its archive formats, cadence, scale, and coverage biases. IN: WARC/WET/WAT structure, snapshot economics, access, what a dump does and does not contain. OUT: text extraction, filtering, and dedup mechanics (own notes); tokenization (link to 04).",
+      "key_points": [
+        "Common Crawl is a nonprofit crawler producing ~monthly snapshots since 2008; each dump is ~2.5-4 billion pages, ~90-100 TiB compressed WARC (250+ TiB uncompressed); by 2026 there are 100+ cumulative dumps.",
+        "Three file types per dump: WARC (raw HTTP response with headers + full HTML), WET (naive pre-extracted plaintext, low quality), WAT (metadata/links). RefinedWeb and FineWeb reject WET and re-extract from WARC.",
+        "Coverage bias: heavily English (~44% of documents), skewed toward high-PageRank domains, respects robots.txt so paywalled/blocked sites are absent, and the long tail of languages is severely underrepresented.",
+        "It is not the whole web: CC samples a few percent of the indexed web per dump seeded from prior crawls + sitemaps; cross-dump deduplication is the consumer's problem, not CC's.",
+        "Access is free via S3 (s3://commoncrawl/) with a CDX URL index for querying by domain; processing one dump end-to-end is a multi-thousand CPU-hour distributed job.",
+        "It dominates because it is the only openly redistributable web-scale corpus: C4, The Pile, RefinedWeb, RedPajama, Dolma, and FineWeb all derive from it."
+      ],
+      "links": [
+        "Deep Dive - The Pretraining Data Pipeline",
+        "Concept - Text Extraction from Web Pages",
+        "Concept - Deduplication at Scale",
+        "Concept - Byte-Pair Encoding",
+        "Reference - Where Real AI Knowledge Lives",
+        "Concept - Copyright and Licensing of Training Data"
+      ]
+    },
+    {
+      "title": "Concept - The Data-Centric View of Model Quality",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The thesis, established ~2020-2024, that pretraining data curation - not architecture - accounts for most of the quality gap between models at fixed compute. IN: the empirical case (Chinchilla implication, FineWeb/DCLM ablations, Phi), why data is the durable moat, how labs quantify data quality. OUT: the mechanism of each curation stage (own notes); scaling-law math (link to 04).",
+      "key_points": [
+        "Post-Chinchilla (Hoffmann et al. 2022) compute-optimal training is data-hungry (~20 tokens/param), so quality-per-token directly bounds achievable loss; you cannot buy your way out with more parameters.",
+        "FineWeb's ablation methodology (Penedo et al. 2024): train identical 1.8B models on 350B tokens of each candidate dataset and compare on a fixed high-signal eval suite - curation choices move downstream accuracy by 5-15 points at fixed compute.",
+        "Phi / 'Textbooks Are All You Need' (Gunasekar et al. 2023): a 1.3B model on ~7B curated+synthetic tokens beat models 10x its size on code - an existence proof that data quality substitutes for scale.",
+        "DCLM (Li et al. 2024) is a standardized data-curation benchmark that fixes the model and raw pool, isolating data as the variable; a better filtering pipeline beat prior open SOTA by large margins.",
+        "'Garbage in, garbage out' is quantifiable: dedup + quality filtering typically discards 90-99% of raw Common Crawl to keep the useful few percent.",
+        "Architectures have largely converged (decoder-only transformer) and are public; the undocumented data pipeline is the durable competitive advantage among frontier labs."
+      ],
+      "links": [
+        "Concept - Scaling Laws",
+        "Breakdown - FineWeb and FineWeb-Edu",
+        "Concept - Quality Filtering for Pretraining Data",
+        "Concept - Synthetic Training Data",
+        "Breakdown - The Phi Models and Textbook-Quality Data",
+        "Deep Dive - Anatomy of a Pretraining Run"
+      ]
+    },
+    {
+      "title": "Concept - Synthetic Training Data",
+      "type": "concept",
+      "level": "core",
+      "scope": "Generating pretraining and mid-training data with models rather than harvesting it - distillation, rephrasing, and textbook-style generation - and the conditions under which synthetic tokens help or hurt. IN: generation families, diversity/verification controls, contamination and legal risks. OUT: recursive model-collapse dynamics (own frontier note); instruction/SFT data and distillation theory (link to 06).",
+      "key_points": [
+        "Families: (a) distillation from a stronger teacher (Phi, Cosmopedia); (b) rephrasing real web into cleaner styles (WRAP, Maini et al. 2024: 'rephrase in Wikipedia/QA style'); (c) task-conditioned generation (self-instruct lineage); (d) format transformation (raw text into QA pairs).",
+        "WRAP result: rephrasing C4 gave ~3x pretraining speedup and lower perplexity across 21 domains vs raw web - the win is style normalization and implicit dedup, not new facts.",
+        "Diversity is the failure axis: naive sampling from one teacher collapses to a narrow distribution; Cosmopedia forced coverage with tens of thousands of topic seeds and hundreds of audience/style variations.",
+        "In verifiable domains, generate-then-verify is the trick: Phi-1 filtered synthetic code by test execution; correctness-checkability is why synthetic pretraining works best for code and math.",
+        "Legal angle: synthetic sidesteps copyright on source text but inherits the teacher's terms (OpenAI ToS forbids training competitors); provenance/watermark leakage is a live concern.",
+        "Risk: teacher hallucinations become the student's ground truth, and if the teacher memorized benchmarks the student is silently contaminated."
+      ],
+      "links": [
+        "Concept - Knowledge Distillation",
+        "Breakdown - The Phi Models and Textbook-Quality Data",
+        "Concept - Model Collapse from Synthetic Data",
+        "Concept - Data Mixtures",
+        "Concept - Supervised Fine-Tuning (SFT)",
+        "Concept - Training Set Decontamination",
+        "Concept - Quality Filtering for Pretraining Data"
+      ]
+    },
+    {
+      "title": "Concept - Data Mixtures",
+      "type": "concept",
+      "level": "core",
+      "scope": "How the proportions of data domains (web, code, books, math, multilingual, academic) in a pretraining corpus are chosen, and why the mix - not just total tokens - determines model capabilities. IN: what a mixture is, canonical mixes, up/down-sampling and effective epochs, capability tradeoffs, annealing mixes. OUT: learned/optimized mixing (own frontier note); scaling-law math (link to 04).",
+      "key_points": [
+        "A mixture assigns per-source sampling weights; effective epochs per domain = (weight x total tokens) / domain size, so small high-quality sources (Wikipedia, code) are upsampled 2-5x and web is downsampled.",
+        "Canonical mixes: LLaMA-1 (Touvron et al. 2023) = 67% CommonCrawl, 15% C4, 4.5% GitHub, 4.5% Wikipedia, 4.5% Books, 2.5% arXiv, 2% StackExchange; GPT-3 upsampled Wikipedia/books ~3.4x; The Pile hand-tuned 22 components.",
+        "Code helps non-code reasoning: adding source code to the mix improves entity tracking, structured reasoning, and CoT quality (folklore that became measured evidence).",
+        "Multilingual tax / 'curse of multilinguality': capacity is shared, so adding languages past a threshold trades English quality for coverage.",
+        "The optimal mix shifts with model size and token budget - a mixture tuned on a 1B proxy is often wrong at 70B, which motivates learned mixing methods.",
+        "Annealing / 'cooldown': many labs upweight high-quality, code, math, and synthetic data during the final ~10-20% of training as LR decays, distinct from the base mix."
+      ],
+      "links": [
+        "Concept - Learned Data Mixing (DoReMi and Mixing Laws)",
+        "Concept - Scaling Laws",
+        "Concept - Data Curriculum and Ordering",
+        "Concept - Synthetic Training Data",
+        "Concept - Quality Filtering for Pretraining Data",
+        "Deep Dive - Anatomy of a Pretraining Run"
+      ]
+    },
+    {
+      "title": "Concept - Quality Filtering for Pretraining Data",
+      "type": "concept",
+      "level": "core",
+      "scope": "The stage that decides which documents survive after extraction: the three filtering paradigms (heuristic rules, perplexity/LM-based, classifier/annotator-based), what each catches and misses, and how they interact. IN: how each works, thresholds, application order, precision/recall tradeoffs, distribution-shift harms. OUT: the exact rule constants (own Reference); the paradigm choice (own Decision); dedup (own note).",
+      "key_points": [
+        "Heuristic filters (C4, Gopher): cheap structural rules - min/max length, mean word length 3-10 chars, symbol-to-word ratio < 0.1, fraction of lines ending in punctuation, stopword presence, bullet/ellipsis ratios - to remove boilerplate, spam, and gibberish.",
+        "Classifier-based (GPT-3, FineWeb-Edu): train a fast classifier (fastText or a linear head on embeddings) with curated positives (Wikipedia/OpenWebText) vs random CC negatives, then keep top scores; GPT-3 used a Pareto threshold to keep documents probabilistically.",
+        "Perplexity-based (CCNet, Wenzek et al. 2019): score docs with a KenLM 5-gram trained on Wikipedia, bucket into head/middle/tail; tail = non-natural text. Cheap, label-free, language-agnostic.",
+        "LLM-as-annotator (FineWeb-Edu 2024): prompt Llama-3-70B to rate educational value 0-5 on ~460k samples, distill into a small classifier, keep >=3 - large gains on knowledge benchmarks.",
+        "Order and interaction: language ID, then heuristics, then dedup, then quality classifier; scoring before dedup wastes compute on duplicates.",
+        "Failure mode: aggressive filtering induces distribution shift - over-cleaning hurts diversity and robustness and can erase dialects and minority topics (the C4 blocklist lesson)."
+      ],
+      "links": [
+        "Reference - Data Filtering Heuristics",
+        "Decision - Choosing a Quality Filtering Strategy",
+        "Concept - Entropy and Cross-Entropy",
+        "Breakdown - FineWeb and FineWeb-Edu",
+        "Concept - Deduplication at Scale",
+        "Lore - The C4 Blocklist Incident"
+      ]
+    },
+    {
+      "title": "Concept - Text Extraction from Web Pages",
+      "type": "concept",
+      "level": "core",
+      "scope": "Turning raw HTML into clean training text: boilerplate/chrome removal, main-content extraction, and why the extractor is one of the highest-leverage and most underrated pipeline stages. IN: extraction algorithms/tools, WET vs custom extraction, the artifacts they introduce, where language ID sits. OUT: crawling itself (own Common Crawl note); downstream quality filtering (own note).",
+      "key_points": [
+        "The problem: an HTML page is mostly nav/ads/footers/JS; the training signal is the main content. Bad extraction leaves menu spam and truncates articles into fragments.",
+        "Tools: trafilatura (Barbaresi 2021, DOM + heuristics, the RefinedWeb/FineWeb choice), resiliparse (fast, used by Dolma/DCLM), jusText, boilerpipe, readability - extractor choice measurably changes downstream loss.",
+        "WET is bad: Common Crawl's pre-extracted plaintext keeps boilerplate; RefinedWeb (Penedo et al. 2023) showed that re-extracting from WARC with trafilatura is a major quality lever - arguably its central finding.",
+        "Artifacts to handle: repeated cross-domain navigation (looks like near-dup), mojibake/encoding errors, unclosed tags, JS-rendered content missed entirely, and tables/code losing structure.",
+        "Language ID lives near here: fastText lid.176 routes or drops by language, and extraction quality and LID interact - bad extraction produces the wrong language label.",
+        "Cost: extraction is CPU-bound and embarrassingly parallel but dominates wall-clock for a full dump; run once and cache the output."
+      ],
+      "links": [
+        "Concept - Common Crawl and Web Data at Scale",
+        "Concept - Quality Filtering for Pretraining Data",
+        "Concept - Deduplication at Scale",
+        "Breakdown - FineWeb and FineWeb-Edu",
+        "Deep Dive - The Pretraining Data Pipeline",
+        "Playbook - Building a Pretraining Corpus from Common Crawl",
+        "Concept - Byte-Pair Encoding",
+        "Lore - Glitch Tokens"
+      ]
+    },
+    {
+      "title": "Concept - Training Set Decontamination",
+      "type": "concept",
+      "level": "core",
+      "scope": "Preventing evaluation benchmarks from leaking into pretraining corpora: how contamination enters at web scale, how labs strip it, and why decontamination is inherently imperfect. IN: leakage sources, n-gram/substring decontamination against eval sets, the GPT-3 bug, canaries, reporting norms. OUT: eval-side contamination detection methodology and benchmark design (link to 13); dedup mechanics reused here (own note).",
+      "key_points": [
+        "How it enters: benchmark items are published on the web (GitHub, HuggingFace, papers, blogs) and get crawled, so any web corpus is contaminated by default with MMLU, GSM8K, HumanEval, etc.",
+        "Decontamination = targeted dedup against eval sets: remove training docs with n-gram/substring overlap against every benchmark's test items; GPT-3 used 13-gram overlap, others use ~50-character substring matches.",
+        "The GPT-3 contamination bug (Brown et al. 2020, section 4): a dedup bug left contamination in; they analyzed impact post hoc rather than retraining - a documented 'we shipped it contaminated' admission.",
+        "Method limits: n-gram matching misses paraphrased, translated, or reformatted contamination; embedding/semantic detection catches more but is expensive and false-positive-prone.",
+        "Norm as of 2026: contamination is treated as unavoidable and disclosure is expected (Llama, GPT-4 publish analyses); canary GUIDs (BIG-bench) let dataset authors detect ingestion.",
+        "Failure mode: decontaminating only against known benchmarks leaves you blind to benchmarks released after your crawl, while over-aggressive n-gram removal deletes legitimate common-phrase content."
+      ],
+      "links": [
+        "Concept - Benchmark Contamination",
+        "Concept - Deduplication at Scale",
+        "Concept - Statistical Rigor in Model Evaluation",
+        "Deep Dive - The Pretraining Data Pipeline",
+        "Gotchas - Pretraining Data Pipelines",
+        "Concept - Synthetic Training Data"
+      ]
+    },
+    {
+      "title": "Concept - Copyright and Licensing of Training Data",
+      "type": "concept",
+      "level": "core",
+      "scope": "The legal-technical mechanics governing what text can be used to train and redistribute: copyright, fair use / TDM arguments, dataset licenses, robots.txt and opt-out signals, and how these constraints shape real corpora. IN: doctrines, license types, technical enforcement signals, lab responses, compliance tooling. OUT: the Books3 war story (own Lore note); model-output IP.",
+      "key_points": [
+        "Crawled web text is copyrighted by default; 'publicly available' is not 'licensed for training.' The legal theory training relies on is fair use (US) or text-and-data-mining exceptions (EU DSM Directive Art. 3-4, with rights-holder opt-out).",
+        "Active litigation shaping practice (as of 2026): NYT v. OpenAI, Authors Guild v. OpenAI, Kadrey v. Meta (Books3), Getty v. Stability - outcomes turn on transformativeness and market harm, with no settled bright line.",
+        "License-clean corpora trade legal safety for size/quality: The Stack (code, SPDX-filtered), Common Pile / KL3M, PG-19 (Project Gutenberg), Common Corpus - smaller, cleaner-provenance pools.",
+        "Technical opt-out signals: robots.txt (Common Crawl honors it), emerging noai/TDM-reservation headers and ai.txt, and per-site blocks of GPTBot/CCBot - all shrinking the future crawlable web.",
+        "Code licenses are a trap: GitHub carries GPL/AGPL copyleft; The Stack filters by detected SPDX license and offers opt-out ('Am I In The Stack'); training on copyleft risks license contamination of outputs.",
+        "Compliance is arriving: C2PA content credentials, dataset datasheets, and the EU AI Act's training-data-summary obligation are becoming requirements, not niceties."
+      ],
+      "links": [
+        "Lore - Books3 and the Shadow Library Reckoning",
+        "Concept - Common Crawl and Web Data at Scale",
+        "Concept - Synthetic Training Data",
+        "Reference - Model Genealogy",
+        "Concept - PII and Toxicity Filtering",
+        "Deep Dive - The Pretraining Data Pipeline"
+      ]
+    },
+    {
+      "title": "Deep Dive - The Pretraining Data Pipeline",
+      "type": "deep-dive",
+      "level": "advanced",
+      "scope": "The end-to-end system that turns raw crawls into a tokenized, shuffled, sharded training corpus: every stage, why it exists, the ordering constraints, how stages interact, and how the design evolved. IN: full architecture walkthrough (crawl -> extract -> LID -> filter -> dedup -> decontaminate -> mix -> shuffle -> tokenize -> shard), data-volume collapse, tooling, cost, evolution. OUT: the deep mechanism of each stage (own dedicated notes; this note orchestrates and links).",
+      "key_points": [
+        "Stage graph with ordering rationale: language ID before filtering (rules are language-specific); dedup before quality classification (do not score duplicates); decontaminate late against eval sets; mixture weighting and a global seeded shuffle last, before sharding.",
+        "Volumes collapse dramatically: a raw dump of hundreds of TiB drops to 1-10% surviving tokens after heuristics + dedup + quality (RefinedWeb kept ~11% of input as tokens; FineWeb kept 15T tokens from a far larger pool).",
+        "Handoff to training: the final corpus is tokenized (BPE, owned by 04), packed into fixed-length sequences with document separators, globally shuffled, and written as memory-mapped shards (Megatron .bin/.idx, WebDataset tar, Mosaic MDS) for random access.",
+        "Reproducibility is fragile: pipelines are versioned (Dolma toolkit, DataTrove for FineWeb, RedPajama scripts), and a corpus is only as reproducible as its pinned filter configs, RNG seed, and tool versions.",
+        "Evolution: WET + basic filters (C4, 2019) -> re-extraction + heavy heuristics (RefinedWeb, 2023) -> ablation-driven + LLM-annotator filtering (FineWeb-Edu, DCLM, 2024) -> synthetic/rephrase augmentation and annealing mixes (2024-25).",
+        "Cost profile: extraction and dedup dominate CPU; a frontier corpus is a multi-hundred-thousand CPU-hour distributed job on Spark/Ray/SLURM, often costing as much engineering effort as the training run it feeds."
+      ],
+      "links": [
+        "Concept - Common Crawl and Web Data at Scale",
+        "Concept - Text Extraction from Web Pages",
+        "Concept - Quality Filtering for Pretraining Data",
+        "Concept - Deduplication at Scale",
+        "Concept - Training Set Decontamination",
+        "Concept - Data Mixtures",
+        "Concept - Byte-Pair Encoding",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Playbook - Building a Pretraining Corpus from Common Crawl",
+        "Gotchas - Pretraining Data Pipelines",
+        "Breakdown - FineWeb and FineWeb-Edu",
+        "Concept - Data Curriculum and Ordering"
+      ]
+    },
+    {
+      "title": "Concept - Deduplication at Scale",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Removing duplicate and near-duplicate documents and spans from web-scale corpora - exact hashing, suffix-array substring dedup, and fuzzy MinHash/LSH - and why dedup is one of the highest-value data operations. IN: algorithms, the LSH banding math, thresholds, distributed implementation, memory/compute cost, granularity choices. OUT: embedding/semantic dedup (own frontier note); the runnable MinHash code (own Snippet).",
+      "key_points": [
+        "Why it matters: Lee et al. 2021 ('Deduplicating Training Data Makes LMs Better') showed near-dedup cut verbatim memorized emission by ~10x, reduced train/test overlap, and improved perplexity; duplicates waste compute and worsen memorization.",
+        "Exact dedup: hash whole docs, or use a suffix array to remove any exactly repeated span >=50 tokens (the ExactSubstr method); scales cheaply but misses templated near-duplicates.",
+        "MinHash + LSH: shingle docs into n-grams (e.g., 5-grams), compute k MinHash signatures (k=128-256) to estimate Jaccard similarity, then LSH-band the signature into b bands of r rows so P(collision) ~ 1-(1-s^r)^b, tuning the similarity threshold (typical target Jaccard 0.7-0.8).",
+        "The banding math is the knob: (b, r) sets the S-curve - e.g., 128 hashes as 20 bands x 6 rows gives a threshold near 0.8; wrong (b, r) either keeps dups or nukes legitimate near-neighbors.",
+        "Distributed reality: dedup is a giant shuffle/join with connected-components (union-find) over candidate pairs; memory blows up on hub documents. SlimPajama deduped RedPajama from 1.2T down to 627B tokens (~49.6% removed); tooling includes text-dedup and DataTrove.",
+        "Non-obvious: FineWeb found global cross-dump dedup can HURT - it strips high-quality content duplicated across many dumps and up-weights unique low-quality text - so they dedup per-dump; granularity (doc vs paragraph vs substring) changes outcomes."
+      ],
+      "links": [
+        "Snippet - MinHash LSH Deduplication",
+        "Concept - Semantic Deduplication",
+        "Concept - Quality Filtering for Pretraining Data",
+        "Concept - Training Set Decontamination",
+        "Breakdown - FineWeb and FineWeb-Edu",
+        "Deep Dive - The Pretraining Data Pipeline",
+        "Gotchas - Pretraining Data Pipelines",
+        "Concept - HNSW",
+        "Deep Dive - Anatomy of a Pretraining Run"
+      ]
+    },
+    {
+      "title": "Concept - PII and Toxicity Filtering",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Removing or redacting personal data, secrets, and toxic/unsafe content from pretraining corpora: detection methods, redaction vs removal, and the quality/safety/legal tradeoffs. IN: PII/secret detection, toxicity/NSFW classifiers, GDPR/extraction-attack pressure, over-filtering harms and dialect bias. OUT: model-side refusal/safety training (link to 14); data-poisoning attacks (link to 14).",
+      "key_points": [
+        "PII detection: regex for structured PII (emails, phones, SSNs, cards, IPs), NER for names/addresses, and entropy/regex for secrets (API keys via detect-secrets/TruffleHog patterns); StarCoder/BigCode redacted PII to placeholders like <EMAIL> and <KEY>.",
+        "Redaction vs removal: redacting to sentinel tokens preserves the document's training signal but placeholder tokens can be memorized and emitted verbatim; dropping whole docs loses signal.",
+        "Toxicity/NSFW filtering: Perspective-style classifiers, fastText toxic classifiers, and KenLM scored on toxic corpora; C4 used a domain blocklist plus a 'bad words' list that was over-broad.",
+        "The safety-diversity tradeoff: filtering toxicity from PRETRAIN reduces toxic generations but also removes the model's ability to recognize and refuse toxicity, and biases against flagged dialects (AAE over-flagged as toxic - Sap et al. 2019); many labs now filter lightly at pretrain and handle safety in post-training.",
+        "Legal driver: GDPR right-to-erasure and the practical impossibility of unlearning a datum from weights push filtering upstream; extraction attacks (Carlini et al. 2021) show unfiltered PII is recoverable from trained models.",
+        "Cost: classifier passes over trillions of tokens are expensive, so labs distill lightweight classifiers and sample rather than score every token."
+      ],
+      "links": [
+        "Concept - Copyright and Licensing of Training Data",
+        "Lore - The C4 Blocklist Incident",
+        "Concept - Quality Filtering for Pretraining Data",
+        "Concept - Refusal Mechanics",
+        "Deep Dive - The Pretraining Data Pipeline",
+        "Concept - Training Set Decontamination"
+      ]
+    },
+    {
+      "title": "Reference - Data Filtering Heuristics",
+      "type": "reference",
+      "level": "advanced",
+      "scope": "A lookup sheet of the concrete filtering rules, thresholds, and constants used by the major open corpora (C4, Gopher/MassiveText, RefinedWeb, Dolma, FineWeb, CCNet) so you do not rederive them mid-pipeline. IN: rule tables with thresholds and source dataset, date-stamped. OUT: the reasoning behind filtering paradigms (own Quality Filtering concept); dedup parameters (own dedup note).",
+      "key_points": [
+        "C4 rules (Raffel et al. 2020): keep only lines ending in terminal punctuation; drop pages < 3 sentences and lines < 5 words; remove lines containing 'lorem ipsum', '{' (code/JS), and policy boilerplate; drop docs hitting a bad-words blocklist; dedup 3-sentence spans.",
+        "Gopher/MassiveText filters (Rae et al. 2021): word count 50-100,000; mean word length 3-10; symbol-to-word ratio (# and ...) < 0.1; < 90% lines starting with a bullet; < 30% lines ending with ellipsis; >= 80% words containing an alpha char; must contain >= 2 of {the, be, to, of, and, that, have, with}.",
+        "RefinedWeb / MacroData Refinement (Penedo et al. 2023): trafilatura extraction; line-level rules dropping mostly-digit lines, short lines, and policy boilerplate; document + line dedup; URL blocklist for adult content.",
+        "FineWeb / FineWeb-Edu (Penedo et al. 2024): Gopher-style plus ablation-discovered custom filters; FineWeb-Edu keeps docs scoring >= 3 of 5 on a Llama-3-70B educational classifier distilled to a linear regression over embeddings.",
+        "Perplexity buckets (CCNet, Wenzek et al. 2019): KenLM 5-gram on Wikipedia; split into head/middle/tail thirds by per-token perplexity; keep head (and often middle).",
+        "Language ID: fastText lid.176 with a probability threshold (e.g., keep English if p >= 0.65); all thresholds are corpus-specific and should be date-stamped and ablation-validated."
+      ],
+      "links": [
+        "Concept - Quality Filtering for Pretraining Data",
+        "Concept - Text Extraction from Web Pages",
+        "Decision - Choosing a Quality Filtering Strategy",
+        "Breakdown - FineWeb and FineWeb-Edu",
+        "Concept - Deduplication at Scale"
+      ]
+    },
+    {
+      "title": "Breakdown - FineWeb and FineWeb-Edu",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "How HuggingFace's FineWeb (15T tokens) and FineWeb-Edu were actually built - the ablation-driven methodology, the specific pipeline, the DataTrove tooling, and the counterintuitive findings that make it the reference open corpus. Date-stamped 2024. IN: pipeline stages, ablation setup, key decisions/results, limits. OUT: general filtering theory (own concepts); tokenization.",
+      "key_points": [
+        "Identity card: FineWeb = 15T tokens from 96 Common Crawl dumps (2013-2024); FineWeb-Edu = 1.3T (and 5.4T) token subset filtered for educational value; released with the full DataTrove pipeline and ablation harness, and it matched or beat RefinedWeb, C4, Dolma, and RedPajama-v2.",
+        "The real contribution is methodology: every design choice was validated by training a 1.82B model on 350B tokens and comparing on a hand-picked set of high signal-to-noise early-signal benchmarks (HellaSwag, MMLU, etc.) - no vibes, all measured.",
+        "Extraction finding: re-extract from WARC with trafilatura instead of using WET, replicating RefinedWeb's central claim that extraction alone is a large quality lever.",
+        "Dedup finding (counterintuitive): global cross-dump MinHash dedup HURT performance versus per-dump dedup, because it disproportionately removed high-quality content duplicated across many dumps and up-weighted unique low-quality text - so they dedup within each dump.",
+        "FineWeb-Edu classifier: prompt Llama-3-70B-Instruct to score educational value 0-5 on ~460k samples, train a linear classifier on embeddings, keep >= 3 - yielding ~5-7 point jumps on MMLU/ARC; 'educational' is a proxy that selects clean, knowledge-dense prose.",
+        "What is dated / limits: English-centric, 'educational' filtering narrows the distribution (worse on some tasks), and it is still web-only with no heavy synthetic augmentation."
+      ],
+      "links": [
+        "Concept - Quality Filtering for Pretraining Data",
+        "Concept - Text Extraction from Web Pages",
+        "Concept - Deduplication at Scale",
+        "Reference - Data Filtering Heuristics",
+        "Concept - The Data-Centric View of Model Quality",
+        "Deep Dive - The Pretraining Data Pipeline",
+        "Concept - Data Mixtures",
+        "Reference - Where Real AI Knowledge Lives",
+        "Concept - Scaling Laws",
+        "Reference - Model Genealogy"
+      ]
+    },
+    {
+      "title": "Breakdown - The Phi Models and Textbook-Quality Data",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "How Microsoft's Phi models (Phi-1 through Phi-4) demonstrated that curated + synthetic 'textbook-quality' data lets small models punch far above their parameter count - the data recipe, not the architecture. Date-stamped 2023-2024. IN: the data methodology, filtering + synthesis, results, and the contamination/reproducibility controversy. OUT: general synthetic-data mechanism (own concept); model architecture (standard transformer).",
+      "key_points": [
+        "Identity card: Phi-1 (Gunasekar et al. 2023, 'Textbooks Are All You Need') = 1.3B params, ~7B tokens, 50.6% HumanEval, beating far larger models on code; then Phi-1.5 (1.3B), Phi-2 (2.7B), Phi-3-mini (3.8B, 3.3T tokens, ~matching Llama-3-8B/Mixtral), and Phi-4 (14B, 2024, heavily synthetic).",
+        "The recipe: (1) filter a web/code pool with a classifier trained to detect textbook-like educational content (GPT-4-labeled seeds -> classifier), (2) generate synthetic textbooks and exercises with GPT-3.5/GPT-4 conditioned on topic/skill seeds, (3) train a small model on the mix.",
+        "Clever part - diversity engineering: to avoid repetitive synthetic output, generation is seeded with random topics, target audiences, and vocabulary constraints, producing billions of varied but consistently clean tokens; this is the core trick that makes synthetic pretraining work.",
+        "Clever part - filter code by usefulness: Phi-1's code was selected by an LLM-judged 'educational value for learning to code' score rather than heuristics, optimizing learnable content density per token.",
+        "The controversy: benchmark-contamination concerns (GPT-4-generated data may echo test items), reproducibility limits (closed data, GPT-4 teacher = distillation not from-scratch capability), and the 'trained near the test distribution' critique about whether wins generalize.",
+        "What to steal: quality-per-token beats quantity; use a strong model to LABEL quality then distill the labeler; engineer diversity explicitly; and verify in checkable domains by executing code."
+      ],
+      "links": [
+        "Concept - Synthetic Training Data",
+        "Concept - Quality Filtering for Pretraining Data",
+        "Concept - Knowledge Distillation",
+        "Concept - The Data-Centric View of Model Quality",
+        "Breakdown - FineWeb and FineWeb-Edu",
+        "Concept - Model Collapse from Synthetic Data",
+        "Concept - Data Mixtures",
+        "Reference - Model Genealogy",
+        "Concept - Training Set Decontamination",
+        "Concept - Byte-Pair Encoding"
+      ]
+    },
+    {
+      "title": "Snippet - MinHash LSH Deduplication",
+      "type": "snippet",
+      "level": "advanced",
+      "scope": "A runnable, minimal MinHash + LSH banding implementation that near-deduplicates a document set, making the shingle -> signature -> banding -> union-find pipeline concrete and showing how (b, r) sets the similarity threshold. IN: complete Python, tunable bands/rows, a demonstration corpus with an obvious near-dup. OUT: distributed/Spark scaling internals (own dedup concept); semantic dedup (own frontier note).",
+      "key_points": [
+        "Complete runnable Python: shingle docs into 5-grams, compute 128 MinHash signatures (datasketch.MinHash or from-scratch numpy hashing), build an LSH index with banding, query near-dups, run union-find to cluster, and keep one representative per cluster.",
+        "Show the banding tradeoff explicitly: parametrize num_perm=128, bands=20, rows=6 and print the resulting approximate threshold via threshold ~ (1/b)^(1/r) so the reader sees how (b, r) moves the S-curve.",
+        "Use a tiny corpus with an obvious near-dup (same doc with one word changed) plus a distinct doc; expected output: the two near-dups cluster together and the distinct doc stays separate.",
+        "'Why written this way' decisions to call out: 5-gram shingles (word vs char granularity), 128 permutations (variance vs cost), LSH banding instead of O(n^2) all-pairs (the whole point), and union-find for transitive clustering.",
+        "Document the transitivity caveat inline: near-duplication is not transitive, so union-find can chain-merge weakly-related docs - a real over-merging failure mode.",
+        "Note the scaling caveat: this is in-memory; real corpora need per-band external shuffle and distributed union-find (link to the dedup concept)."
+      ],
+      "links": [
+        "Concept - Deduplication at Scale",
+        "Concept - Semantic Deduplication",
+        "Concept - Quality Filtering for Pretraining Data",
+        "Deep Dive - The Pretraining Data Pipeline"
+      ]
+    },
+    {
+      "title": "Decision - Choosing a Quality Filtering Strategy",
+      "type": "decision",
+      "level": "advanced",
+      "scope": "How to choose among heuristic, perplexity, classifier, and LLM-annotator filtering (and combinations) for a given corpus, compute budget, and language set - the real tradeoffs and the default recipe. IN: decision flow, cost/quality/label-availability/language axes, when each paradigm wins and its risk. OUT: the exact rule constants (own Reference); dedup (a separate stage).",
+      "key_points": [
+        "Default (80% case, as of 2026): heuristics + dedup first (cheap, catch obvious junk), THEN a classifier or LLM-annotator on the survivors - the FineWeb-Edu recipe - because heuristics alone plateau and LLM-annotators on raw CC waste compute.",
+        "Decision axes: are labels available (classifiers need positives/negatives)? compute budget (LLM-annotator ~1000x the cost of KenLM), language coverage (perplexity/heuristics are language-agnostic; classifiers need per-language reference sets), and target skew (edu/knowledge -> classifier; broad -> light heuristics).",
+        "Perplexity filtering wins for low-resource languages, no labels, and tight budgets (CCNet scales to 100+ languages cheaply); risk: it penalizes stylistically unusual but valid text like code, poetry, and lists.",
+        "Classifier/fastText wins when you have a good 'reference-like' positive set and want cheap high-throughput scoring; risk: it learns surface features of the reference domain (formality, topic) causing distribution narrowing and bias.",
+        "LLM-annotator wins when you can afford to label ~100k-1M samples and distill; it captures semantic quality (educational value, reasoning) heuristics cannot; risk: it inherits the annotator's biases and mislabels edge content.",
+        "The trap is over-filtering: every filter narrows the distribution, so validate with held-out ablation (train small models on each variant) rather than trusting a filter's internal precision - the FineWeb lesson."
+      ],
+      "links": [
+        "Concept - Quality Filtering for Pretraining Data",
+        "Reference - Data Filtering Heuristics",
+        "Breakdown - FineWeb and FineWeb-Edu",
+        "Concept - Entropy and Cross-Entropy",
+        "Concept - Deduplication at Scale",
+        "Concept - The Data-Centric View of Model Quality"
+      ]
+    },
+    {
+      "title": "Playbook - Building a Pretraining Corpus from Common Crawl",
+      "type": "playbook",
+      "level": "advanced",
+      "scope": "The operational start-to-finish procedure to produce a clean, deduplicated, tokenizer-ready corpus from Common Crawl dumps, with tools, ordering, and verification at each step. IN: concrete steps (fetch -> extract -> LID -> filter -> dedup -> decontaminate -> mix -> shuffle -> shard), tool choices, checkpoints, and a failure branch table. OUT: mechanism explanations (own concepts); running the training job (link to 04).",
+      "key_points": [
+        "Step 1 - fetch: pull selected dumps from s3://commoncrawl/ as WARC (not WET); expected ~90 TiB/dump; deviation (only WET available) means you lose the extraction-quality lever.",
+        "Step 2 - extract: run trafilatura/resiliparse via DataTrove or the Dolma toolkit; verify by spot-reading 100 random docs for boilerplate; deviation (menus present) means a wrong extractor/config.",
+        "Step 3 - language ID: fastText lid.176 with a probability threshold, route or drop; verify the language histogram matches the target distribution.",
+        "Step 4 - filter: apply heuristic rules (Gopher/C4), then a quality classifier or LLM-annotator; verify the survival rate lands in the expected 1-15% band - >50% survival means filters too weak, <0.5% means too aggressive.",
+        "Step 5 - dedup + decontaminate: MinHash-LSH per dump (num_perm=128, threshold ~0.8) with text-dedup/DataTrove, then remove docs with 13-gram overlap against your eval sets; verify duplicate rate falls and eval-overlap is ~0.",
+        "Step 6 - assemble: apply mixture weights, global seeded shuffle, tokenize (BPE, 04), pack to seq_len with document separators, and write memmap shards (Megatron .bin/.idx or MDS); verify token count, shard integrity, and a decode-roundtrip sample before committing GPUs. Failure branches: early NaNs -> unshuffled or corrupt shard; verbatim memorization -> dedup failed; suspiciously high benchmarks -> contamination leaked."
+      ],
+      "links": [
+        "Deep Dive - The Pretraining Data Pipeline",
+        "Concept - Common Crawl and Web Data at Scale",
+        "Concept - Text Extraction from Web Pages",
+        "Concept - Deduplication at Scale",
+        "Concept - Training Set Decontamination",
+        "Concept - Data Mixtures",
+        "Concept - Byte-Pair Encoding",
+        "Gotchas - Pretraining Data Pipelines",
+        "Deep Dive - Anatomy of a Pretraining Run"
+      ]
+    },
+    {
+      "title": "Concept - Data Curriculum and Ordering",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The order and repetition schedule in which pretraining data is presented - whether curriculum (easy-to-hard, domain phasing, quality annealing) beats random shuffling, and the evidence for multi-epoch repetition. IN: ordering strategies, annealing/cooldown, epoch/repetition effects, packing order. OUT: LR schedules and the optimizer's role (link to 04); the base mixture (own note).",
+      "key_points": [
+        "The default is a global i.i.d. shuffle; curriculum claims that ordering (easy-to-hard, short-to-long, low-to-high quality) speeds convergence, but the evidence is mixed and mostly small-scale, so large runs usually keep shuffling because curriculum gains are fragile.",
+        "Quality annealing / 'cooldown' is the one robust ordering effect: reserve the highest-quality, synthetic, code, and math data for the final ~10-20% of tokens while LR decays; consistently improves final benchmarks (MiniCPM, OLMo, Llama-3 annealing, DeepSeek).",
+        "Multi-epoch repetition: Muennighoff et al. 2023 ('Scaling Data-Constrained Language Models') found up to ~4 epochs of repeated data is nearly as good as fresh data, returns decay quickly beyond that, and ~16+ epochs adds essentially nothing.",
+        "Repetition value depends on dedup - you want to repeat clean data, not junk - which couples ordering decisions to the dedup stage.",
+        "Domain phasing (front-load broad web, then shift to specialized domains) interacts with catastrophic forgetting: late-stage narrow data can erase earlier capabilities.",
+        "Open problem: there is no scaling-law-grade theory of optimal ordering, and effects seen at 1B often vanish at 70B - mirroring the mixture-transfer problem."
+      ],
+      "links": [
+        "Concept - Data Mixtures",
+        "Concept - Learned Data Mixing (DoReMi and Mixing Laws)",
+        "Concept - Scaling Laws",
+        "Deep Dive - Anatomy of a Pretraining Run",
+        "Concept - Deduplication at Scale",
+        "Concept - Synthetic Training Data"
+      ]
+    },
+    {
+      "title": "Concept - Learned Data Mixing (DoReMi and Mixing Laws)",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Replacing hand-tuned domain weights with optimized mixtures - DoReMi's minimax reweighting, predictive data-mixing laws, and proxy-model regression - and their limits at scale. IN: DoReMi algorithm, mixing-law functional form, RegMix, the transfer-failure catch. OUT: the base concept of mixtures (own core note); token-budget scaling laws (link to 04).",
+      "key_points": [
+        "DoReMi (Xie et al. 2023): train a small reference model, then a small proxy with Group DRO that up-weights domains where the proxy has high excess loss vs the reference (a minimax objective), and transfer the resulting domain weights to the large run - on The Pile it reached baseline perplexity ~2.6x faster and improved average downstream accuracy.",
+        "Mechanism: it is distributionally-robust optimization minimizing worst-case per-domain excess loss, and the optimized weights often DOWN-weight the largest domain (web) and up-weight underperforming domains.",
+        "Data Mixing Laws (Ye et al. 2024): loss is a predictable (exponential) function of mixture proportions, so you fit the law on a few small runs and PREDICT the optimal mixture without training at scale - turning mixing into optimization over a fitted surface.",
+        "RegMix and proxy-model methods: train many tiny models on random mixtures, regress loss on mixture, and extrapolate the optimum - cheaper than DoReMi and competitive.",
+        "The catch (transfer problem): mixtures optimized on small proxies do not cleanly transfer to large models or long token budgets; DoReMi's gains are sensitive to the reference model and domain granularity, and several replications found weak or negative transfer (labeled folklore/contested).",
+        "Practical state: most frontier labs still hand-tune + ablate mixtures and treat learned methods as a prior, choosing annealing mixes empirically."
+      ],
+      "links": [
+        "Concept - Data Mixtures",
+        "Concept - Scaling Laws",
+        "Concept - KL Divergence",
+        "Concept - Data Curriculum and Ordering",
+        "Deep Dive - The Pretraining Data Pipeline",
+        "Concept - The Data-Centric View of Model Quality"
+      ]
+    },
+    {
+      "title": "Concept - Semantic Deduplication",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Deduplicating by meaning rather than surface overlap - embedding-based clustering (SemDeDup, D4) that removes semantic near-duplicates MinHash misses - and its connection to data pruning and diversity. IN: SemDeDup/D4 methods, thresholds, compute cost, results, embedding-choice bias. OUT: MinHash/exact dedup (own core note); embedding-model training (link to 11).",
+      "key_points": [
+        "Motivation: MinHash catches lexical near-dups but misses paraphrases, translations, and semantically redundant docs; SemDeDup (Abbas et al. 2023) embeds each doc with a pretrained encoder, clusters with k-means, and removes points above a cosine-similarity threshold to a neighbor/centroid.",
+        "Results: SemDeDup on C4 removed ~50% of data with no loss (sometimes a gain) in downstream performance and faster convergence, with a similar result on LAION images - a clean 'less data, same quality' finding.",
+        "D4 (Tirumala et al. 2023) combines MinHash dedup + SemDeDup + a 'diversify' step (prune dense cluster regions via SSL prototypes), training faster and better than raw or MinHash-only by targeting both redundancy and over-represented topics.",
+        "Cost: it requires embedding the whole corpus (a forward pass over trillions of tokens) plus large-scale k-means - far more expensive than MinHash - so it is often run on a subset or with a cheap encoder.",
+        "It sits on the data-pruning/coreset spectrum alongside perplexity/loss-based pruning, memorization scoring, and EL2N/GraNd - the frontier of 'which examples actually matter.'",
+        "Non-obvious: the embedding model defines what 'duplicate' means, and a weak encoder merges distinct-but-topically-similar docs into over-pruning, so the threshold must be ablation-validated like every other filter."
+      ],
+      "links": [
+        "Concept - Deduplication at Scale",
+        "Concept - Embedding Models",
+        "Snippet - MinHash LSH Deduplication",
+        "Concept - Quality Filtering for Pretraining Data",
+        "Concept - Data Curriculum and Ordering",
+        "Deep Dive - The Pretraining Data Pipeline"
+      ]
+    },
+    {
+      "title": "Concept - Model Collapse from Synthetic Data",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "What happens when models are trained on model-generated data recursively - distribution narrowing, tail loss, and 'model collapse' - and the accumulate-vs-replace condition that determines whether it actually occurs. IN: the mechanism, the Nature result, the critical caveat, the real-world web-recursion channel, detection. OUT: healthy synthetic-data use (own core note); RLHF mode collapse (link to 06/18).",
+      "key_points": [
+        "Mechanism: training on model outputs over generations compounds statistical error (finite-sample tail undersampling) and functional error (the model cannot represent the true tail), so learned-distribution variance shrinks and tails vanish each generation - 'early' then 'late' collapse.",
+        "The Nature paper (Shumailov et al. 2024, 'AI models collapse when trained on recursively generated data'): iterative retraining on prior-generation outputs raises perplexity, deletes rare events, and converges outputs to bland high-probability modes, shown on LMs, VAEs, and GMMs.",
+        "The critical caveat (Gerstgrasser et al. 2024): collapse assumes you REPLACE real data with synthetic each round; if you ACCUMULATE (keep real data and add synthetic), the error does not compound and performance is stable - and real pipelines accumulate, so the apocalyptic framing is overstated.",
+        "Real-world channel: the web is filling with LLM output, so future crawls ingest it in an involuntary recursive loop, giving pre-2023 'clean' corpora ('low-background steel') and provenance/watermarking rising value.",
+        "Why curated synthetic (Phi, WRAP) does not collapse: it is filtered, verified, mixed with real data, and generated for coverage - collapse is about unfiltered recursive REPLACEMENT, not synthetic data per se.",
+        "Detection: track output entropy/perplexity and n-gram diversity across successive model generations; a collapsing pipeline shows monotonically falling generation diversity."
+      ],
+      "links": [
+        "Concept - Synthetic Training Data",
+        "Concept - Scaling Laws",
+        "Concept - Data Mixtures",
+        "Concept - Copyright and Licensing of Training Data",
+        "Concept - The Emergent Abilities Debate",
+        "Concept - Entropy and Cross-Entropy"
+      ]
+    },
+    {
+      "title": "Gotchas - Pretraining Data Pipelines",
+      "type": "gotchas",
+      "level": "unicorn",
+      "scope": "The hard-won failures of building web-scale training corpora - the bugs, silent quality killers, and reproducibility traps that only surface after compute is burned. IN: aggregated pitfalls across extraction, dedup, filtering, decontamination, sharding, ordering, and redaction, each as symptom -> cause -> fix -> detection. OUT: the mechanism explainers themselves (link to concepts).",
+      "key_points": [
+        "'Model memorizes and emits verbatim training text' -> dedup threshold too loose or exact-only -> tighten MinHash + substring dedup -> detection: prompt with document prefixes and measure verbatim continuation (Carlini-style extraction).",
+        "'Benchmark scores suspiciously high' -> contamination leaked (decontam ran only against known sets, or paraphrase-contamination) -> add n-gram + semantic decontam and hold out post-crawl benchmarks -> detection: per-benchmark overlap report.",
+        "'Loss NaNs or spikes early' -> unshuffled shards (one domain clustered), a corrupt/truncated shard, or a single pathological repeated document -> global seeded shuffle + shard checksums + per-doc length caps -> detection: plot data-order against loss.",
+        "'Quality classifier silently narrowed the corpus' -> positives were one domain (Wikipedia) so it learned formality/topic and dropped code and dialects -> validate with ablation not internal precision, and audit samples of rejected docs.",
+        "'Corpus cannot be reproduced' -> filter configs, tool versions, and RNG seeds unpinned (a trafilatura bump changed extraction) -> version and hash the whole pipeline via Dolma/DataTrove manifests.",
+        "'Global dedup made it worse' -> cross-dump dedup stripped high-quality repeated content (the FineWeb finding) -> dedup per shard/dump and measure downstream, not dup-rate.",
+        "'Mojibake and encoding garbage in tokens' -> wrong charset detection at extraction -> normalize with ftfy -> detection: scan for U+FFFD replacement chars and non-UTF8 rate. Also: 'PII placeholder tokens emitted' -> redaction sentinels too regular -> randomize/rate-limit redaction and probe for <EMAIL> emission."
+      ],
+      "links": [
+        "Deep Dive - The Pretraining Data Pipeline",
+        "Concept - Deduplication at Scale",
+        "Concept - Training Set Decontamination",
+        "Concept - Quality Filtering for Pretraining Data",
+        "Concept - PII and Toxicity Filtering",
+        "Playbook - Building a Pretraining Corpus from Common Crawl",
+        "Lore - The OPT-175B Logbook"
+      ]
+    },
+    {
+      "title": "Lore - The C4 Blocklist Incident",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The war story of C4's 'bad words' blocklist and domain filtering: how a well-meaning heuristic quietly deleted minority voices and medical/LGBTQ content from a corpus that trained a generation of models, as exposed by Dodge et al.'s 2021 documentation audit. IN: what the blocklist was, what it removed, the audit findings, and the lasting lesson. OUT: general quality/toxicity filtering mechanism (link to concepts).",
+      "key_points": [
+        "The artifact: C4 (Raffel et al. 2020, built for T5) applied the 'List of Dirty, Naughty, Obscene, and Otherwise Bad Words' to drop any document containing a listed term - a blunt lexical blocklist inherited from a Shutterstock GitHub repo.",
+        "The audit: Dodge et al. 2021 ('Documenting the English Colossal Clean Crawled Corpus') reverse-engineered what C4 actually contained and excluded, finding the blocklist disproportionately removed content about LGBTQ+ identities and sexual health and text in African-American and Hispanic-aligned English, while clinical descriptions of sexual violence survived.",
+        "They also found entire domains excluded (some benign), evidence of benchmark/eval text present in C4 (contamination), and over-representation of patent and US-government text.",
+        "Mechanism of harm: lexical blocklists conflate a word with a harm, 'clean' is defined by the list author's blind spots, and filtering at pretrain removes the model's exposure to - and ability to discuss - whole topics.",
+        "Lasting lesson: this is the canonical cautionary tale for why modern pipelines document datasets (datasheets), prefer audited classifier/annotator filtering over word blocklists, and push safety to post-training rather than lobotomizing the pretrain corpus.",
+        "Evidence status: verified - the paper, the blocklist, and C4 are all public and reproducible."
+      ],
+      "links": [
+        "Concept - Quality Filtering for Pretraining Data",
+        "Concept - PII and Toxicity Filtering",
+        "Reference - Data Filtering Heuristics",
+        "Concept - Training Set Decontamination",
+        "Concept - Refusal Mechanics",
+        "Reference - Where Real AI Knowledge Lives"
+      ]
+    },
+    {
+      "title": "Lore - Books3 and the Shadow Library Reckoning",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The story of Books3 - the ~197,000-book pile of pirated ebooks that trained early open LLMs, its removal after DMCA action and lawsuits, and how it forced the field to confront training-data copyright. IN: what Books3 was, its provenance, which models used it, the takedown and litigation, and the aftermath. OUT: copyright doctrine mechanics (own concept); go-forward licensing choices.",
+      "key_points": [
+        "The artifact: Books3 = ~196,640 books (~37 GiB plaintext) assembled by Shawn Presser in 2020 from a Bibliotik torrent (a private ebook piracy tracker), shipped as a component of EleutherAI's The Pile (Gao et al. 2020).",
+        "Who trained on it: The Pile and thus GPT-J, GPT-NeoX-20B, and Pythia; and per litigation disclosures Meta's LLaMA and BloombergGPT - books are prized for long-form coherence, making a books corpus disproportionately valuable per token.",
+        "The takedown: in 2023 the Danish anti-piracy group Rights Alliance issued DMCA notices, Books3 was pulled from The Eye and HuggingFace, and The Pile's official host removed the books component.",
+        "Litigation: Kadrey v. Meta and Authors Guild suits cite Books3 by name, and internal Meta discussions about using it surfaced in discovery - a rare look at how a lab knowingly weighed pirated data.",
+        "The reckoning: it triggered license-clean corpus efforts (Common Pile, KL3M, Common Corpus), crystallized the 'books are the crown jewel and the legal third rail' tension, and drove licensing deals (labs paying publishers) to replace scraped books.",
+        "Evidence status: verified for provenance, takedown, and pleadings; some per-model book counts come from court filings (well-sourced) and certain usage details remain contested or sealed."
+      ],
+      "links": [
+        "Concept - Copyright and Licensing of Training Data",
+        "Concept - Common Crawl and Web Data at Scale",
+        "Reference - Model Genealogy",
+        "Lore - The OPT-175B Logbook",
+        "Concept - Synthetic Training Data",
+        "Reference - Where Real AI Knowledge Lives"
+      ]
+    }
+  ]
+}

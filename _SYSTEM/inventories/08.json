@@ -1,0 +1,551 @@
+{
+  "domain": "08 - Hardware & Systems",
+  "slug": "hardware-systems",
+  "notes": [
+    {
+      "title": "Concept - Why GPUs for Deep Learning",
+      "type": "concept",
+      "level": "surface",
+      "scope": "Why deep learning runs on throughput-oriented SIMT accelerators instead of latency-optimized CPUs. IN: the architectural bargain (many simple cores, latency hidden by oversubscription, bandwidth over caches) and why matmul-heavy nets map to it. OUT: the detailed memory hierarchy (link to Concept - GPU Memory Hierarchy) and tensor-core internals (link to Concept - Tensor Cores).",
+      "key_points": [
+        "SIMT model: thousands of threads run in lockstep 32-thread warps; a CPU spends transistors on branch prediction/out-of-order/large caches for single-thread latency, a GPU spends them on ALUs + register files and hides latency by oversubscription",
+        "DL is ~90% dense matmul (GEMM), embarrassingly parallel FMA that saturates thousands of MACs — the workload fit, link to Concept - Matrix Multiplication as the Atom of Deep Learning",
+        "Memory bandwidth is the real currency: H100 ~3.35 TB/s HBM3 vs a server CPU's ~100-400 GB/s DDR",
+        "Throughput vs latency: a GPU tolerates ~400-800 cycle HBM latency because thousands of warps are ready to issue; you win by keeping the machine busy, not finishing one op fast",
+        "Peak numbers as of 2026: H100 ~989 TFLOP/s BF16 dense (tensor cores) vs ~67 TFLOP/s FP32 CUDA cores vs ~34 TFLOP/s FP64",
+        "When CPUs still win: tiny batch, control-heavy/branchy code, latency-critical single requests, workloads that don't tile into GEMM",
+        "The catch that motivates the whole domain: you only approach peak if arithmetic intensity is high — teaser to the roofline model"
+      ],
+      "links": ["Concept - Matrix Multiplication as the Atom of Deep Learning", "Concept - GPU Memory Hierarchy", "Concept - Tensor Cores", "Concept - The Roofline Model", "Concept - The Memory Wall", "Reference - AI Accelerator Landscape"]
+    },
+    {
+      "title": "Concept - The Memory Wall",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The central organizing fact of this domain: compute FLOPs have outpaced memory bandwidth for decades, so most DL kernels are memory-bound, not compute-bound. IN: the widening FLOP:byte gap and what it forces on kernel design. OUT: the roofline formalism (link to Concept - The Roofline Model) and specific fixes (link to Concept - Kernel Fusion, Deep Dive - FlashAttention).",
+      "key_points": [
+        "Compute has grown ~3x/2yr while DRAM bandwidth ~1.6x/2yr — the widening gap quantified in Gholami et al. 'AI and Memory Wall' (2024)",
+        "H100 compute:bandwidth ratio ~ 989 TFLOP / 3.35 TB/s ~= 295 FLOP/byte: you must reuse each loaded byte ~300x to be compute-bound",
+        "Consequence: elementwise ops, softmax, LayerNorm/RMSNorm, and naive attention are memory-bound; only large GEMMs are compute-bound",
+        "Capacity wall too: 80 GB (H100) / 141 GB (H200) / 192 GB (B200) caps what model + KV fits, driving quantization and offload",
+        "Why fusion, activation recomputation, and FlashAttention all exist: each trades extra FLOPs for fewer HBM round-trips",
+        "Energy angle: moving a word from HBM costs ~100-1000x the energy of the FLOP that consumes it; data movement dominates power and thus cost"
+      ],
+      "links": ["Concept - The Roofline Model", "Concept - GPU Memory Hierarchy", "Concept - Kernel Fusion", "Deep Dive - FlashAttention", "Concept - Post-Training Quantization Formats", "Concept - Why GPUs for Deep Learning"]
+    },
+    {
+      "title": "Concept - Anatomy of an AI Training Cluster",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The physical and logical hierarchy of a modern GPU cluster: GPU -> node -> rack -> pod -> datacenter, and the two networks (scale-up NVLink, scale-out InfiniBand/Ethernet). IN: what each tier is with typical counts and bandwidths. OUT: network topology design (link to Concept - Network Topology for AI Clusters) and collective algorithms (link to Concept - All-Reduce and Collective Operations).",
+      "key_points": [
+        "Node = 8 GPUs (DGX/HGX H100) fully connected by NVSwitch: ~900 GB/s NVLink4 per GPU, all-to-all inside the node",
+        "Two-tier network: intra-node NVLink (scale-up, ~TB/s) vs inter-node InfiniBand NDR / RoCE (scale-out, ~400 Gb/s ~= 50 GB/s per GPU)",
+        "The bandwidth cliff: leaving the node is ~10-18x slower per GPU than NVLink — the single fact that dictates keeping tensor parallelism inside a node",
+        "Scale realities as of 2026: NVIDIA SuperPOD ~256 GPUs; production clusters 16k-100k+ (xAI Colossus ~100k H100, Meta's two 24k clusters, 2024)",
+        "Power/cooling as the binding constraint: ~700W/H100, ~10 kW+/node, air cooling gives way to liquid at GB200 rack densities (~120 kW/rack)",
+        "Support cast: parallel filesystem/object storage for checkpoints, head/login nodes, and the scheduler (SLURM or Kubernetes)"
+      ],
+      "links": ["Concept - GPU Interconnects (NVLink, InfiniBand, RoCE)", "Concept - Network Topology for AI Clusters", "Concept - All-Reduce and Collective Operations", "Concept - Tensor and Pipeline Parallelism", "Concept - Rack-Scale Systems and NVLink Domains", "Gotchas - Hardware Failures at Scale"]
+    },
+    {
+      "title": "Concept - GPU Memory Hierarchy",
+      "type": "concept",
+      "level": "core",
+      "scope": "The full memory hierarchy of an NVIDIA GPU from registers to HBM, with capacities, bandwidths, and latencies, and how kernel performance depends on keeping the working set in the fastest tier. IN: registers, shared memory/L1, L2, HBM and the capacity-vs-bandwidth pyramid. OUT: the arithmetic that decides bound-ness (link to Concept - The Roofline Model) and the model memory budget (link to Reference - Memory Math for Transformers).",
+      "key_points": [
+        "Registers: ~256 KB/SM (64K 32-bit regs), per-thread, ~1 cycle; register spilling to local memory (HBM-backed) silently tanks performance",
+        "Shared memory / L1: unified, up to ~228 KB/SM on Hopper, software-managed scratchpad and the key enabler of tiling; ~20-30 cycle latency",
+        "L2 cache: ~50 MB on H100 shared across SMs; L2 residency/persistence controls for reused data; ~200 cycle latency",
+        "HBM3: 80 GB @ ~3.35 TB/s on H100 (192 GB @ ~8 TB/s HBM3e on B200); the capacity + bandwidth bottleneck; ~400-800 cycle latency",
+        "The pyramid tradeoff: capacity grows ~1000x from registers to HBM while bandwidth drops ~1000x; fast kernels stage operands down the pyramid and reuse them",
+        "The FlashAttention constraint: shared-memory capacity caps tile size, which caps either occupancy or arithmetic intensity",
+        "Detection: Nsight Compute reports achieved vs peak DRAM throughput, L2 hit rate, and shared-memory usage per block"
+      ],
+      "links": ["Concept - The Roofline Model", "Concept - Tensor Cores", "Reference - Memory Math for Transformers", "Deep Dive - FlashAttention", "Concept - Matmul Tiling on GPUs", "Concept - Memory Coalescing and Shared Memory Bank Conflicts", "Concept - The Memory Wall", "Concept - Floating Point for Deep Learning"]
+    },
+    {
+      "title": "Concept - The CUDA Programming Model",
+      "type": "concept",
+      "level": "core",
+      "scope": "The abstract machine CUDA exposes — the grid/block/thread hierarchy mapped onto SMs and warps — and the memory spaces and synchronization primitives a kernel author works with. IN: the execution and memory model, warps, syncthreads, streams. OUT: occupancy tuning (link to Concept - Occupancy and Latency Hiding), Triton's higher abstraction (link to Concept - Triton), collective ops (link to Concept - All-Reduce and Collective Operations).",
+      "key_points": [
+        "Hierarchy: thread -> warp (32 threads, the true SIMT unit) -> thread block (maps to one SM, shares shared memory) -> grid; Hopper adds thread-block clusters with distributed shared memory across SMs",
+        "Hardware mapping: blocks are scheduled to SMs; warps are the scheduling quantum; branch divergence within a warp serializes the taken/not-taken paths",
+        "Memory spaces: registers, shared, global (HBM), constant, local; __syncthreads() barriers within a block; no global sync across blocks inside a single kernel launch",
+        "Kernel launch: grid/block dims, ~5-10 us launch overhead (motivates CUDA graphs), asynchronous w.r.t. host, streams express independent concurrency",
+        "SIMT evolution: per-warp program counter (pre-Volta) vs independent thread scheduling (Volta+); why __syncwarp and cooperative groups exist",
+        "The abstraction leak: you write scalar per-thread code but must think in warps, coalesced access, and shared-memory tiling to get performance"
+      ],
+      "links": ["Concept - GPU Memory Hierarchy", "Concept - Occupancy and Latency Hiding", "Concept - Triton", "Concept - Memory Coalescing and Shared Memory Bank Conflicts", "Concept - Tensor Cores", "Concept - Matrix Multiplication as the Atom of Deep Learning"]
+    },
+    {
+      "title": "Concept - Tensor Cores",
+      "type": "concept",
+      "level": "core",
+      "scope": "The dedicated matrix-multiply-accumulate units that provide the bulk of a modern GPU's FLOPs, how they operate at the warp level, and the precisions and shapes they support. IN: the MMA operation, supported dtypes, WMMA/mma/wgmma, structured sparsity. OUT: how mixed-precision training uses them (link to Concept - Mixed Precision Training) and FP8 format details (link to Concept - FP8 and Low-Precision Hardware Formats).",
+      "key_points": [
+        "What they compute: a small tile MMA D = A*B + C in one instruction (e.g., 16x8x16 for mma.sync); warp-collective, each thread holds operand/accumulator fragments",
+        "FLOP dominance: ~989 BF16 TFLOP/s (H100 tensor cores) vs ~67 FP32 TFLOP/s (CUDA cores) — ~15x; ignoring tensor cores wastes the chip",
+        "Precision generations: Volta (FP16), Ampere (BF16, TF32, INT8, 2:4 sparsity), Hopper (FP8 E4M3/E5M2 + Transformer Engine), Blackwell (FP4, microscaling MX)",
+        "TF32: 19-bit internal format, drop-in for FP32 matmul at ~8x speed — the default free lunch (torch.backends.cuda.matmul.allow_tf32)",
+        "Programming ladder: WMMA API (portable, coarse) -> mma.sync PTX (fine) -> wgmma warpgroup async (Hopper); ldmatrix loads fragments; cuBLAS/CUTLASS wrap all of it",
+        "2:4 structured sparsity doubles throughput but needs the pruning pattern and is rarely used in practice — the marketing-vs-reality gap",
+        "Failure mode: dims not a multiple of the MMA tile (seqlen/hidden not divisible by 8 or 16) or an unsupported dtype fall off the tensor-core path to a ~10x-slower CUDA-core fallback"
+      ],
+      "links": ["Concept - GPU Memory Hierarchy", "Concept - The CUDA Programming Model", "Concept - FP8 and Low-Precision Hardware Formats", "Concept - Mixed Precision Training", "Concept - Matmul Tiling on GPUs", "Concept - Matrix Multiplication as the Atom of Deep Learning", "Concept - Floating Point for Deep Learning"]
+    },
+    {
+      "title": "Concept - The Roofline Model",
+      "type": "concept",
+      "level": "core",
+      "scope": "The performance model that predicts whether a kernel is compute-bound or memory-bound from its arithmetic intensity, and how to read a roofline plot to guide optimization. IN: arithmetic intensity, the ridge point, the two ceilings, worked intensities. OUT: the underlying memory hierarchy (link to Concept - GPU Memory Hierarchy) and specific kernels (link to Deep Dive - FlashAttention).",
+      "key_points": [
+        "Arithmetic intensity I = FLOPs / bytes moved from HBM; attainable performance = min(peak FLOP/s, I x bandwidth)",
+        "Ridge point I* = peak_FLOPs / peak_bandwidth ~= 295 FLOP/byte on H100 (BF16); below it you are memory-bound, above it compute-bound",
+        "Worked intensities: large FP16 GEMM ~ O(N) (compute-bound), softmax/norm/elementwise ~ O(1) (deeply memory-bound), naive attention memory-bound -> FlashAttention raises effective I by tiling",
+        "Why most non-GEMM ops are memory-bound: they touch large tensors once with only a few FLOPs per element",
+        "Using it in practice: measure achieved FLOP/s and HBM bytes (Nsight Compute Speed-of-Light + roofline section), place the kernel, then decide whether to raise intensity (fuse, tile) or accept you are at the compute ceiling",
+        "Limits of the model: assumes perfect overlap, ignores latency-bound low-occupancy regimes and cache effects — a first-order guide, not gospel; add a latency ceiling for small kernels"
+      ],
+      "links": ["Concept - GPU Memory Hierarchy", "Concept - The Memory Wall", "Concept - Model FLOPs Utilization (MFU)", "Concept - Kernel Fusion", "Deep Dive - FlashAttention", "Playbook - Profiling and Optimizing a GPU Kernel", "Concept - Tensor Cores"]
+    },
+    {
+      "title": "Concept - Model FLOPs Utilization (MFU)",
+      "type": "concept",
+      "level": "core",
+      "scope": "The headline efficiency metric for training and inference runs — the fraction of a chip's peak FLOPs actually spent on useful model math — how to compute it and why real runs land at 30-60%. IN: MFU/HFU definitions, the 6ND FLOP estimate, what erodes utilization. OUT: the parallelism strategy that affects it (link to Concept - Tensor and Pipeline Parallelism) and roofline theory (link to Concept - The Roofline Model).",
+      "key_points": [
+        "Definition: MFU = achieved model FLOP/s / peak hardware FLOP/s; HFU also counts activation-recompute FLOPs, so HFU >= MFU",
+        "The 6ND rule: training a dense transformer costs ~6 x params x tokens FLOPs (2 forward + 4 backward); divide by wall-clock to get achieved FLOP/s",
+        "Real numbers: PaLM reported 46.2% MFU; GPT-3-class runs often 30-50%; well-tuned Megatron/H100 runs reach ~50-60%; >60% is excellent",
+        "What erodes it: memory-bound ops (norms/softmax/attention), exposed (non-overlapped) communication, pipeline bubbles, small matmuls, kernel launch overhead, low occupancy",
+        "Economics: MFU sets $/token and time-to-train directly; going 40% -> 55% cuts cost ~27% — link to Concept - Cost Engineering for LLM Applications",
+        "The peak-FLOPs caveat: vendors quote sparse/boost-clock peaks; use dense sustained peak or MFU is inflated — link to Concept - GPU Clocks, Power, and Thermal Throttling"
+      ],
+      "links": ["Concept - The Roofline Model", "Reference - Memory Math for Transformers", "Concept - Scaling Laws", "Deep Dive - Anatomy of a Pretraining Run", "Concept - Cost Engineering for LLM Applications", "Concept - All-Reduce and Collective Operations", "Concept - GPU Clocks, Power, and Thermal Throttling"]
+    },
+    {
+      "title": "Concept - GPU Interconnects (NVLink, InfiniBand, RoCE)",
+      "type": "concept",
+      "level": "core",
+      "scope": "The links that move data between GPUs and nodes — on-node NVLink/NVSwitch (scale-up) and cross-node InfiniBand/RoCE (scale-out) — their bandwidths, and why the two-tier split shapes distributed training. IN: NVLink/NVSwitch, PCIe, InfiniBand vs RoCE, GPUDirect RDMA. OUT: collective algorithms over these links (link to Concept - All-Reduce and Collective Operations) and topology design (link to Concept - Network Topology for AI Clusters).",
+      "key_points": [
+        "NVLink: point-to-point GPU-GPU; NVLink4 (Hopper) ~900 GB/s aggregate per GPU (18 links x 50 GB/s); NVSwitch provides all-to-all within a node",
+        "PCIe as the slow path: Gen5 x16 ~64 GB/s, ~14x slower than NVLink; staging GPU-GPU traffic over PCIe/host is a classic performance trap",
+        "Scale-out: InfiniBand NDR 400 Gb/s (~50 GB/s) per GPU; RoCEv2 = RDMA over Ethernet, cheaper but requires PFC/ECN tuning to stay lossless",
+        "GPUDirect RDMA: the NIC reads/writes GPU HBM directly, bypassing a CPU/host-memory bounce — essential to hit scale-out line rate",
+        "The bandwidth hierarchy that dictates parallelism placement: NVLink (TB/s) >> IB (~50 GB/s) >> PCIe host path; put tensor parallelism inside the NVLink domain, data/pipeline parallelism across IB",
+        "Failure modes: wrong NUMA/PCIe-switch affinity silently halving bandwidth; RoCE congestion collapse without correct ECN/PFC configuration"
+      ],
+      "links": ["Concept - Anatomy of an AI Training Cluster", "Concept - All-Reduce and Collective Operations", "Concept - Network Topology for AI Clusters", "Concept - Rack-Scale Systems and NVLink Domains", "Concept - Tensor and Pipeline Parallelism", "Breakdown - NCCL"]
+    },
+    {
+      "title": "Concept - All-Reduce and Collective Operations",
+      "type": "concept",
+      "level": "core",
+      "scope": "The collective communication primitives distributed training depends on — all-reduce, all-gather, reduce-scatter, all-to-all — and the algorithms (ring, tree) that implement them efficiently. IN: the op set, ring all-reduce bandwidth math, tree/hierarchical variants, the cost model. OUT: NCCL's implementation specifics (link to Breakdown - NCCL) and how DP/TP invoke them (link to Concept - Data Parallelism and ZeRO).",
+      "key_points": [
+        "The op set: all-reduce (sum grads), all-gather + reduce-scatter (compose into all-reduce; ZeRO uses them separately), broadcast, all-to-all (MoE expert dispatch)",
+        "Ring all-reduce: each GPU transfers 2(N-1)/N x data bytes regardless of N — bandwidth-optimal; latency grows with N since it takes 2(N-1) steps",
+        "Bandwidth-optimal vs latency-optimal: ring for large messages, tree/recursive-doubling for small messages or high GPU counts (latency ~ log N)",
+        "Cost model: time ~= latency x steps + bytes / bandwidth; small tensors are latency-bound, which is why gradient bucketing/fusion exists",
+        "Hierarchical collectives: reduce within the NVLink node, then across IB, then broadcast back — exploits the two-tier bandwidth hierarchy",
+        "All-to-all for MoE: the expensive expert-dispatch collective, bandwidth- and imbalance-sensitive — link to Concept - Mixture of Experts Architecture",
+        "Failure modes: one slow GPU/link stalls the whole ring (straggler); mismatched buffer sizes or dtypes across ranks cause a hang"
+      ],
+      "links": ["Concept - GPU Interconnects (NVLink, InfiniBand, RoCE)", "Breakdown - NCCL", "Concept - Data Parallelism and ZeRO", "Concept - Tensor and Pipeline Parallelism", "Concept - Mixture of Experts Architecture", "Playbook - Debugging a Hung Distributed Training Job"]
+    },
+    {
+      "title": "Reference - Memory Math for Transformers",
+      "type": "reference",
+      "level": "core",
+      "scope": "The formula sheet for GPU memory consumption of a transformer — parameters, optimizer state, gradients, activations, and KV cache — so you can compute what fits on a GPU before launching. IN: every byte formula with worked examples and quick-fit heuristics. OUT: the parallelism that shards these terms (link to Concept - Data Parallelism and ZeRO) and the KV cache paging mechanism (link to Concept - KV Cache).",
+      "key_points": [
+        "Parameter count: ~12 x n_layers x d_model^2 (+ embeddings + final head) for a standard transformer; worked for 7B and 70B",
+        "Training memory per param: fp16 weights 2B + fp32 master 4B + Adam m,v 8B + grad 2-4B ~= 16-18 bytes/param for mixed-precision AdamW; a 7B model needs ~112+ GB, which forces sharding",
+        "Activation memory: the Korthikanti et al. (2022) formula ~ s*b*h per layer x constants; scales with batch x seq; activation recomputation trades ~30% more FLOPs for a large memory cut",
+        "KV cache: 2 x n_layers x n_kv_heads x head_dim x seq x batch x bytes_per_elem; worked example showing how GQA/MQA slash it — link to Concept - KV Cache",
+        "Inference weight memory by dtype: bytes/param fp16=2, fp8=1, int4=0.5, plus KV, plus ~1.1-1.2x runtime overhead",
+        "Quick-fit heuristics: 'params x2 for fp16 inference', 'params x~18 for AdamW training', and the recompute-vs-store activation tradeoff",
+        "Cross-reference table: how each ZeRO stage / tensor-parallel degree divides each memory term (pointer to 04)"
+      ],
+      "links": ["Concept - GPU Memory Hierarchy", "Concept - Model FLOPs Utilization (MFU)", "Concept - KV Cache", "Concept - Data Parallelism and ZeRO", "Concept - Mixed Precision Training", "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)", "Concept - Post-Training Quantization Formats"]
+    },
+    {
+      "title": "Concept - Triton",
+      "type": "concept",
+      "level": "core",
+      "scope": "OpenAI's Triton — a Python-embedded language and compiler for writing GPU kernels at the block (tile) level instead of per-thread — its programming model, what it automates, and where it wins versus CUDA. IN: the block-programming abstraction, autotuning, the compiler pipeline, tradeoffs vs CUDA/CUTLASS. OUT: specific kernels written in it (link to Snippet - Fused Softmax Kernel in Triton) and the FlashAttention algorithm (link to Deep Dive - FlashAttention).",
+      "key_points": [
+        "Core abstraction: a program operates on blocks/tiles via tl.load/tl.store with pointer arithmetic + masks; the compiler handles intra-block threading, coalescing, shared-memory allocation, and pipelining",
+        "What you still control: block sizes, the program grid (tl.program_id), num_warps, num_stages; @triton.autotune sweeps these configs",
+        "Compiler path: Triton IR -> LLVM -> NVPTX (and AMD/other backends); it performs coalescing, software pipelining, and register allocation for you",
+        "Why it matters: 10-20 lines of Triton can match hand-tuned CUDA for many memory-bound kernels; it powers torch.compile's generated kernels and many FlashAttention/fused-kernel implementations",
+        "Limits: less control than raw PTX/CUTLASS for peak GEMM (wgmma scheduling, warp specialization); harder to debug; not always portable-optimal across GPUs",
+        "Practitioner reality as of 2026: default for research kernels and fusions, while production peak-GEMM still often uses CUTLASS/cuBLAS"
+      ],
+      "links": ["Concept - The CUDA Programming Model", "Snippet - Fused Softmax Kernel in Triton", "Snippet - A Minimal FlashAttention Kernel in Triton", "Deep Dive - FlashAttention", "Concept - Kernel Fusion", "Concept - Matmul Tiling on GPUs"]
+    },
+    {
+      "title": "Reference - AI Accelerator Landscape",
+      "type": "reference",
+      "level": "core",
+      "scope": "A comparison reference for the accelerators used to train and serve models — NVIDIA GPUs, Google TPUs, AMD MI300, AWS Trainium/Inferentia, and inference specialists (Groq, Cerebras, SambaNova) — with the numbers that matter. IN: the comparison tables and each chip's niche, date-stamped. OUT: the deep architecture of any one chip (link to Breakdown - The NVIDIA Datacenter GPU (Hopper and Blackwell)) and the systolic-array primitive (link to Concept - Systolic Arrays).",
+      "key_points": [
+        "Table columns (date-stamped 2026): peak BF16/FP8 FLOPs, HBM capacity + bandwidth, interconnect BW, TDP, availability",
+        "NVIDIA line: A100 (312 BF16 TFLOP, 80 GB, 2 TB/s) -> H100 (989, 80 GB, 3.35 TB/s) -> H200 (141 GB HBM3e, 4.8 TB/s) -> B200/GB200 (FP4, 192 GB, ~8 TB/s)",
+        "Google TPU: v4/v5e/v5p/v6 Trillium; systolic MXU + large ICI mesh; GCP-only; strong perf/$ within its regular-dense niche",
+        "AMD MI300X: 192 GB HBM3 and competitive FLOPs, but the ROCm software gap is the real story; MI325X/MI355 follow",
+        "AWS Trainium2/Inferentia2: vertically integrated, cheaper per token in-cloud, with a Neuron-compiler maturity caveat",
+        "Inference specialists: Groq LPU (SRAM-only, deterministic, extreme low-latency decode, tiny memory), Cerebras WSE (wafer-scale, ~900k cores), SambaNova — memory-vs-latency niche plays",
+        "The real differentiator is software/ecosystem (the CUDA moat), not raw FLOPs — link to Reference - Where Real AI Knowledge Lives"
+      ],
+      "links": ["Breakdown - The NVIDIA Datacenter GPU (Hopper and Blackwell)", "Breakdown - The Google TPU", "Concept - Systolic Arrays", "Concept - Tensor Cores", "Decision - Selecting GPUs for Training and Inference", "Reference - Where Real AI Knowledge Lives"]
+    },
+    {
+      "title": "Deep Dive - FlashAttention",
+      "type": "deep-dive",
+      "level": "advanced",
+      "scope": "The exact algorithm that makes attention memory-efficient and fast — tiling the attention computation with online softmax and recomputation so the O(N^2) score matrix never touches HBM — across v1/v2/v3. IN: the tiling, online softmax recurrence, backward recomputation, IO complexity, the three versions. OUT: attention as a math operation (link to Concept - Attention Mechanism) and serving-time KV cache (link to Concept - KV Cache).",
+      "key_points": [
+        "The problem: naive attention materializes the N x N score matrix S=QK^T in HBM -> O(N^2) memory and memory-bound; FlashAttention keeps it O(N) memory by never writing S",
+        "Tiling + online softmax: stream K,V in blocks, maintain running max m and sum l, and rescale the output accumulator by exp(m_old - m_new) each block — the running-softmax recurrence is the crux",
+        "IO complexity (Dao et al. 2022): O(N^2 d^2 / M) HBM accesses vs O(N^2) naive, where M is SRAM size — the theoretical reason it is faster despite equal FLOPs",
+        "Recomputation in backward: do not store S/P; recompute from Q,K,V in SRAM, trading FLOPs for memory — still faster because attention is memory-bound",
+        "v2 (Dao 2023): better work partitioning across warps, fewer non-matmul FLOPs, parallelize over the sequence dimension -> ~2x v1 at ~50-70% of peak",
+        "v3 (Shah et al. 2024): Hopper-specific — wgmma + TMA async, warp specialization (producer/consumer), FP8 -> ~75% of H100 peak; link to Concept - Warp Specialization and Async Pipelines on Hopper",
+        "Failure modes: numerical care in the rescale, head_dim > 256 support, masking/ALiBi/varlen variants, dropout RNG state, and the attention-sink interaction"
+      ],
+      "links": ["Concept - Attention Mechanism", "Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)", "Concept - GPU Memory Hierarchy", "Concept - The Roofline Model", "Concept - Kernel Fusion", "Concept - Warp Specialization and Async Pipelines on Hopper", "Snippet - A Minimal FlashAttention Kernel in Triton", "Concept - Softmax", "Concept - Attention Sinks", "Concept - KV Cache"]
+    },
+    {
+      "title": "Concept - Matmul Tiling on GPUs",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "How a high-performance GEMM is decomposed into a hierarchy of tiles matched to the memory hierarchy (block/warp/instruction tiles) so operands are reused from shared memory and registers instead of HBM. IN: the tiling hierarchy, the data-reuse arithmetic, double buffering, mapping to tensor cores. OUT: the roofline reasoning (link to Concept - The Roofline Model) and full kernel code (link to Snippet - Fused Softmax Kernel in Triton).",
+      "key_points": [
+        "Why tile: naive GEMM reloads operands from HBM O(N) times and is memory-bound; tiling reuses each loaded tile O(tile_dim) times, raising arithmetic intensity above the ridge point",
+        "Three-level tiling: threadblock tile (-> shared memory, e.g. 128x128x32), warp tile (-> registers / tensor-core fragments), instruction tile (the MMA shape); each level reuses the level below",
+        "The reuse math: a 128x128 output tile from 128xK and Kx128 inputs does 128^2*K FLOPs per ~(128*K + 128*K) bytes loaded -> intensity ~64, comfortably compute-bound",
+        "Software pipelining / double buffering: prefetch the next K-tile into shared memory while computing the current one (cp.async on Ampere, TMA on Hopper) to hide HBM latency",
+        "Epilogue fusion: apply bias/activation/scaling in registers before writeback — where kernel fusion meets GEMM",
+        "Where CUTLASS/cuBLAS live: they template this hierarchy and pick tile shapes per GPU and problem size; the 'wave/tile quantization' tail effect hurts small or odd problem sizes",
+        "Failure mode: a bad tile shape causes shared-memory bank conflicts, low occupancy, or falling off the tensor-core path"
+      ],
+      "links": ["Concept - GPU Memory Hierarchy", "Concept - Tensor Cores", "Concept - The Roofline Model", "Concept - Kernel Fusion", "Concept - Memory Coalescing and Shared Memory Bank Conflicts", "Concept - Warp Specialization and Async Pipelines on Hopper", "Concept - Matrix Multiplication as the Atom of Deep Learning"]
+    },
+    {
+      "title": "Concept - Kernel Fusion",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "Combining multiple operations into a single GPU kernel so intermediates stay in registers/shared memory instead of round-tripping through HBM — the single biggest lever for memory-bound DL ops. IN: why fusion helps (roofline), what fuses well, vertical vs horizontal fusion, torch.compile/Triton tooling. OUT: FlashAttention as a specific fusion (link to Deep Dive - FlashAttention) and GEMM epilogue fusion (link to Concept - Matmul Tiling on GPUs).",
+      "key_points": [
+        "The mechanism: each unfused elementwise op reads and writes the full tensor to HBM; fusing N ops turns 2N HBM passes into 2 (one read, one write), cutting traffic ~Nx on memory-bound chains",
+        "Canonical fusions: bias+activation+dropout, LayerNorm/RMSNorm (reduction+normalize+scale), softmax, attention (FlashAttention), and the fused optimizer step",
+        "Vertical (producer->consumer) vs horizontal (independent ops sharing a launch) fusion; reduction fusions need shared-memory or warp-shuffle reductions",
+        "Tooling: torch.compile / TorchInductor auto-generates fused Triton kernels; nvFuser; hand-fusion in Triton or CUDA; XLA fusion on TPU",
+        "Limits: you cannot easily fuse across a large GEMM (compute-bound anyway); fusion raises register pressure and can drop occupancy; the recompute-vs-materialize tradeoff",
+        "Numbers: fusing a norm+residual can cut its time ~2-3x; the proof is measured HBM-traffic reduction, not a FLOP count"
+      ],
+      "links": ["Concept - The Memory Wall", "Concept - The Roofline Model", "Concept - GPU Memory Hierarchy", "Deep Dive - FlashAttention", "Concept - Matmul Tiling on GPUs", "Concept - Triton", "Concept - RMSNorm and LayerNorm"]
+    },
+    {
+      "title": "Concept - Occupancy and Latency Hiding",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "How a GPU hides the hundreds-of-cycles latency of memory access by keeping many warps resident per SM, what limits occupancy, and why more occupancy is not always faster. IN: occupancy definition, the three limiters, the latency-hiding mechanism, Volkov's low-occupancy nuance. OUT: the memory-hierarchy latencies themselves (link to Concept - GPU Memory Hierarchy) and tile sizing (link to Concept - Matmul Tiling on GPUs).",
+      "key_points": [
+        "Latency hiding: when a warp stalls on a ~400-800 cycle load, the warp scheduler issues from another ready warp; with enough warps the SM never idles",
+        "Occupancy = active warps / max warps per SM (64 on most archs), limited by registers/thread (64K regs/SM), shared memory/block, and threads/block",
+        "The arithmetic: a kernel using 128 regs/thread caps at 64K/128 = 512 threads = 16 warps ~= 25% occupancy; pushing further causes register spilling to local memory (HBM)",
+        "Little's law framing: required in-flight parallelism = latency x throughput; you need enough outstanding memory requests to saturate HBM bandwidth",
+        "Volkov's insight (2010): high occupancy is not required — instruction-level parallelism (multiple independent loads per thread) hides latency at low occupancy, which is why good GEMM kernels run at ~25-50%",
+        "Tuning: __launch_bounds__, maxrregcount, block-size sweeps, the occupancy calculator; when to trade occupancy for register-resident data reuse",
+        "Failure mode: register spilling silently tanks performance; over-allocating shared memory caps blocks/SM"
+      ],
+      "links": ["Concept - GPU Memory Hierarchy", "Concept - The CUDA Programming Model", "Concept - Matmul Tiling on GPUs", "Concept - The Roofline Model", "Playbook - Profiling and Optimizing a GPU Kernel", "Concept - Memory Coalescing and Shared Memory Bank Conflicts"]
+    },
+    {
+      "title": "Concept - Systolic Arrays",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "The matmul compute paradigm behind TPUs and many inference ASICs — a 2D grid of MAC units through which operands flow rhythmically so each loaded value is reused across a whole row/column — and how it differs from a GPU's tensor cores. IN: the dataflow, weight-stationary vs output-stationary, why it is efficient, its rigidity. OUT: the full TPU system (link to Breakdown - The Google TPU) and GPU tensor cores (link to Concept - Tensor Cores).",
+      "key_points": [
+        "The structure: an N x N grid of MAC cells; operands are pumped in from the edges and partial sums accumulate as data marches through; TPU v1's MXU was 256x256 = 65,536 MACs",
+        "Data reuse without a register file: each input flows to many cells, amortizing one SRAM read over N MACs -> very high FLOP/byte and FLOP/watt",
+        "Dataflow variants: weight-stationary (TPU: weights preloaded, activations stream), output-stationary, and row-stationary (Eyeriss); the choice sets which operand is maximally reused",
+        "Efficiency vs flexibility: near-optimal for large dense GEMM/conv, but underutilized on small or odd shapes — the fill/drain pipeline bubble and the padding tax",
+        "Contrast with GPU tensor cores: a GPU is many small flexible MMA units + SIMT + a deep memory hierarchy (general purpose); a systolic array is one large rigid MAC fabric (specialized, higher efficiency at its sweet spot)",
+        "Why it matters now: resurgent in inference ASICs and the perf/watt argument of the accelerator wars; the MXU in TPUs is the canonical example"
+      ],
+      "links": ["Concept - Tensor Cores", "Breakdown - The Google TPU", "Reference - AI Accelerator Landscape", "Concept - Matrix Multiplication as the Atom of Deep Learning", "Concept - The Roofline Model", "Concept - GPU Memory Hierarchy"]
+    },
+    {
+      "title": "Concept - Network Topology for AI Clusters",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "How the scale-out network of a large GPU cluster is designed — fat-tree/Clos, rail-optimized layouts, oversubscription, dragonfly/OCS — and why topology determines achievable all-reduce bandwidth at 10k+ GPU scale. IN: the topologies, rail optimization, oversubscription tradeoffs, failure domains, congestion control. OUT: the collective algorithms that run on top (link to Concept - All-Reduce and Collective Operations) and on-node NVLink (link to Concept - GPU Interconnects (NVLink, InfiniBand, RoCE)).",
+      "key_points": [
+        "Fat-tree / Clos: a non-blocking multi-tier switch fabric giving full bisection bandwidth when not oversubscribed — the standard for HPC and AI clusters",
+        "Rail-optimized design: each GPU's NIC connects to a dedicated 'rail' switch so same-rank GPUs across nodes communicate with minimal hops — critical for ring all-reduce efficiency",
+        "Oversubscription: cheaper upper tiers (1:2, 1:4) cut cost but throttle cross-cluster collectives — the main cost/performance knob",
+        "Scale realities: 2-3 tier Clos for 10k-100k GPUs; switch radix and cable count explode; copper gives way to optics at the top tiers",
+        "Reconfigurable fabrics: dragonfly variants and Google's optical circuit switch (OCS) that rewires TPU-pod topology and routes around failures",
+        "Failure domains and blast radius: a spine failure vs a leaf failure; topology-aware scheduling to keep a job inside one failure domain",
+        "Congestion control at scale: RoCE PFC/ECN and adaptive routing; incast collapse under all-to-all (MoE) traffic"
+      ],
+      "links": ["Concept - Anatomy of an AI Training Cluster", "Concept - GPU Interconnects (NVLink, InfiniBand, RoCE)", "Concept - All-Reduce and Collective Operations", "Breakdown - NCCL", "Gotchas - Hardware Failures at Scale", "Concept - Tensor and Pipeline Parallelism"]
+    },
+    {
+      "title": "Playbook - Profiling and Optimizing a GPU Kernel",
+      "type": "playbook",
+      "level": "advanced",
+      "scope": "The end-to-end procedure to find and fix the bottleneck in a slow kernel — from top-down timeline profiling to Nsight Compute roofline/warp-stall analysis to the targeted fix. IN: the tool workflow, what each metric means, the symptom-to-fix decision tree. OUT: the roofline theory (link to Concept - The Roofline Model) and occupancy theory (link to Concept - Occupancy and Latency Hiding).",
+      "key_points": [
+        "Step 1 timeline: Nsight Systems / torch.profiler to see where wall-clock goes (kernel vs memcpy vs CPU-bound gaps vs launch overhead) before touching any kernel; expected observation = the dominant time sink",
+        "Step 2 classify: is the hot kernel compute-, memory-, or latency-bound? Read Nsight Compute Speed-of-Light + roofline; achieved vs peak DRAM throughput; deviation from expectation redirects the fix",
+        "Step 3 stall reasons: warp-stall sampling (long scoreboard = memory latency, barrier, MIO throttle) and the occupancy limiter (regs/smem/blocks)",
+        "Step 4 fix map: memory-bound -> fuse/coalesce/cut traffic; low-occupancy latency-bound -> more warps or more ILP; bank conflicts -> pad/swizzle; off tensor cores -> fix shapes/dtypes",
+        "Verification: re-profile and confirm the specific metric moved (achieved bandwidth up or SM-busy up) and that numerical output is unchanged",
+        "When it goes wrong (branch table): metric did not move -> wrong bottleneck identified; got faster on one shape, slower on another -> overfit tile config; correctness drifted -> a fusion/precision bug",
+        "Common wins ranked: fix non-coalesced access, enable tensor cores (TF32/BF16), fuse elementwise chains, raise tile reuse"
+      ],
+      "links": ["Concept - The Roofline Model", "Concept - Occupancy and Latency Hiding", "Concept - Memory Coalescing and Shared Memory Bank Conflicts", "Concept - Kernel Fusion", "Concept - Tensor Cores", "Gotchas - GPU Kernel Performance", "Concept - Model FLOPs Utilization (MFU)"]
+    },
+    {
+      "title": "Gotchas - GPU Kernel Performance",
+      "type": "gotchas",
+      "level": "advanced",
+      "scope": "The recurring, hard-to-diagnose performance traps in GPU kernels and framework code — the silent 2-10x slowdowns that never raise an error. IN: coalescing, bank conflicts, tensor-core shape misses, occupancy cliffs, launch overhead, precision-flag footguns. OUT: correctness/hardware failures (link to Gotchas - Hardware Failures at Scale) and the profiling procedure (link to Playbook - Profiling and Optimizing a GPU Kernel).",
+      "key_points": [
+        "Non-coalesced global access: Symptom - low global-load efficiency; Cause - strided/transposed access fans out to up to 32 transactions; Fix - restructure layout or stage through shared memory; Detection - Nsight sectors-per-request",
+        "Shared-memory bank conflicts: Symptom - high shared-load latency; Cause - N threads hit the same 4-byte bank; Fix - +1 padding or swizzle; Detection - bank-conflict counter",
+        "Falling off the tensor-core path: Symptom - ~10x slower than expected; Cause - dims not multiple of 8/16 or wrong dtype -> CUDA-core fallback; Fix - pad/align shapes; Detection - low tensor-core utilization",
+        "Register spilling: Symptom - unexpected local-memory traffic; Cause - too many regs/thread; Fix - maxrregcount or split the kernel; Detection - spill stores in ptxas -v",
+        "Kernel launch overhead: Symptom - CPU-bound gaps on the timeline; Cause - many tiny kernels at ~5-10 us each; Fix - CUDA graphs or fusion; Detection - profiler timeline",
+        "Small-batch decode / excessive __syncthreads: Symptom - low SM-busy at high occupancy; Cause - latency-bound serialization; Detection - warp-stall sampling",
+        "The TF32/allow_tf32 precision footgun: Symptom - surprise slowdown or accuracy change; Cause - framework matmul-precision flags toggling the tensor-core path; Detection - check torch.backends flags"
+      ],
+      "links": ["Concept - The Roofline Model", "Concept - Occupancy and Latency Hiding", "Concept - Memory Coalescing and Shared Memory Bank Conflicts", "Concept - Tensor Cores", "Playbook - Profiling and Optimizing a GPU Kernel", "Concept - Kernel Fusion"]
+    },
+    {
+      "title": "Playbook - Debugging a Hung Distributed Training Job",
+      "type": "playbook",
+      "level": "advanced",
+      "scope": "The procedure when a multi-GPU/multi-node job hangs, stalls, or times out on a collective — isolating whether it is a collective deadlock, a straggler, a dead GPU, or a network fault. IN: the diagnostic sequence, NCCL debug flags, straggler detection, the symptom->cause table, recovery. OUT: the hardware-failure taxonomy itself (link to Gotchas - Hardware Failures at Scale) and collective-algorithm theory (link to Concept - All-Reduce and Collective Operations).",
+      "key_points": [
+        "First move: set NCCL_DEBUG=INFO and NCCL_DEBUG_SUBSYS=ALL to see which collective and rank stalled; recognize the torch 'Watchdog caught collective timeout' signature",
+        "Rule out mismatched collectives: ranks calling different ops/shapes/order deadlock — check for divergent control flow (conditional all-reduce, uneven per-rank batch counts)",
+        "Straggler detection: one slow rank stalls the whole ring; use per-rank step-time logging and the PyTorch NCCL flight recorder to find the outlier GPU/node",
+        "Hardware isolation: check dmesg/Xid errors, nvidia-smi for fallen-off-bus / ECC, ibstat for IB link flaps, and DCGM for thermal throttling; correlate the slow rank to a bad node",
+        "Deadlock vs slowdown: distinguish a true hang (no progress, watchdog fires at the ~30 min default) from a chronic slowdown; inspect/adjust the NCCL/c10d timeout",
+        "Network faults: RoCE PFC storms, a flaky cable/transceiver, or adaptive-routing misconfig; use IB diagnostics",
+        "Recovery: exclude the bad node, restart from checkpoint; the standing case for frequent checkpoints and elastic/fault-tolerant training"
+      ],
+      "links": ["Concept - All-Reduce and Collective Operations", "Breakdown - NCCL", "Gotchas - Hardware Failures at Scale", "Concept - Network Topology for AI Clusters", "Concept - GPU Interconnects (NVLink, InfiniBand, RoCE)", "Deep Dive - Anatomy of a Pretraining Run", "Lore - Silent Data Corruption at Scale"]
+    },
+    {
+      "title": "Breakdown - The Google TPU",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "How Google's TPU actually works as a system — the systolic MXU, the VMEM/HBM memory model, the ICI interconnect and pod topology, and the XLA compile-first programming model — and where it beats or loses to GPUs. IN: v4/v5/v6 architecture, ICI mesh + OCS, static scheduling. OUT: the systolic-array primitive in general (link to Concept - Systolic Arrays) and the cross-chip comparison (link to Reference - AI Accelerator Landscape).",
+      "key_points": [
+        "Compute identity card: the MXU is a large systolic array (128x128 per unit, multiple per core) doing bf16 matmul; TPU v4 ~275 BF16 TFLOP/chip, v5p higher; two TensorCores per chip",
+        "Memory model: a small fast VMEM/CMEM scratchpad + HBM, compiler-managed with no hardware caches — everything is scheduled statically by XLA",
+        "Interconnect: ICI forms a 2D/3D torus within a pod (v4 pod = 4096 chips); optical circuit switches (OCS) reconfigure the torus and route around failed chips",
+        "Programming: XLA compile-first (JAX/TF) with whole-program fusion and static scheduling — excellent for regular dense workloads, painful for dynamic shapes and heavy control flow",
+        "The clever parts: OCS reconfigurable topology (twisted tori, failure isolation), the SparseCore for embeddings, and perf/watt from systolic compute + static scheduling",
+        "What it got wrong / limits: rigidity on dynamic/irregular workloads, GCP-only (no merchant market), a smaller ecosystem than CUDA, and long compile times",
+        "What to steal: the static-scheduling + whole-program-fusion mindset, topology-aware collectives, and the perf/watt case for specialization"
+      ],
+      "links": ["Concept - Systolic Arrays", "Reference - AI Accelerator Landscape", "Concept - Tensor Cores", "Concept - All-Reduce and Collective Operations", "Concept - Network Topology for AI Clusters", "Reference - Model Genealogy", "Concept - Mixed Precision Training"]
+    },
+    {
+      "title": "Decision - Selecting GPUs for Training and Inference",
+      "type": "decision",
+      "level": "advanced",
+      "scope": "How to choose the accelerator/instance for a workload — training vs inference, memory-bound vs compute-bound, owned vs rented — driven by memory capacity, bandwidth, FLOPs, and $/hr. IN: the decision flow and tradeoff matrix with real numbers and per-scenario picks. OUT: the raw spec tables (link to Reference - AI Accelerator Landscape) and serving throughput economics (link to Concept - Cost Engineering for LLM Applications).",
+      "key_points": [
+        "Decision flow: does the model + KV/optimizer fit? (capacity is the first gate) -> is the workload compute- or memory-bound? (FLOPs vs bandwidth) -> latency vs throughput SLO -> $/hr and availability",
+        "Training pick: need FLOPs + fast interconnect (NVLink) + capacity for optimizer state -> H100/H200/B200; A100 still fine below ~70B; at scale interconnect matters more than raw FLOPs",
+        "Inference pick: decode is memory-bandwidth-bound, so bandwidth + capacity for weights+KV dominate -> H100 vs L40S vs consumer 4090 vs Groq for ultra-low latency; batch size trades against latency SLO",
+        "The FLOPs trap: buying peak FLOPs you cannot feed (low MFU) wastes money — bandwidth and memory capacity usually bind first",
+        "Cloud vs owned: H100 rental ~$2-4/hr (2026) vs capex + ~50-70% utilization breakeven; spot/preemptible risk for long training",
+        "Consumer vs datacenter: no NVLink/ECC/large HBM on consumer cards — fine for single-GPU fine-tune/inference, not multi-node training; note the datacenter driver licensing caveat",
+        "Concrete recos by scenario (7B inference, 70B serving, 100B+ training) as of 2026"
+      ],
+      "links": ["Reference - AI Accelerator Landscape", "Reference - Memory Math for Transformers", "Concept - The Roofline Model", "Concept - Model FLOPs Utilization (MFU)", "Breakdown - The NVIDIA Datacenter GPU (Hopper and Blackwell)", "Concept - Cost Engineering for LLM Applications", "Concept - KV Cache"]
+    },
+    {
+      "title": "Snippet - Fused Softmax Kernel in Triton",
+      "type": "snippet",
+      "level": "advanced",
+      "scope": "A complete, runnable Triton kernel that computes a numerically-stable row softmax in one fused pass, teaching Triton's block-programming model and why fusion beats calling separate ops. IN: the kernel, launcher, autotune, the max-subtraction stability trick. OUT: the streaming online softmax used in attention (link to Snippet - A Minimal FlashAttention Kernel in Triton) and the theory of fusion (link to Concept - Kernel Fusion).",
+      "key_points": [
+        "Complete runnable code: imports (triton, torch), an @triton.jit kernel with tl.program_id over rows, tl.load with a mask for the row, row max, exp, sum, divide, tl.store; plus a launcher and a correctness check vs torch.softmax",
+        "Numerical stability: subtract the row max before exp (the standard trick) and show why skipping it overflows in fp16 — link to Concept - Softmax",
+        "The fusion win: one kernel reads the row once and writes once instead of read/write per op — the memory-bound speedup; the kernel is explicitly bandwidth-bound",
+        "BLOCK_SIZE choice and masking for rows longer than one block (single-block vs two-pass tradeoff)",
+        "num_warps / @triton.autotune knobs and how they change the generated PTX",
+        "'Why written this way': mask handling for the ragged tail, fp32 accumulation of the sum even with fp16 I/O, and one-row-per-program mapping"
+      ],
+      "links": ["Concept - Triton", "Concept - Kernel Fusion", "Concept - Softmax", "Concept - The Roofline Model", "Snippet - A Minimal FlashAttention Kernel in Triton", "Concept - GPU Memory Hierarchy"]
+    },
+    {
+      "title": "Breakdown - The NVIDIA Datacenter GPU (Hopper and Blackwell)",
+      "type": "breakdown",
+      "level": "frontier",
+      "scope": "How NVIDIA's datacenter GPUs are actually built across the Hopper (H100/H200) and Blackwell (B200/GB200) generations — SM structure, tensor-core generations, TMA/async, HBM, NVLink, and the rack-scale turn. IN: the concrete architecture and headline numbers of both generations. OUT: the general tensor-core concept (link to Concept - Tensor Cores) and rack-scale interconnect (link to Concept - Rack-Scale Systems and NVLink Domains).",
+      "key_points": [
+        "H100 identity card: 132 SMs, 4th-gen tensor cores, 989 BF16 / 1979 FP8 TFLOP dense, 80 GB HBM3 @ 3.35 TB/s, 50 MB L2, NVLink4 900 GB/s, 700W; H200 = 141 GB HBM3e @ 4.8 TB/s",
+        "Hopper's clever parts: TMA (async bulk multidimensional SMEM<->HBM copies), thread-block clusters + distributed shared memory, wgmma warpgroup async MMA, the Transformer Engine (FP8 with delayed per-tensor scaling), DPX instructions",
+        "Blackwell B200: dual-die (2 reticle-limited dies + 10 TB/s die-to-die link), 2nd-gen Transformer Engine with FP4/MXFP, 192 GB HBM3e @ ~8 TB/s, ~2.2x H100 training throughput; GB200 = 2 B200 + a Grace CPU",
+        "The rack turn: GB200 NVL72 puts 72 B200 in one NVLink domain (~130 TB/s) presented as 'one big GPU' — link to Concept - Rack-Scale Systems and NVLink Domains",
+        "What's dated / caveats: sparsity FLOPs marketing (the 2x asterisk), FP4 accuracy caveats, liquid cooling as the real deployment blocker, and allocation/availability politics",
+        "What to steal / why it matters: async memory movement + warp specialization are now mandatory for peak kernels (FA3), and hardware+numeric-format co-design (FP8/FP4) is the throughput lever"
+      ],
+      "links": ["Concept - Tensor Cores", "Concept - GPU Memory Hierarchy", "Concept - GPU Interconnects (NVLink, InfiniBand, RoCE)", "Concept - Rack-Scale Systems and NVLink Domains", "Concept - FP8 and Low-Precision Hardware Formats", "Concept - Warp Specialization and Async Pipelines on Hopper", "Reference - AI Accelerator Landscape", "Deep Dive - FlashAttention"]
+    },
+    {
+      "title": "Breakdown - NCCL",
+      "type": "breakdown",
+      "level": "frontier",
+      "scope": "How NVIDIA's collective library actually implements fast collectives — channel/ring construction, protocols (Simple/LL/LL128), algorithm selection (ring/tree/NVLS), and the tuning knobs that make or break scale-out throughput. IN: NCCL internals and its tuning folklore. OUT: the collective algorithms in the abstract (link to Concept - All-Reduce and Collective Operations) and the physical network (link to Concept - Network Topology for AI Clusters).",
+      "key_points": [
+        "What NCCL does: discovers topology (NVLink/PCIe/IB), builds rings and trees across it, and launches CUDA kernels that pipeline reduce+copy over channels; it backs PyTorch DDP/FSDP and Megatron",
+        "Protocols: Simple (max bandwidth, higher latency), LL (low-latency 8-byte flags, wastes half the bandwidth), LL128 (the NVLink sweet spot) — chosen by message size",
+        "Algorithms: Ring (bandwidth-optimal, large messages), Tree (latency-optimal, small messages / many nodes), NVLS (NVLink SHARP in-switch reduction on NVSwitch) — the crossover thresholds are the folklore",
+        "Channels & SMs: NCCL uses GPU SMs to drive copies; NCCL_MIN/MAX_NCHANNELS trades comm bandwidth against SM occupancy for compute",
+        "The tuning env-var arcana: NCCL_ALGO, NCCL_PROTO, NCCL_IB_HCA, NCCL_SOCKET_IFNAME, NCCL_P2P_LEVEL, NCCL_BUFFSIZE — a misconfig silently halves bandwidth; the classic 'works on 1 node, hangs on 2' HCA/GID saga",
+        "SHARP: in-network reduction on IB switches offloads all-reduce — a large-cluster win",
+        "Failure modes: wrong NIC/GID selection, missing PXN, or PFC not configured for RoCE -> congestion collapse; mismatched ranks -> hang"
+      ],
+      "links": ["Concept - All-Reduce and Collective Operations", "Concept - GPU Interconnects (NVLink, InfiniBand, RoCE)", "Concept - Network Topology for AI Clusters", "Playbook - Debugging a Hung Distributed Training Job", "Concept - Data Parallelism and ZeRO", "Gotchas - Hardware Failures at Scale"]
+    },
+    {
+      "title": "Concept - FP8 and Low-Precision Hardware Formats",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The low-precision numeric formats modern tensor cores execute — FP8 (E4M3/E5M2), FP4, and microscaling (MX) block formats — how they are encoded, how hardware scales them, and the accuracy tradeoffs. IN: the bit layouts, scaling (per-tensor/per-block), hardware support, throughput. OUT: the mixed-precision training recipe and loss scaling (link to Concept - Mixed Precision Training) and inference quantization formats (link to Concept - Post-Training Quantization Formats).",
+      "key_points": [
+        "FP8 variants: E4M3 (4 exp, 3 mantissa, ~+-448 range, used for weights/activations) vs E5M2 (5 exp, 2 mantissa, wider range, used for gradients) — the range-vs-precision split",
+        "Why FP8 needs scaling: 8 bits cannot span activation dynamic range, so per-tensor scale factors (delayed scaling / amax history in the Transformer Engine) keep values representable",
+        "Microscaling (MX): a shared exponent per small block (e.g., 32 elements) — MXFP8/MXFP6/MXFP4 in the OCP MX standard, native on Blackwell; block scaling beats per-tensor for accuracy",
+        "FP4 on Blackwell: E2M1 + a block scale; ~2x FP8 throughput; used for inference and emerging training, with accuracy on the edge requiring careful calibration",
+        "Hardware throughput: H100 FP8 ~1979 TFLOP (2x BF16), Blackwell FP4 ~2x again — FLOP throughput doubles per precision halving",
+        "Accuracy failure modes: outlier features (the LLM.int8 story), keeping attention/softmax and certain layers in higher precision; DeepSeek-V3's FP8 pretraining as a real large-scale proof point"
+      ],
+      "links": ["Concept - Tensor Cores", "Concept - Floating Point for Deep Learning", "Concept - Mixed Precision Training", "Concept - Post-Training Quantization Formats", "Breakdown - The NVIDIA Datacenter GPU (Hopper and Blackwell)", "Reference - Memory Math for Transformers"]
+    },
+    {
+      "title": "Concept - Rack-Scale Systems and NVLink Domains",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "The shift from the 8-GPU node to the rack-as-one-accelerator — GB200 NVL72 and large NVLink domains — and how extending the high-bandwidth scale-up domain to 72+ GPUs changes which parallelism strategies are cheap. IN: NVLink-domain scaling, NVSwitch fabric, HBM pooling, implications for TP/EP. OUT: how parallelism strategies exploit it (link to Concept - Tensor and Pipeline Parallelism) and the specific silicon (link to Breakdown - The NVIDIA Datacenter GPU (Hopper and Blackwell)).",
+      "key_points": [
+        "The idea: a large NVLink domain (NVL72 = 72 GPUs, ~130 TB/s all-to-all) presents as one coherent high-bandwidth pool instead of the old 8-GPU NVLink island + slow IB beyond it",
+        "Why it matters: tensor and expert parallelism are bandwidth-hungry and were effectively capped at 8 (the node); a 72-GPU NVLink domain lets TP/EP span far more GPUs without hitting the IB cliff",
+        "Memory pooling: NVLink-connected GPUs address each other's HBM at NVLink speed -> ~72 x 192 GB ~= 13.5 TB of fast-memory pool for huge models and KV",
+        "Blackwell specifics: NVLink5 1.8 TB/s per GPU, NVLink Switch trays, a copper cable backplane, liquid cooling; GB200 pairs a Grace CPU for coherent CPU-GPU memory",
+        "Reconfiguration of the bandwidth hierarchy: the 'cliff' moves from 8 to 72 GPUs, changing the optimal (TP, EP, PP, DP) mapping and making MoE dispatch all-to-all much cheaper in-domain",
+        "Caveats & competition: ~120 kW/rack power density, the failure blast radius of a whole NVLink domain, and alternative scale-up fabrics (Google TPU pods, AMD/UALink)"
+      ],
+      "links": ["Concept - GPU Interconnects (NVLink, InfiniBand, RoCE)", "Concept - Anatomy of an AI Training Cluster", "Breakdown - The NVIDIA Datacenter GPU (Hopper and Blackwell)", "Concept - Tensor and Pipeline Parallelism", "Concept - Mixture of Experts Architecture", "Concept - All-Reduce and Collective Operations"]
+    },
+    {
+      "title": "Snippet - A Minimal FlashAttention Kernel in Triton",
+      "type": "snippet",
+      "level": "frontier",
+      "scope": "A runnable, minimal Triton implementation of forward FlashAttention showing the online-softmax streaming loop — the code that makes the algorithm concrete. IN: the kernel with running max/sum rescaling, the block-over-KV loop, causal masking, and a correctness check. OUT: the full v2/v3 optimizations (link to Deep Dive - FlashAttention) and Triton basics (link to Concept - Triton).",
+      "key_points": [
+        "Runnable minimal code: load Q/K/V tiles, loop over K/V blocks computing scaled S=QK^T, do streaming online softmax (running m, l, and an accumulator rescaled by exp(m_old - m_new)), then final normalize; plus a launcher and a check vs a torch reference",
+        "The online-softmax recurrence is the teaching core: show the m_i/l_i update and the accumulator correction each block — why the N x N score matrix is never materialized",
+        "fp32 accumulation of m/l/acc even with fp16 inputs, with the numerical-stability rationale",
+        "Block sizes (BLOCK_M, BLOCK_N, head_dim) and how they map to shared memory — the tiling constraint from Concept - GPU Memory Hierarchy",
+        "Causal masking handled inside the streaming loop (skip fully-masked upper blocks, mask the diagonal block)",
+        "'Why written this way': the recomputation-friendly structure, why the rescale preserves exactness, and what v2/v3 add (warp partitioning, wgmma/TMA) as a pointer up to the deep dive"
+      ],
+      "links": ["Deep Dive - FlashAttention", "Concept - Triton", "Snippet - Fused Softmax Kernel in Triton", "Concept - GPU Memory Hierarchy", "Concept - Attention Mechanism", "Concept - Softmax", "Concept - Warp Specialization and Async Pipelines on Hopper"]
+    },
+    {
+      "title": "Concept - Warp Specialization and Async Pipelines on Hopper",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "The Hopper-era kernel design pattern behind peak kernels (FlashAttention-3, fast GEMM) — splitting warpgroups into producers (async data movement via TMA) and consumers (wgmma tensor-core math) coordinated by mbarriers to form a software pipeline. IN: TMA, wgmma, mbarrier, ping-pong scheduling. OUT: the general CUDA model (link to Concept - The CUDA Programming Model) and the FlashAttention algorithm (link to Deep Dive - FlashAttention).",
+      "key_points": [
+        "The problem it solves: tensor cores are so fast that feeding them (HBM->SMEM) is the bottleneck; you must overlap async copies with MMA to reach peak",
+        "TMA (Tensor Memory Accelerator): a hardware unit that does bulk multidimensional SMEM<->HBM copies asynchronously from a single instruction, signaling completion via an mbarrier and freeing threads",
+        "wgmma: a warpgroup-wide (128-thread) asynchronous tensor-core MMA that reads operands from shared memory and overlaps with the next TMA load",
+        "mbarrier / async pipeline: producer warps issue TMA loads and arrive on barriers; consumer warps wait, run wgmma, then signal buffers free, cycling a multi-stage circular SMEM buffer (generalized double buffering)",
+        "Warp-specialization patterns: dedicated producer vs consumer warpgroups and 'ping-pong' scheduling (two consumer warpgroups alternate so tensor cores never idle across the softmax in FA3)",
+        "Why it's arcana: this is the difference between ~35% and ~75% of H100 peak; it is hand-written in CUTLASS/CuTe, with FA3 (Shah et al. 2024) the canonical public example; Blackwell adds tcgen05/tmem",
+        "Failure modes: barrier deadlocks, wrong pipeline depth over-allocating SMEM (killing occupancy), and register pressure split between warpgroups"
+      ],
+      "links": ["Concept - The CUDA Programming Model", "Concept - Tensor Cores", "Concept - GPU Memory Hierarchy", "Deep Dive - FlashAttention", "Concept - Matmul Tiling on GPUs", "Breakdown - The NVIDIA Datacenter GPU (Hopper and Blackwell)", "Concept - Memory Coalescing and Shared Memory Bank Conflicts"]
+    },
+    {
+      "title": "Concept - Memory Coalescing and Shared Memory Bank Conflicts",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "The two lowest-level memory-access rules that separate a fast kernel from a slow one — coalesced global access across a warp and conflict-free shared-memory access across its 32 banks — plus the swizzling tricks used to satisfy them. IN: coalescing rules, the 32-bank model, conflict patterns, padding and XOR swizzle. OUT: the memory-hierarchy capacities/latencies (link to Concept - GPU Memory Hierarchy) and tiling strategy (link to Concept - Matmul Tiling on GPUs).",
+      "key_points": [
+        "Coalescing: a warp's 32 global accesses that fall in one aligned 128-byte cache line become 1 transaction; strided/misaligned access fans out to up to 32 transactions, up to 32x bandwidth loss",
+        "The transpose problem: naive matrix transpose has coalesced reads but strided writes (or vice versa); the classic fix is staging through shared memory",
+        "Shared-memory banks: 32 banks of 4-byte words interleaved; bank = (address/4) mod 32; simultaneous access to different words in the same bank is an N-way conflict, serialized",
+        "The +1 padding trick: declaring tile[32][33] makes column access stride across banks instead of hitting one — a one-word waste that can double effective bandwidth",
+        "Swizzling: XOR-permuting the shared-memory layout (as in CUTLASS/CuTe and ldmatrix) makes tensor-core fragment loads conflict-free without the padding waste — the deep arcana",
+        "Broadcast exception: all threads reading the same word is a single access (no conflict), which is why constant/broadcast access is cheap",
+        "Detection: Nsight Compute 'shared memory bank conflicts' and 'global load efficiency / sectors per request' counters"
+      ],
+      "links": ["Concept - GPU Memory Hierarchy", "Concept - The CUDA Programming Model", "Concept - Matmul Tiling on GPUs", "Concept - Warp Specialization and Async Pipelines on Hopper", "Gotchas - GPU Kernel Performance", "Playbook - Profiling and Optimizing a GPU Kernel"]
+    },
+    {
+      "title": "Gotchas - Hardware Failures at Scale",
+      "type": "gotchas",
+      "level": "unicorn",
+      "scope": "The failure modes that appear only when you run thousands of GPUs for weeks — GPU fall-off-bus, ECC/Xid errors, silent data corruption, thermal-throttling stragglers, network flaps — and how they manifest inside a training run. IN: the taxonomy of at-scale hardware failures with detection. OUT: the SDC war stories in depth (link to Lore - Silent Data Corruption at Scale) and the hung-job debug procedure (link to Playbook - Debugging a Hung Distributed Training Job).",
+      "key_points": [
+        "MTBF math: at 10k+ GPUs, mean time between failures is hours — a long run will hit failures (OPT-175B / Llama / BLOOM logbooks), so design for frequent checkpoints and elastic restart",
+        "Xid errors & fall-off-bus: Symptom - nvidia-smi 'GPU has fallen off the bus', Xid 79/48/119, ECC double-bit; Fix - drain and exclude the node; Detection - dmesg/DCGM",
+        "Silent Data Corruption (SDC): Symptom - a GPU computes wrong results with no error flag, poisoning gradients/producing NaNs; Cause - a defective ALU/data path; Detection - hardest of all (link to Lore - Silent Data Corruption at Scale)",
+        "Stragglers from thermal/clock variation: Symptom - one hot GPU throttles and stalls the whole collective; Detection - per-rank step-time outliers (link to Concept - GPU Clocks, Power, and Thermal Throttling)",
+        "Network faults: Symptom - NCCL hangs/timeouts; Cause - IB link flaps, transceiver failures, RoCE congestion; Detection - ibstat / IB diagnostics",
+        "Memory failures: uncorrectable ECC, row-remapping-resource exhaustion, and HBM degradation over the GPU's service life",
+        "The loss-spike-that-is-actually-hardware trap: a NaN/loss spike traced to one bad GPU rather than the math; localize by checkpoint-diffing and moving the job off the suspect node"
+      ],
+      "links": ["Lore - Silent Data Corruption at Scale", "Playbook - Debugging a Hung Distributed Training Job", "Concept - GPU Clocks, Power, and Thermal Throttling", "Concept - Network Topology for AI Clusters", "Deep Dive - Anatomy of a Pretraining Run", "Lore - The OPT-175B Logbook", "Concept - All-Reduce and Collective Operations"]
+    },
+    {
+      "title": "Lore - Silent Data Corruption at Scale",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "The war stories of silent data corruption in large fleets — GPUs and CPUs that compute wrong answers with no error signal — as documented by Meta, Google, and training-run logbooks, and what it taught the field about trusting hardware. IN: the named incidents/papers, how SDC was found, the mechanical lesson. OUT: the broader failure taxonomy (link to Gotchas - Hardware Failures at Scale).",
+      "key_points": [
+        "What happened: Meta's 'Silent Data Corruptions at Scale' (Dixit et al. 2021) and Google's 'Cores that Don't Count' (Hochschild et al. 2021) found fleet CPUs/accelerators deterministically producing wrong results on specific inputs — 'mercurial cores' at ~1 per few-thousand machines",
+        "The AI-training manifestation: unexplained loss spikes/NaNs that vanish after moving the job off a specific node, and gradient corruption that silently poisons a checkpoint",
+        "How they hunted it: fleet-wide idempotency checks, dueling replicas, and targeted stress tests — hard because it is input-dependent and often localized to one ALU or operand pattern",
+        "Evidence status: the phenomenon is verified (published Meta and Google papers); specific AI-run attributions are often well-sourced folklore from logbooks and engineering blogs",
+        "The lesson mechanically: at scale, hardware is not a trustworthy oracle — correctness needs redundancy/checksums, and 'it's probably a bug in our code' is sometimes a lie the silicon tells",
+        "Why it's unicorn: most engineers never see it; teams that run big fleets build an entire detection-and-quarantine discipline around it"
+      ],
+      "links": ["Gotchas - Hardware Failures at Scale", "Concept - GPU Clocks, Power, and Thermal Throttling", "Lore - The OPT-175B Logbook", "Deep Dive - Anatomy of a Pretraining Run", "Playbook - Debugging a Hung Distributed Training Job", "Concept - Floating Point for Deep Learning"]
+    },
+    {
+      "title": "Concept - GPU Clocks, Power, and Thermal Throttling",
+      "type": "concept",
+      "level": "unicorn",
+      "scope": "How real GPU performance drifts from spec because of power caps, boost clocks, and thermal throttling — and why this quietly creates stragglers, non-determinism, and MFU variance in production. IN: boost/base clocks, power capping, thermal/current throttling, per-GPU silicon variation, DVFS, monitoring. OUT: the broader failure taxonomy (link to Gotchas - Hardware Failures at Scale) and roofline peak-FLOPs assumptions (link to Concept - The Roofline Model).",
+      "key_points": [
+        "Boost vs base clock: GPUs run above base clock when power/thermal headroom allows, so vendor 'peak FLOPs' (measured near boost) is optimistic — sustained AI load throttles it down",
+        "Power capping: a 700W H100 hitting its board power limit downclocks; nvidia-smi -pl and datacenter power budgets cap sustained clocks — the datacenter is often power-limited before it is GPU-limited",
+        "Thermal throttling: hot inlet air, poor airflow, or a hot rack position raises temps and lowers clocks, so the same job runs slower on a hot GPU — a straggler source in collectives",
+        "Silicon lottery / per-GPU variation: chips need different voltages for a given clock, so some GPUs in a fleet are persistently slower and become chronic stragglers — the case for straggler-aware scheduling",
+        "Non-determinism & benchmarking traps: clock variation makes microbenchmarks noisy; lock clocks with nvidia-smi -lgc for reproducible profiling; a kernel that 'got slower' was often just a clock change",
+        "Monitoring: DCGM clock and throttle-reason counters (SW/HW power/thermal/reliability slowdown) and correlating throttle events with MFU dips",
+        "The MFU tie-in: sustained-clock reality is part of why measured MFU falls below a naive peak-FLOPs estimate"
+      ],
+      "links": ["Concept - Model FLOPs Utilization (MFU)", "Gotchas - Hardware Failures at Scale", "Lore - Silent Data Corruption at Scale", "Concept - The Roofline Model", "Playbook - Debugging a Hung Distributed Training Job", "Concept - Anatomy of an AI Training Cluster"]
+    }
+  ]
+}

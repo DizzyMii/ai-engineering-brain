@@ -1,0 +1,415 @@
+{
+  "domain": "22 - AI Economics",
+  "slug": "ai-economics",
+  "notes": [
+    {
+      "title": "Concept - Value Capture Across the AI Stack",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The layer-cake view of where money accrues in AI: silicon (Nvidia) -> cloud/neoclouds -> foundation-model labs -> application layer -> distribution, and why the profit pool is not where the value is created. IN: the stack model, gross-margin reality per layer, a16z's value-capture thesis, picks-and-shovels, model-layer commoditization, value-creation vs value-capture. OUT: serving cost mechanics (link to 07), per-function case studies (link to 21 AI Impact by Business Function), forward compute-buildout scenarios (link to 24 Bubble or Boom).",
+      "key_points": [
+        "Layer model: silicon (Nvidia) -> cloud/neoclouds -> foundation-model labs -> app layer -> distribution. As of 2026 the clearest profit pool is silicon: Nvidia data-center revenue ~$115B FY2025 at ~75% gross margin (E3, audited 10-K), while the app layer runs 50-60% gross margin (E1, Bessemer/a16z 2026).",
+        "a16z 'Who Owns the Generative AI Platform?' (Jan 2023, E1) argued infrastructure captures the most durable value while apps struggle with retention and margins and models sit in between — a thesis largely borne out by 2026.",
+        "'Picks and shovels': the surest returns have flowed to compute suppliers (Nvidia, TSMC, CoreWeave) rather than to model or app builders — the buildout enriches the arms dealer first.",
+        "The model layer is commoditizing: token price deflation and open-weight parity (DeepSeek, Llama) compress model-layer margins, pushing durable value toward apps with proprietary workflow/data and toward infra.",
+        "The 'thin-margin sandwich': app companies buy inference cost-plus from labs who buy GPUs from Nvidia; each layer's pricing power squeezes the next, so app-layer margins are structurally pinched (link Unit Economics, Moats).",
+        "Counter-evidence: app-layer breakouts like Cursor ($500M+ ARR by mid-2025, E2) show apps can capture value fast — but usually on the model providers' compute, so top-line speed is not the same as a durable profit pool (link The Cursor Ramp).",
+        "Non-obvious: value capture is not value creation — most measured economic value (McKinsey $2.6-4.4T/yr, E1) accrues to AI *users* (enterprises cutting cost), not AI *vendors*, mirroring prior general-purpose-technology waves where suppliers under-captured the surplus."
+      ],
+      "links": [
+        "Concept - Unit Economics of LLM Products",
+        "Concept - Moats in the AI Application Layer",
+        "Breakdown - Frontier Lab Economics",
+        "Breakdown - The Cursor Ramp",
+        "Concept - Token Price Deflation",
+        "Reference - AI Market Sizing Claims",
+        "Concept - Support Deflection Economics",
+        "Deep Dive - Bubble or Boom",
+        "Concept - Cost Engineering for LLM Applications",
+        "Reference - Model Genealogy"
+      ]
+    },
+    {
+      "title": "Concept - Token Price Deflation",
+      "type": "concept",
+      "level": "surface",
+      "scope": "The rapid, sustained fall in the price of a fixed quality level of LLM inference ('LLMflation') and what it does to AI business models. IN: the ~10x/year deflation rate, GPT-4-class price history, the drivers (hardware, algorithms, open-weight competition), Epoch's per-benchmark variation, Jevons dynamics, business implications. OUT: the serving mechanisms that enable it (link to 07 quantization/batching), scaling-law compute economics (link to 04), forward extrapolation (link to 24).",
+      "key_points": [
+        "a16z 'LLMflation' (Guido Appenzeller, Nov 2024, E1): for a model of fixed quality, inference cost falls roughly 10x per year; a GPT-3-quality token fell ~1000x in ~3 years.",
+        "Frontier-quality price history (E3, published price lists): GPT-4 launched Mar 2023 at $30/$60 per million input/output tokens; GPT-4o (2024) $2.50/$10; GPT-4o-mini $0.15/$0.60; GPT-4-class open weights (DeepSeek V3, Llama 3.3 70B) under $0.50/M — a >60x drop at constant quality.",
+        "Epoch AI (2025, E2): the deflation rate varies 9x-900x per year depending on which capability milestone you hold fixed — commodity tasks deflate fastest, frontier capability slowest.",
+        "Drivers: cheaper hardware ($/FLOP), algorithmic efficiency (distillation, quantization, MoE), and competition/open weights; DeepSeek's Jan 2025 release crystallized the 'cheap frontier' narrative and knocked ~$589B off Nvidia in a day (E3).",
+        "Business implication: any margin that depends on today's token price evaporates at next year's price — cost-plus token pricing is a melting ice cube; conversely, inference-heavy features become economical on a predictable delay.",
+        "Jevons paradox: Satya Nadella invoked it (Jan 2025, E2) — cheaper tokens expand total usage, so aggregate AI spend can rise even as per-token price collapses (link Unit Economics, Frontier Lab Economics).",
+        "Non-obvious: deflation is per-quality-level, not per-token-you-actually-buy — frontier users keep paying top dollar for the newest (more expensive) capability, so labs' revenue grows even as unit prices fall."
+      ],
+      "links": [
+        "Concept - Unit Economics of LLM Products",
+        "Breakdown - Frontier Lab Economics",
+        "Decision - Build vs Buy vs Wrap",
+        "Concept - Value Capture Across the AI Stack",
+        "Concept - Moats in the AI Application Layer",
+        "Deep Dive - Circular Financing in the AI Buildout",
+        "Concept - The Capability-Reliability Gap",
+        "Reference - The 2026 Navigation Cheatsheet",
+        "Concept - Post-Training Quantization Formats",
+        "Concept - Knowledge Distillation",
+        "Concept - Scaling Laws"
+      ]
+    },
+    {
+      "title": "Concept - Unit Economics of LLM Products",
+      "type": "concept",
+      "level": "core",
+      "scope": "The COGS and gross-margin math of an AI product: what each query actually costs, why AI gross margins (50-60%) trail SaaS (80-90%), and the levers that move them. IN: per-query cost model, variable vs fixed cost, the broken SaaS zero-marginal-cost assumption, margin levers (caching, routing, small models), power-user risk, per-cohort measurement. OUT: serving-engine cost internals (link to 07), LLMOps cost tooling/gateways (link to 16), forward capex (link to 24).",
+      "key_points": [
+        "The SaaS assumption (marginal serving cost ~ 0) breaks: inference is a real per-query variable cost, so AI products run COGS ~40-50% -> gross margins 50-60% vs SaaS 80-90% (E1, Bessemer Feb 2026 and a16z framing); ICONIQ's 2026 survey put model-inference at ~23% of spend and rising with usage (E2, single survey).",
+        "Cost drivers per query: input+output tokens (output typically priced 3-5x input), retries and self-consistency sampling, RAG embedding + retrieval calls, and reasoning models' hidden thinking tokens (can 5-20x output volume).",
+        "Margin levers: prompt caching (up to ~90% off cached input), semantic caching, model routing/cascades (cheap model first, escalate on failure), quantized/distilled small models, and batching — each trades quality or latency for COGS (link Cost Engineering for LLM Applications 16).",
+        "The power-user problem: flat-rate or seat pricing on a token-metered backend makes heavy users gross-margin-negative; unlimited plans invert SaaS economics, which is why coding tools (Cursor, Claude Code) repeatedly repriced in 2025 (E2, reporting).",
+        "Deflation cuts both ways: token deflation improves margins over time, but competition passes the savings to customers and agents/reasoning raise token volume per task — net margin is a race, not a gift (link Token Price Deflation, Frontier Lab Economics).",
+        "Measure per-feature, per-cohort unit economics (cost per resolved ticket, per generated PR), never blended — one runaway agent workflow can erase the margin of an entire product line.",
+        "Non-obvious: gross margin is a moving target set by your *worst* users and your *newest* model choice; teams that don't instrument token cost per request discover their COGS only when the monthly bill arrives (link Measuring AI ROI)."
+      ],
+      "links": [
+        "Concept - Token Price Deflation",
+        "Decision - Pricing Models for AI Products",
+        "Breakdown - Frontier Lab Economics",
+        "Playbook - Measuring AI ROI",
+        "Concept - Value Capture Across the AI Stack",
+        "Concept - Outcome-Based Pricing",
+        "Concept - Support Deflection Economics",
+        "Breakdown - The Cursor Ramp",
+        "Concept - Cost Engineering for LLM Applications",
+        "Concept - Prompt Caching",
+        "Concept - Semantic Caching",
+        "Breakdown - vLLM"
+      ]
+    },
+    {
+      "title": "Decision - Build vs Buy vs Wrap",
+      "type": "decision",
+      "level": "core",
+      "scope": "The strategic choice among training/owning a model (build), consuming a foundation model via API (buy), or building product/workflow on top of one (wrap): cost thresholds, defensibility, platform risk, and when each wins. IN: the decision axes, cost crossovers, the 'thin wrapper' failure test, platform-risk quantification, the buy-then-selectively-build path. OUT: the fine-tune-vs-RAG-vs-prompt technical choice (link to 12), agent-framework build decisions (link to 10), per-function ROI (link to 21).",
+      "key_points": [
+        "Default (as of 2026): buy or wrap. Pretraining a frontier model costs $100M-$1B+ (E1 estimates, link Frontier Lab Economics) and deflating token prices make owning a model economically irrational for all but labs and a few sovereign/vertical plays.",
+        "'Wrap' = build product, workflow, and data on top of a bought model; the pejorative 'thin wrapper' (Jasper — link AI Wrapper Graveyard) applies only when the wrapper adds nothing the model vendor won't ship for free.",
+        "Decision axes: differentiation (does the model or you do the hard part?), platform risk (will the lab ship your feature?), data moat, latency/cost/control, compliance/data residency, and volume (self-hosting open weights can beat API only at very high sustained QPS).",
+        "Build (train or heavily fine-tune) is justified for proprietary-data verticals, cost at extreme scale, on-prem/regulatory isolation, or a capability the API won't grant — otherwise it is a distraction (link Fine-Tuning vs RAG vs Prompting 12).",
+        "The wrapper survival test: own the workflow, the data exhaust, the integrations, and the distribution — not the prompt. Cursor wrapped Anthropic/OpenAI models and still built a ~$9.9B business (E2, TechCrunch 2025) because the IDE workflow and codebase context are the moat (link The Cursor Ramp, Moats).",
+        "Platform risk is measurable: ChatGPT's launch (Nov 2022) gutted Jasper a month after its $1.5B round (E2) — build on a vendor and you inherit their roadmap as your competition.",
+        "Non-obvious: 'buy' is rarely permanent — the strongest teams start on the best API to find product-market fit, then selectively self-host or fine-tune only the 5% of traffic where unit economics or control demand it (link Unit Economics)."
+      ],
+      "links": [
+        "Concept - Moats in the AI Application Layer",
+        "Breakdown - Frontier Lab Economics",
+        "Lore - AI Wrapper Graveyard",
+        "Breakdown - The Cursor Ramp",
+        "Concept - Unit Economics of LLM Products",
+        "Concept - Token Price Deflation",
+        "Playbook - Picking Profitable AI Use Cases",
+        "Deep Dive - Agentic Coding in Production",
+        "Decision - Fine-Tuning vs RAG vs Prompting",
+        "Breakdown - vLLM"
+      ]
+    },
+    {
+      "title": "Concept - Moats in the AI Application Layer",
+      "type": "concept",
+      "level": "core",
+      "scope": "Where defensibility comes from for AI applications, and why the model itself is not a moat. IN: proprietary data, workflow lock-in, distribution, integration switching cost, network effects, speed as a temporary edge, outcome-data compounding; why 'thin wrapper' fails; commoditization pressure from below. OUT: model-layer/lab moats (link to Frontier Lab Economics), regulatory moats (link to 23 EU AI Act), the wrapper war stories (link to AI Wrapper Graveyard).",
+      "key_points": [
+        "The model is not your moat: capabilities you access via API, competitors access too; token deflation and open weights erase any advantage built purely on 'we use the best model' (link Token Price Deflation).",
+        "Durable moats mirror classic software: proprietary/hard-to-get data, deep workflow integration and switching costs, distribution/installed base, and network effects — not prompt cleverness (a16z, Emergence, Greylock 2023-2025 theses, E1).",
+        "Data moats are subtler than claimed: generic user prompts aren't defensible, but structured outcome/feedback data tied to a workflow (which fixes users accepted, which resolutions stuck) compounds into eval and fine-tune advantages (link Outcome-Based Pricing, Measuring AI ROI).",
+        "Workflow lock-in wins in practice: Cursor's codebase indexing and editor habit, Harvey's legal workflows, and medical scribes' EHR integration (link AI Medical Scribes 21) — the moat is the surrounding system, not the model call.",
+        "Platform/wrapper risk quantified: Jasper's $1.5B-to-cut collapse after ChatGPT (link AI Wrapper Graveyard) is the canonical failure; the operative test is 'what happens to us the day the model vendor ships this for free?'",
+        "Speed is only a temporary moat: being first with a workflow buys time, not defensibility, and incumbents with distribution (Microsoft/Google embedding AI) can erase a feature-level lead (link Build vs Buy vs Wrap).",
+        "Non-obvious: in AI the strongest moat is often being the *system of record* for a workflow's outcomes — whoever captures the labeled result data gets compounding advantages competitors on the same base model cannot copy (link Unit Economics)."
+      ],
+      "links": [
+        "Decision - Build vs Buy vs Wrap",
+        "Lore - AI Wrapper Graveyard",
+        "Breakdown - The Cursor Ramp",
+        "Concept - Token Price Deflation",
+        "Concept - Value Capture Across the AI Stack",
+        "Concept - Outcome-Based Pricing",
+        "Breakdown - AI Medical Scribes",
+        "Concept - The Pilot-to-Production Gap",
+        "Reference - The EU AI Act for Operators",
+        "Decision - Fine-Tuning vs RAG vs Prompting"
+      ]
+    },
+    {
+      "title": "Reference - AI Market Sizing Claims",
+      "type": "reference",
+      "level": "core",
+      "scope": "A tiered lookup of the big AI market-size, value, and ROI claims with source, date, evidence tier, and the methodological catch on each. IN: McKinsey $2.6-4.4T, PwC $15.7T, Bloomberg gen-AI $1.3T, Sequoia's $600B gap, IDC ROI multipliers, actual lab revenue anchors, and the value/market/spend distinction. OUT: the forecasting track record analysis (link to 24), per-function impact numbers (link to 21 AI Impact by Business Function), bubble scenario (link to 24 Bubble or Boom).",
+      "key_points": [
+        "McKinsey MGI (Jun 2023, E1): gen AI could add $2.6-4.4T *annually* across 63 use cases — a potential-value estimate, not revenue; ~75% concentrates in customer ops, marketing/sales, software engineering, and R&D.",
+        "PwC (2017/2023, E1): AI could contribute $15.7T to global GDP by 2030; Bloomberg Intelligence (2023, E1): the generative-AI market reaches ~$1.3T by 2032. These are TAM/GDP models, wildly method-dependent — present as a spread, never averaged into a single figure.",
+        "The revenue-reality gap: Sequoia's David Cahn '$600B question' (Sep 2024, E1, updated from his 2023 '$200B' version) — the annual AI revenue needed to justify GPU capex vastly exceeds actual AI revenue (link Circular Financing).",
+        "Actual revenue anchors (E2, reporting): OpenAI ~$13B revenue in 2025; Anthropic run-rate in the low-tens-of-billions by 2026 (Epoch AI) — total app-layer revenue is a small fraction of the multi-hundred-billion annual capex.",
+        "ROI claims: IDC (Microsoft-commissioned, 2024, E1) 'about $3.70 returned per $1 spent on gen AI' is a vendor-sponsored estimate; contrast MIT NANDA's finding that ~95% of enterprise pilots showed no P&L impact (E2, link Pilot-to-Production Gap 23).",
+        "Reading rule: every market-size number here is E1 at best — check who paid for it, whether it measures TAM/GDP/value/revenue, the target year, and whether 'AI' means gen-AI or all AI; those definitions swing figures by 10x.",
+        "Core distinction (footnote): 'value/productivity' (economic surplus) != 'market/revenue' (vendor sales) != 'spend/capex' (buyer outlay); most headlines silently conflate all three."
+      ],
+      "links": [
+        "Reference - The AI Forecasting Track Record",
+        "Deep Dive - Bubble or Boom",
+        "Concept - The Pilot-to-Production Gap",
+        "Reference - AI Impact by Business Function",
+        "Concept - Value Capture Across the AI Stack",
+        "Breakdown - Frontier Lab Economics",
+        "Deep Dive - Circular Financing in the AI Buildout"
+      ]
+    },
+    {
+      "title": "Decision - Pricing Models for AI Products",
+      "type": "decision",
+      "level": "core",
+      "scope": "How to choose among seat/subscription, usage/token-metered, credit/hybrid, and outcome-based pricing given variable inference COGS and ongoing token deflation. IN: the four models, margin risk of each, real 2025-2026 repricing moves, why agents break flat pricing, the value-vs-cost decoupling rule. OUT: the deep treatment of outcome pricing (link to Outcome-Based Pricing), COGS mechanics (link to Unit Economics), gateway/metering tooling (link to 16).",
+      "key_points": [
+        "Four models: per-seat (GitHub Copilot ~$19/user/mo), pure usage ($/token API), credit/hybrid (ChatGPT and Cursor tiers plus overage), and outcome-based (Intercom Fin $0.99/resolution — E3, published) — each shifts COGS risk differently.",
+        "Seat pricing on a token backend is a trap: a heavy user on a flat seat can be gross-margin-negative; every major coding tool (Cursor, Claude Code, Windsurf, Replit) repriced or added usage caps in 2025 after power users blew through flat plans (E2, reporting).",
+        "Usage pricing aligns cost but repels buyers: unpredictable bills stall enterprise procurement, so hybrid (base subscription + metered overage) became the 2026 default for balancing predictability and margin (E1, Bessemer/OpenView pricing analyses).",
+        "Outcome pricing (Sierra, Intercom Fin) is emerging where the outcome is attributable and clearly cheaper than the human it replaces (link Support Deflection Economics 21, Outcome-Based Pricing) — but attribution and gaming are hard.",
+        "Deflation forces annual repricing: because token cost falls ~10x/yr (link Token Price Deflation), pricing locked to today's cost either bleeds margin (if priced under) or gets undercut (if priced over) within a year.",
+        "Agent and reasoning workloads break flat pricing hardest: one autonomous task can consume 10-100x a chat's tokens, so agent products trend toward usage or outcome pricing (link Agentic Coding in Production 20).",
+        "Non-obvious: price on value/outcome, meter on cost — the winning structure decouples what the customer pays for (a resolved ticket, a merged PR) from your token bill, so deflation flows into your margin rather than the customer's (link Unit Economics)."
+      ],
+      "links": [
+        "Concept - Unit Economics of LLM Products",
+        "Concept - Outcome-Based Pricing",
+        "Concept - Token Price Deflation",
+        "Concept - Support Deflection Economics",
+        "Deep Dive - Agentic Coding in Production",
+        "Breakdown - The Cursor Ramp",
+        "Playbook - Measuring AI ROI",
+        "Concept - Cost Engineering for LLM Applications"
+      ]
+    },
+    {
+      "title": "Playbook - Measuring AI ROI",
+      "type": "playbook",
+      "level": "core",
+      "scope": "An end-to-end procedure to measure the actual return of an AI deployment and avoid the vanity metrics that make most claimed ROI unfalsifiable. IN: baselining, fully-loaded cost, counterfactual attribution, Goodhart-resistant outcome metrics, the quality/liability tail, benchmark sanity-checks, quarterly recomputation. OUT: pilot-to-production organizational blockers (link to 23), per-function benchmark outcomes (link to 21), forecasting (link to 24).",
+      "key_points": [
+        "Step 1 — baseline before deploy: measure the human/legacy process cost and quality first; without a pre-AI baseline any post-hoc ROI is unfalsifiable, the #1 reason claimed 'ROI' is E0 (link Pilot-to-Production Gap 23).",
+        "Step 2 — fully-loaded cost: count inference tokens and retries, but also build/integration, prompt/eval maintenance, human oversight/review, and error-remediation — the hidden denominator that turns positive pilots negative (link Unit Economics).",
+        "Step 3 — attribution via counterfactual: use an A/B or holdout, not before/after (which confounds seasonality and other changes); METR's 2025 RCT found experienced devs were ~19% *slower* with AI while *believing* they were ~20% faster (E3) — self-reported productivity is unreliable (link METR Developer Slowdown RCT 20).",
+        "Step 4 — pick outcome metrics that survive Goodhart: resolved-and-stayed-resolved tickets, merged-and-not-reverted PRs — not 'messages sent' or 'suggestions accepted' (link The Evaluation Gap 23).",
+        "Step 5 — subtract the quality/liability tail: deflection that raises churn, AI code that raises defect/rework rates, and hallucination liability (link Hallucination Liability Incidents 23) all net against gross savings.",
+        "Sanity-check against the public spread: IDC/Microsoft '$3.70 per $1' (E1, vendor-sponsored) vs MIT NANDA '~95% of pilots, no P&L impact' (E2) — the gap is the point; the honest number is your own measured one.",
+        "Verification: recompute ROI on real production data quarterly with updated token prices (deflation helps) and updated usage (agents hurt) — a pilot ROI rarely survives contact with scale."
+      ],
+      "links": [
+        "Concept - Unit Economics of LLM Products",
+        "Concept - The Pilot-to-Production Gap",
+        "Breakdown - The METR Developer Slowdown RCT",
+        "Concept - The Evaluation Gap",
+        "Lore - Hallucination Liability Incidents",
+        "Reference - AI Impact by Business Function",
+        "Reference - Developer Productivity Studies",
+        "Concept - Token Price Deflation",
+        "Concept - Outcome-Based Pricing",
+        "Concept - LLM Observability and Tracing"
+      ]
+    },
+    {
+      "title": "Breakdown - Frontier Lab Economics",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "The revenue, burn, and capex reality of the frontier labs (OpenAI, Anthropic, Google DeepMind, xAI): the loss-making growth model, cost structure, revenue mix, capital raised, and compute commitments that dwarf revenue. IN: revenue/ARR figures, burn and path-to-profit, training vs inference COGS, enterprise-vs-consumer mix, mega-raises, the capex-revenue gap. OUT: forward compute-buildout/power scenarios (link to 24), the circular-financing structure (link to Circular Financing), scaling-law compute mechanics (link to 04).",
+      "key_points": [
+        "Revenue (E2, reporting): OpenAI ~$13B revenue in 2025 (up from ~$3.7B in 2024), ~$20B ARR entering 2026; Anthropic scaled from ~$1B ARR at end-2024 to a low-tens-of-billions run-rate by 2026, reportedly overtaking OpenAI's run-rate mid-2026 per Epoch AI.",
+        "Burn: OpenAI reportedly lost billions on ~$13B revenue and guides to continued multi-billion losses through the late 2020s, targeting profitability only ~2029-2030 (E2, reporting/company guidance) — growth is funded by capital, not cash flow.",
+        "Cost structure: compute dominates. Inference for free consumer users (hundreds of millions of ChatGPT users) is a massive COGS line, and each model generation raises training cost — frontier runs $100M-$1B+ (E1 estimates).",
+        "Revenue mix is diverging: Anthropic skews API/enterprise and coding (Claude Code), higher-margin; OpenAI skews consumer subscriptions — two genuinely different business models (E2, Forbes 2026 framing).",
+        "Capital raised is unprecedented: OpenAI's $40B round (Mar 2025, SoftBank-led) at ~$300B post was the largest private tech raise ever; Anthropic raised $13B at $183B (Sept 2025) — funding the burn (link Venture Funding Patterns).",
+        "Compute commitments exceed revenue by an order of magnitude: OpenAI signed hundreds of billions in Oracle/Nvidia/AMD/Broadcom compute deals against ~$13B revenue — that gap is the entire controversy (link Circular Financing, Bubble or Boom 24).",
+        "The Jevons bet: labs wager that cheaper tokens (link Token Price Deflation) expand usage faster than price falls, growing revenue despite deflation — plausible but unproven at the committed capex scale.",
+        "Non-obvious / what's dated: 'ARR' for these labs blends volatile consumer subscriptions and capacity-constrained API; press run-rate figures are E2 and move monthly — treat any single number as a snapshot, not audited truth."
+      ],
+      "links": [
+        "Concept - Token Price Deflation",
+        "Concept - Unit Economics of LLM Products",
+        "Deep Dive - Circular Financing in the AI Buildout",
+        "Reference - AI Venture Funding Patterns",
+        "Concept - Value Capture Across the AI Stack",
+        "Reference - AI Market Sizing Claims",
+        "Concept - GPU Depreciation and Compute Capex Accounting",
+        "Deep Dive - Bubble or Boom",
+        "Reference - The AI Forecasting Track Record",
+        "Breakdown - The Cursor Ramp",
+        "Deep Dive - Agentic Coding in Production",
+        "Concept - Scaling Laws",
+        "Reference - Model Genealogy"
+      ]
+    },
+    {
+      "title": "Breakdown - The Cursor Ramp",
+      "type": "breakdown",
+      "level": "advanced",
+      "scope": "Anysphere/Cursor as the fastest application-layer revenue ramp on record and a live case study in wrapper economics: what its numbers reveal about moats (workflow/context), COGS (third-party inference), pricing (repricings), and platform risk. IN: the revenue/valuation ramp, enterprise mix shift, the moat, the margin squeeze, platform risk, transferable lessons. OUT: agentic-coding mechanics (link to Agentic Coding in Production 20), coding-productivity evidence (link to 20), model-provider economics (link to Frontier Lab Economics).",
+      "key_points": [
+        "Ramp (E2, TechCrunch/reporting): Cursor hit ~$100M ARR by Jan 2025 (~2 years from launch) and $500M+ ARR with a $9.9B valuation by June 2025 — among the fastest application-layer revenue ramps ever recorded.",
+        "Enterprise shift: revenue moved from individual-developer subscriptions toward enterprise seats through 2025-2026 (E2) — the classic PLG-to-enterprise motion, where durability comes from org-level lock-in rather than the model.",
+        "The moat is workflow + context, not the model: Cursor runs on Anthropic/OpenAI frontier models any competitor can call; defensibility is codebase indexing, editor habit, and integrations (link Moats, Build vs Buy vs Wrap).",
+        "COGS reality: as a wrapper on third-party inference, Cursor's gross margin is squeezed between subscription revenue and model-API bills — it repriced and added usage limits in 2025 when heavy agent use blew past flat plans (E2, link Pricing Models, Unit Economics).",
+        "Platform risk is live: it sells on top of Anthropic while Anthropic ships Claude Code, and OpenAI pursued a rival in the Windsurf saga (2025) — the model vendor is simultaneously supplier and competitor (link AI Wrapper Graveyard).",
+        "What to steal: pick a high-frequency professional workflow, own the context/data layer around the model, and convert PLG love into enterprise contracts before the base-model vendor commoditizes the feature.",
+        "Non-obvious: Cursor is both the counterexample to 'wrappers can't win' AND proof that 'wrapper margins are structurally thin' — a fast top line on someone else's compute is not the same as a durable profit pool (link Value Capture)."
+      ],
+      "links": [
+        "Concept - Moats in the AI Application Layer",
+        "Decision - Build vs Buy vs Wrap",
+        "Concept - Unit Economics of LLM Products",
+        "Decision - Pricing Models for AI Products",
+        "Lore - AI Wrapper Graveyard",
+        "Concept - Value Capture Across the AI Stack",
+        "Breakdown - Frontier Lab Economics",
+        "Deep Dive - Agentic Coding in Production",
+        "Breakdown - GitHub Copilot's Measured Productivity Impact",
+        "Concept - The Capability-Reliability Gap",
+        "Playbook - Picking Profitable AI Use Cases",
+        "Breakdown - vLLM"
+      ]
+    },
+    {
+      "title": "Reference - AI Venture Funding Patterns",
+      "type": "reference",
+      "level": "advanced",
+      "scope": "A lookup of the AI funding landscape: mega-rounds, valuations, VC concentration, revenue multiples, strategic/vendor money, and secondaries. IN: the biggest raises and valuations, the 'AI is most of VC' stat, forward-multiple norms, how strategic compute money blurs 'funding', tender/secondary dynamics, the reading rules. OUT: circular vendor-financing analysis (link to Circular Financing), bubble scenario (link to 24), lab burn detail (link to Frontier Lab Economics).",
+      "key_points": [
+        "Mega-rounds (E2, reporting): OpenAI $40B at ~$300B post (Mar 2025, SoftBank-led), the largest private tech raise in history; Anthropic $3.5B at $61.5B (Mar 2025) then $13B at $183B (Sept 2025); xAI multi-billion raises at ~$50B+ — valuations set as much by strategic/compute partners as by VCs.",
+        "Concentration: AI captured the majority of US VC dollars in 2025 (E1/E2, PitchBook/CB Insights), with a handful of foundation-model labs absorbing most of it — simultaneously starving and inflating the rest of the market.",
+        "Revenue multiples: labs priced at ~10-30x forward run-rate (E1) — richer than SaaS norms, justified by growth rate and winner-take-most bets rather than profitability (link Frontier Lab Economics).",
+        "Strategic/vendor money blurs the line: Nvidia, Microsoft, Amazon, and Google invest in the same labs that buy their compute (link Circular Financing) — some 'funding' is effectively pre-purchased GPU capacity.",
+        "Secondaries and tenders: employee tender offers (OpenAI, Anthropic, Anysphere) convert paper value to cash without an IPO — a marker of a private-market-heavy, IPO-light cycle (E2).",
+        "Reading rule: a private 'valuation' is the price of the last (often strategic, structured) share, not a market-clearing price — treat lab valuations as E1 signals, not audited worth.",
+        "Footnote: 'raised' != 'revenue' != 'valuation'; and because much 2025-26 capital is earmarked for compute, a raise is often a spending commitment routed straight to the infra layer (link Value Capture)."
+      ],
+      "links": [
+        "Breakdown - Frontier Lab Economics",
+        "Deep Dive - Circular Financing in the AI Buildout",
+        "Concept - Value Capture Across the AI Stack",
+        "Reference - AI Market Sizing Claims",
+        "Deep Dive - Bubble or Boom",
+        "Concept - GPU Depreciation and Compute Capex Accounting",
+        "Concept - The Pilot-to-Production Gap",
+        "Reference - Where Real AI Knowledge Lives"
+      ]
+    },
+    {
+      "title": "Concept - GPU Depreciation and Compute Capex Accounting",
+      "type": "concept",
+      "level": "advanced",
+      "scope": "How hyperscalers and neoclouds account for GPU capex, why depreciation-schedule choices swing reported AI profits, and the live debate over whether those schedules overstate earnings. IN: the depreciation mechanism, 4-to-6-year extensions, Burry's critique and the counter, the waterfall model, GPU-backed debt, detection signals. OUT: forward capex/power buildout scenarios (link to 24), the circular-financing structure (link to Circular Financing), GPU hardware internals (link to 08).",
+      "key_points": [
+        "The mechanism: GPUs are capitalized and depreciated over an assumed useful life; lengthening that life lowers annual depreciation and raises reported profit. Microsoft moved server/GPU depreciation from ~4 to 6 years and Meta to ~5.5 years (E2, 10-K disclosures).",
+        "Burry's critique (Nov 2025, E2, his own estimate): frontier GPUs economically obsolesce in ~2-3 years (Nvidia's annual Hopper->Blackwell->Rubin cadence), so 5-6yr schedules understate depreciation by ~$176B across the industry 2026-2028, inflating AI-era earnings.",
+        "The counter (E1): the 'waterfall' — chips age out of frontier *training* in 18-36 months but keep earning on cheaper inference and older workloads for years, so a long book life is not fraud if the asset genuinely earns over it.",
+        "Why it matters economically: depreciation is the single largest cost of the AI buildout; if understated, hyperscaler AI margins and the entire capex-justification math are rosier than reality (link Market Sizing Claims, Circular Financing).",
+        "Neocloud leverage: GPU-backed debt financing (CoreWeave et al.) assumes multi-year GPU cash flows to service loans — shorten the real useful life and the debt-coverage math breaks (E2).",
+        "Detection signal: watch for depreciation-schedule changes disclosed in 10-Ks around capex ramps, and the widening gap between capex outflow and reported operating income (link Frontier Lab Economics).",
+        "Non-obvious: the same physical GPU can be an appreciating scarce asset (during shortage) and a rapidly depreciating one (once the next gen ships and supply loosens) — the accounting picks one story while reality is regime-dependent, and the bull/bear case hinges on which regime holds (link Bubble or Boom 24)."
+      ],
+      "links": [
+        "Breakdown - Frontier Lab Economics",
+        "Deep Dive - Circular Financing in the AI Buildout",
+        "Reference - AI Market Sizing Claims",
+        "Reference - AI Venture Funding Patterns",
+        "Deep Dive - Bubble or Boom",
+        "Concept - Value Capture Across the AI Stack",
+        "Reference - The AI Forecasting Track Record",
+        "Concept - Token Price Deflation",
+        "Concept - The Capability-Reliability Gap",
+        "Concept - GPU Memory Hierarchy",
+        "Concept - Tensor Cores"
+      ]
+    },
+    {
+      "title": "Deep Dive - Circular Financing in the AI Buildout",
+      "type": "deep-dive",
+      "level": "frontier",
+      "scope": "The interlocking money loops of the 2025-2026 AI buildout and the debate over whether they are prudent infrastructure capex or demand manufactured by vendor financing. IN: the Nvidia-OpenAI-Oracle-CoreWeave loops, Stargate, vendor-financing analogy to the telecom bust, the $600B gap, systemic concentration risk, the depreciation tie-in, and the one number that settles it. OUT: bubble scenario/probabilities (link to 24 Bubble or Boom), depreciation accounting (link to GPU Depreciation), scaling-law compute demand (link to 04).",
+      "key_points": [
+        "The pattern: Nvidia committed to invest up to ~$100B in OpenAI (Sept 2025 announcement, E2) while OpenAI commits hundreds of billions to buy Nvidia-powered compute via Oracle, CoreWeave, and Microsoft — capital and chips loop among the same few balance sheets.",
+        "More loops: Nvidia is both supplier to and investor in CoreWeave; the OpenAI-Oracle ~$300B compute deal and Project Stargate ($500B, $100B initial, announced Jan 2025) route capital from labs to clouds to Nvidia (E2, announcements — actual spend unverified).",
+        "The bear read: vendor financing can inflate demand — a supplier funding its customer's purchases manufactures revenue that isn't end-demand; the analogy is Lucent/Nortel telecom vendor financing before the 2001 bust (E1, analyst analogy).",
+        "The bull read: this is how capital-intensive infrastructure has always been built (railroads, telecom, cloud) — strategic investment de-risks buildout ahead of demand, and circular does not mean fraudulent (E1).",
+        "The gap that drives the debate: Sequoia's Cahn '$600B question' (E1) — committed capex implies AI revenue that dwarfs today's tens-of-billions of actual lab revenue (link Frontier Lab Economics, Market Sizing Claims).",
+        "Systemic risk is concentration: Nvidia, a few labs, and 3-4 hyperscalers are cross-exposed, so a demand shortfall or a DeepSeek-style efficiency shock (Nvidia -$589B in a single day, Jan 2025, E3) transmits across all of them at once.",
+        "Depreciation tie-in: the loops assume multi-year GPU cash flows to service GPU-backed debt; if useful life is shorter than booked (link GPU Depreciation), the financing math tightens fast.",
+        "Non-obvious: whether it is 'circular financing' or 'ordinary capex' cannot be read off the deal structure — it depends entirely on whether real end-user demand shows up to consume the compute; the identical transactions are prudent or a bubble depending on a number nobody yet has (link Bubble or Boom 24)."
+      ],
+      "links": [
+        "Breakdown - Frontier Lab Economics",
+        "Reference - AI Venture Funding Patterns",
+        "Concept - GPU Depreciation and Compute Capex Accounting",
+        "Reference - AI Market Sizing Claims",
+        "Concept - Value Capture Across the AI Stack",
+        "Concept - Token Price Deflation",
+        "Lore - AI Wrapper Graveyard",
+        "Deep Dive - Bubble or Boom",
+        "Reference - The AI Forecasting Track Record",
+        "Concept - The AGI Timeline Debate",
+        "Reference - The 2026 Navigation Cheatsheet",
+        "Concept - The Pilot-to-Production Gap",
+        "Concept - Scaling Laws"
+      ]
+    },
+    {
+      "title": "Concept - Outcome-Based Pricing",
+      "type": "concept",
+      "level": "frontier",
+      "scope": "Pricing AI by delivered result (per resolution, per successful task) instead of per seat or token, and why agents make it newly possible and newly hard. IN: the definition, real deployments, why agents enable it, the attribution/verification problem, margin alignment under deflation, gaming/adverse selection, where it fails. OUT: the general pricing decision (link to Pricing Models), support-deflection unit math (link to 21 Support Deflection Economics), agent mechanics (link to 10).",
+      "key_points": [
+        "Definition: charge per verified outcome (resolved ticket, booked meeting, merged PR), not per seat or token — the vendor absorbs token COGS and bears delivery risk (link Unit Economics).",
+        "Real pricing (E2/E3, published): Intercom Fin $0.99 per resolution; Sierra outcome-based with per-contract undisclosed rates; Salesforce Agentforce launched around $2/conversation before shifting toward flexible/credit models — the market is actively experimenting.",
+        "Why now: agents can complete whole tasks autonomously, so the sellable unit becomes the outcome (a labor substitute) rather than a tool — reframing AI as 'selling work' priced against the human it replaces (link Support Deflection Economics 21, Agentic Coding in Production 20).",
+        "The attribution problem: you must define and verify the outcome and prove the agent (not a human, not luck) caused it — disputes over what counts as a 'resolution' are the central commercial friction (link The Evaluation Gap 23).",
+        "Margin alignment: outcome pricing decouples price (value) from cost (tokens), so token deflation accrues to vendor margin — the structurally best model in a deflationary world (link Token Price Deflation, Pricing Models).",
+        "Gaming and adverse selection: customers route only hard cases to a per-outcome agent, and agents can be tuned to over-declare weak 'resolutions' — both sides optimize the metric, so Goodhart-resistant outcome definitions are essential.",
+        "Non-obvious: outcome pricing only works where the outcome is cheap to verify and clearly cheaper than the human alternative; where verification is costly or quality is contested (legal, medical advice, liability — link Hallucination Liability Incidents 23), seat/usage pricing persists."
+      ],
+      "links": [
+        "Decision - Pricing Models for AI Products",
+        "Concept - Unit Economics of LLM Products",
+        "Concept - Support Deflection Economics",
+        "Concept - Token Price Deflation",
+        "Concept - Moats in the AI Application Layer",
+        "Lore - AI Wrapper Graveyard",
+        "Deep Dive - Agentic Coding in Production",
+        "Concept - The Evaluation Gap",
+        "Concept - Cost Engineering for LLM Applications"
+      ]
+    },
+    {
+      "title": "Lore - AI Wrapper Graveyard",
+      "type": "lore",
+      "level": "unicorn",
+      "scope": "War stories of application-layer companies erased or maimed by platform shifts, and the folklore of the 'thin wrapper' — plus what the survivors did differently. IN: Jasper vs ChatGPT, the 'GPT-4 killed my startup' wave, the Windsurf saga, the $20/month ceiling, the survivor pattern, honest evidence status. OUT: moats theory (link to Moats), the build/buy/wrap decision (link to Build vs Buy vs Wrap), enterprise-adoption blockers (link to 23).",
+      "key_points": [
+        "Jasper (E2, reporting): raised $125M at a $1.5B valuation in Oct 2022; ChatGPT launched Nov 30, 2022; Jasper later cut its internal valuation and revenue reportedly fell from a ~$120M peak — the canonical 'thin wrapper' cautionary tale.",
+        "OpenAI's demo-ware effect: successive releases (GPTs, structured output, code interpreter, Sora) vaporized whole categories of wrappers ('PDF chat', 'AI writer') overnight — folklore-but-real: never build a company on a feature the platform will ship for free.",
+        "Windsurf saga (2025, E2): a reported OpenAI acquisition of the coding startup collapsed, Google 'reverse-acquihired' the leadership and licensed the tech, and Cognition acquired the remainder — a live lesson that even successful coding wrappers are pawns in the labs' consolidation.",
+        "Survivor pattern: the ones that lived (Cursor, Harvey, Perplexity) owned a workflow, proprietary data/context, or distribution — not a prompt (link Moats, The Cursor Ramp).",
+        "The '$20/month ceiling': consumer wrappers competing with ChatGPT's $20 tier lost all pricing power once the base product absorbed their use case — pricing power requires a moat the base model lacks (link Pricing Models).",
+        "Evidence status: the Jasper valuation cut and the Windsurf saga are well-reported (E2); specific revenue figures and 'killed by GPT-X' attributions are often founder/press narrative (E1) — directionally true, numerically soft.",
+        "The durable lesson operators repeat: 'don't build a business in the model's roadmap' — assume every capability you wrap will be commoditized, and ask what you still own when it is (link Build vs Buy vs Wrap, Value Capture)."
+      ],
+      "links": [
+        "Concept - Moats in the AI Application Layer",
+        "Decision - Build vs Buy vs Wrap",
+        "Breakdown - The Cursor Ramp",
+        "Concept - Value Capture Across the AI Stack",
+        "Decision - Pricing Models for AI Products",
+        "Gotchas - Enterprise AI Adoption",
+        "Deep Dive - Agentic Coding in Production",
+        "Reference - Model Genealogy"
+      ]
+    }
+  ]
+}
