@@ -4,9 +4,9 @@ aliases: [IOI patching, resid_pre patching hook]
 summary: "Runnable TransformerLens code that patches GPT-2 small's residual stream on the IOI task to heatmap the name-mover heads."
 ---
 
-**What it does:** implements [[Concept - Activation Patching]] end to end on the classic IOI (indirect-object identification) task — caches clean-run activations, patches them into a corrupted run at every `(layer, position)`, and renders a heatmap of the normalized logit-difference recovery.
+**What it does:** runs [[Concept - Activation Patching]] end to end on the classic IOI (indirect-object identification) task. It caches clean-run activations, patches them into a corrupted run at every `(layer, position)`, and draws a heatmap of normalized logit-difference recovery.
 **Dependencies:** `transformer_lens>=1.17`, `torch>=2.2`, `matplotlib` (any recent version). Runs on CPU in well under a minute for GPT-2 small (12 layers, `d_model=768`).
-**Expected output:** a `[12, n_pos]` heatmap where the score climbs toward 1 (clean-recovering) at the final token position from around layer 7-9 onward — the late-layer name-mover heads reported in Wang et al. 2022's IOI circuit — and stays near 0 (still corrupted) almost everywhere else.
+**Expected output:** a `[12, n_pos]` heatmap. At the final token position the score climbs toward 1 (clean-recovering) from around layer 7-9 onward, which matches the late-layer name-mover heads in Wang et al. 2022's IOI circuit. Almost everywhere else it stays near 0 (still corrupted).
 
 ```python
 import torch
@@ -77,10 +77,13 @@ plt.savefig("patching_heatmap.png")
 
 ## Why it's written this way
 
-- **Patches `resid_pre`, not individual head outputs, for the first pass.** The residual stream is the shared channel every component reads from and writes to, so a `resid_pre` sweep gives a coarse `[layer x position]` map of *where* the relevant computation lives at minimal code complexity; once a hot region shows up, the natural next step (not shown here, to keep this snippet minimal) is to re-run the same loop patching `attn_out`/`z` at just those layers to attribute the effect to specific heads.
-- **Normalizes against clean and corrupted baselines.** Dividing by `clean_diff - corrupted_diff` turns an otherwise model- and prompt-specific logit-difference number into a 0-to-1 recovery score that's comparable across layers, prompts, and even different models — without this, a heatmap's raw values are not interpretable at a glance.
-- **Uses logit difference, not raw probability, as the metric.** Probability passes through softmax, which is nonlinear and saturates near 0 and 1; logit difference is linear in the unembedding matrix, so it stays well-behaved and additive across the many small patches being compared, which is what makes a clean heatmap possible instead of a noisy one.
-- **Runs one prompt pair for clarity, but production analysis should not stop there.** A single minimal pair can pick up an idiosyncrasy of that specific sentence rather than the general mechanism; real circuit-localization work averages this exact procedure over many prompt pairs sharing the same template to wash out per-prompt noise, and reaches for [[Concept - Attribution Graphs|attribution patching]] instead of this per-component loop once the model is too large for a full `layer x position` sweep to be affordable.
+The first pass patches `resid_pre`, not individual head outputs. Every component reads from and writes to the residual stream, so a `resid_pre` sweep gives a coarse `[layer x position]` map of *where* the computation happens with very little code. Once a hot region shows up, re-run the same loop patching `attn_out`/`z` at just those layers to pin the effect on specific heads. That step is left out to keep the snippet small.
+
+Dividing by `clean_diff - corrupted_diff` normalizes against both baselines. The raw logit difference is specific to the model and prompt; the normalized version is a 0-to-1 recovery score you can compare across layers, prompts and even models. Without it you can't read the heatmap's raw values at a glance.
+
+The metric is logit difference, not probability. Probability goes through softmax, which is nonlinear and saturates near 0 and 1. Logit difference is linear in the unembedding matrix, so it stays additive across the many small patches being compared. That's what gives you a clean heatmap and not a noisy one.
+
+One prompt pair is for clarity. Don't stop there in real analysis. A single minimal pair can pick up a quirk of that one sentence instead of the general mechanism. Real circuit-localization work averages the same procedure over many prompt pairs from one template to wash out per-prompt noise. When the model is too large to afford a full `layer x position` sweep, switch from this per-component loop to [[Concept - Attribution Graphs|attribution patching]].
 
 ## Connections
 - [[Concept - Activation Patching]] — the theory and metric design (denoising, corruption choice, confounds) this snippet is a direct implementation of.

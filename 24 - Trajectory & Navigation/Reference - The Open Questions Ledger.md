@@ -6,7 +6,7 @@ summary: "The genuinely unresolved questions that decide the AI trajectory — e
 
 # Reference - The Open Questions Ledger
 
-*Every row is E0/E1 by construction — these are the questions that are open. The value here is stating each one crisply and naming the specific evidence that would move it, so you can update instead of argue. Date-stamped mid-2026; expected to churn fast. The deep treatment of each lives in the linked owning note.*
+*Every row is E0/E1 by construction, since these are the open questions. The point is to state each one crisply and name the specific evidence that would move it, so you can update instead of argue. Date-stamped mid-2026 and expected to churn fast. Each gets its deep treatment in the linked owning note.*
 
 ## The ledger
 
@@ -21,10 +21,10 @@ summary: "The genuinely unresolved questions that decide the AI trajectory — e
 
 ## How to read this ledger
 
-- **Nothing here is settled.** A row marked E1 is not a soft E3 — it is a genuine unknown where confident assertion (either way) is the error. Treat anyone who states row 3, 4, or 6 as *resolved* as selling something.
-- **The rows are coupled.** The data wall (1) feeds takeoff (4) feeds the timeline (6); the reliability wall (2) gates the labor effect (5) and the bubble (3). A move in one propagates — e.g. if reliability (2) is structural, takeoff (4) stalls and "boom" (3) weakens.
-- **Watch the resolving evidence, not the debate.** Each row names one concrete thing to monitor. Updating on that beats accumulating more opinions.
-- **Provenance discount.** Forecasts carrying a fundraising or product incentive (inside-lab short timelines, vendor deflection numbers) get discounted; aggregators with track records get weighted up — see [[Reference - The AI Forecasting Track Record]].
+- **Nothing here is settled.** An E1 row isn't a soft E3. It's a real unknown, and confident assertion either way is the error. Anyone who calls row 3, 4, or 6 *resolved* is selling something.
+- **The rows are coupled.** The data wall (1) feeds takeoff (4), which feeds the timeline (6). The reliability wall (2) gates the labor effect (5) and the bubble (3). A move in one propagates: if reliability (2) is a hard limit, takeoff (4) stalls and "boom" (3) weakens.
+- **Watch the resolving evidence, not the debate.** Each row names one concrete thing to monitor. Updating on it beats collecting more opinions.
+- **Provenance discount.** Forecasts with a fundraising or product incentive (inside-lab short timelines, vendor deflection numbers) get discounted, and aggregators with track records get weighted up; see [[Reference - The AI Forecasting Track Record]].
 
 ## Connections
 

@@ -6,77 +6,77 @@ summary: "The masking, scaling, dtype, reshape, RoPE, and GQA bugs that let a ha
 
 # Gotchas - Implementing Attention
 
-The bugs that let a hand-implemented [[Concept - Attention Mechanism|attention]] layer *run*, produce a plausible-looking loss curve, and still be wrong. None of these throw an exception; all of them cost days of misdirected debugging elsewhere in the stack. Ordered by how much pain they cause, worst first.
+These are the bugs that let a hand-written [[Concept - Attention Mechanism|attention]] layer *run*, produce a plausible loss curve, and still be wrong. None of them throws an exception. Each one costs days of debugging in the wrong part of the stack. Worst first.
 
-## 1. Causal mask leakage — loss looks great, eval is garbage
+## 1. Causal mask leakage: loss looks great, eval is garbage
 
-**Symptom:** training loss drops faster and lower than the model size and data should allow — implausibly good, often within the first few hundred steps at a scale where that shouldn't happen — while downstream generation or held-out eval is clearly broken.
+**Symptom:** training loss drops faster and lower than the model size and data should allow, often within the first few hundred steps at a scale where that shouldn't happen. Downstream generation or held-out eval is clearly broken.
 
-**Cause:** the causal mask is built with the wrong triangle or an off-by-one on the diagonal — e.g. masking $j \geq i$ instead of $j > i$ (hiding a token from itself) is merely wasteful, but the dangerous direction is leaving $j > i$ unmasked, letting position $i$ see future tokens. Since training targets are the input sequence shifted by one, an unmasked future position lets the model read its own answer directly off the input — textbook label leakage, and the loss curve looks fantastic while doing it.
+**Cause:** the causal mask uses the wrong triangle or is off by one on the diagonal. Masking $j \geq i$ instead of $j > i$ hides a token from itself, which only wastes capacity. The dangerous direction is leaving $j > i$ unmasked, so position $i$ sees future tokens. Training targets are the input shifted by one, so an unmasked future position lets the model read its answer straight off the input. That's textbook label leakage, and the loss curve looks fantastic the whole time.
 
-**Fix:** set $S_{ij} = -\infty$ for $j > i$ before the softmax, keeping the diagonal ($j=i$) visible; verify against a tiny hand-checked example before trusting it on real data.
+**Fix:** set $S_{ij} = -\infty$ for $j > i$ before the softmax and keep the diagonal ($j=i$) visible. Check it on a tiny hand-worked example before trusting it on real data.
 
-**Detection:** a causality self-test — perturb a future token in the input and confirm the output at every earlier position is bit-for-bit (or numerically) unchanged. A loss-at-init or early-training curve that looks too good for the model/data scale is the first clue; run the self-test before spending compute on a real run.
+**Detection:** a causality self-test. Perturb a future token in the input and confirm the output at every earlier position is bit-for-bit (or numerically) unchanged. The first clue is a loss-at-init or early-training curve too good for the model/data scale. Run the self-test before spending compute on a real run.
 
 ## 2. RoPE ported to the wrong dims, split, or base
 
-**Symptom:** short-context behavior looks fine; quality degrades sharply at longer context, or a checkpoint ported between frameworks (e.g. a custom implementation loading Hugging Face weights) silently underperforms with no error.
+**Symptom:** short-context behavior is fine, but quality degrades sharply at longer context. Or a checkpoint ported between frameworks (a custom implementation loading Hugging Face weights, say) underperforms with no error.
 
-**Cause:** [[Concept - Rotary Position Embeddings (RoPE)|RoPE]] has two incompatible conventions for pairing dimensions (interleaved vs. half-split "rotate_half"), and mixing them between a reference checkpoint and your implementation silently garbles the rotation. Related variants of the same bug: applying the rotation before the head split instead of after, on the wrong axis, or with a `base`/`theta` that doesn't match the checkpoint it was trained with.
+**Cause:** [[Concept - Rotary Position Embeddings (RoPE)|RoPE]] has two incompatible ways of pairing dimensions: interleaved and half-split "rotate_half". Mixing them between a reference checkpoint and your code garbles the rotation without complaint. Variants of the same bug: rotating before the head split instead of after, rotating on the wrong axis, or using a `base`/`theta` that doesn't match the one the checkpoint was trained with.
 
-**Fix:** match the exact convention your weights were trained under — half-split `rotate_half` is the modern default (LLaMA, Hugging Face); apply the rotation only to Q and K, only after the head reshape, on the $d_{head}$ axis, never to V.
+**Fix:** match the convention your weights were trained under. Half-split `rotate_half` is the modern default (LLaMA, Hugging Face). Rotate only Q and K, never V, and only after the head reshape, on the $d_{head}$ axis.
 
-**Detection:** the empirical relative-position check — the dot product of rotated $q_m$ and $k_n$ should depend only on $(m-n)$, not on $m$ and $n$ individually — and diff logits token-for-token against a reference implementation using the [[Playbook - Numerically Matching a Reference Implementation|numerical-matching playbook]] rather than trusting an aggregate loss number.
+**Detection:** check relative position empirically: the dot product of rotated $q_m$ and $k_n$ should depend only on $(m-n)$, not on $m$ and $n$ separately. Then diff logits token by token against a reference using the [[Playbook - Numerically Matching a Reference Implementation|numerical-matching playbook]]. An aggregate loss number won't show this.
 
 ## 3. GQA/MQA `repeat` vs `repeat_interleave` mis-grouping
 
-**Symptom:** the model trains and metrics look "close enough" to a reference but are consistently a bit worse; a checkpoint loaded from a different framework underperforms its published numbers with no crash.
+**Symptom:** the model trains and metrics are "close enough" to a reference but consistently a bit worse. A checkpoint loaded from another framework underperforms its published numbers without crashing.
 
-**Cause:** expanding $n_{kv}$ KV heads up to $n_{heads}$ query heads requires tiling each KV head across a contiguous block of query heads. Using `repeat()` (which tiles the whole tensor) where the reference uses `repeat_interleave()` (which tiles each element) — or vice versa — changes which query heads end up sharing which KV head, silently mis-grouping keys and values without any shape error, since both produce a tensor of the correct size.
+**Cause:** expanding $n_{kv}$ KV heads to $n_{heads}$ query heads means tiling each KV head across a contiguous block of query heads. `repeat()` tiles the whole tensor; `repeat_interleave()` tiles each element. Using one where the reference uses the other changes which query heads share which KV head. Both produce a tensor of the correct size, so there's no shape error to catch it.
 
-**Fix:** write out the exact query-head-to-KV-head mapping the reference implementation uses before writing the expansion code, and match it precisely (`repeat_interleave` along the head dimension is the common convention, per [[Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)|GQA/MQA]]).
+**Fix:** write out the reference's query-head-to-KV-head mapping before writing the expansion code, and match it. `repeat_interleave` along the head dimension is the common convention (see [[Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)|GQA/MQA]]).
 
-**Detection:** a unit test with distinguishable, per-head-identifiable KV values (e.g. each KV head filled with its own index) confirms every query head attends to the KV head the mapping intends.
+**Detection:** a unit test with KV values you can tell apart per head (fill each KV head with its own index, for example) confirms every query head attends to the KV head the mapping intends.
 
 ## 4. Head reshape/transpose scrambles heads while shapes still check out
 
-**Symptom:** no crash, no shape mismatch, loss trains but plateaus at noticeably worse quality than an equivalent reference implementation.
+**Symptom:** no crash, no shape mismatch. Loss trains but plateaus noticeably worse than an equivalent reference implementation.
 
-**Cause:** splitting `[B, T, d_model]` into per-head form requires reshaping to `[B, T, H, d_head]` *then* transposing to `[B, H, T, d_head]`. Going straight from `[B, T, d_model]` to a `.view(B, H, T, d_head)` reinterprets the underlying memory layout incorrectly, since `d_model` is contiguous as `H` chunks of `d_head` in row-major order but the target shape puts `H` before `T` — this mixes features from different positions into the same "head," a bug that produces plausible-looking but wrong output.
+**Cause:** splitting `[B, T, d_model]` into heads means reshaping to `[B, T, H, d_head]` *then* transposing to `[B, H, T, d_head]`. Going straight to `.view(B, H, T, d_head)` misreads the memory layout. `d_model` is laid out as `H` contiguous chunks of `d_head` in row-major order, but the target shape puts `H` before `T`. Features from different positions end up in the same "head", and the output looks plausible but is wrong.
 
-**Fix:** always reshape to `[B, T, H, d_head]` first, then `.transpose(1, 2)` (or `.permute`) to get `[B, H, T, d_head]`; never `.view()` directly across a dimension reordering.
+**Fix:** reshape to `[B, T, H, d_head]` first, then `.transpose(1, 2)` (or `.permute`) to get `[B, H, T, d_head]`. Never `.view()` across a dimension reordering.
 
-**Detection:** a per-head identity unit test — zero out all heads' weights except one, set that one to identity, and confirm the output only reflects that head's designated slice of the input.
+**Detection:** a per-head identity test. Zero every head's weights except one, set that one to identity, and confirm the output only reflects that head's slice of the input.
 
 ## 5. Padding interacts badly with the causal mask and RoPE position indices
 
-**Symptom:** batched generation quality is noticeably worse than single-sequence generation of the identical prompt; outputs change depending on what else is in the batch.
+**Symptom:** batched generation is noticeably worse than generating the same prompt alone. Outputs change depending on what else is in the batch.
 
-**Cause:** two bugs share a root cause. During training, if the padding mask isn't combined (ANDed) with the causal mask, tokens can attend to pad positions and pad-position gradients can leak into real tokens. At inference, left-padding (the common choice for batched generation, so all sequences end at the same index) shifts every real token's position within the tensor — if position indices are computed as a raw `arange` instead of derived from the attention mask, RoPE rotates every token by the wrong angle, corrupting position information for exactly the padded sequences in the batch.
+**Cause:** two bugs with one root. In training, if the padding mask isn't ANDed with the causal mask, tokens can attend to pad positions and pad-position gradients leak into real tokens. At inference, left-padding (the usual choice for batched generation, so every sequence ends at the same index) shifts each real token's position in the tensor. If position indices come from a raw `arange` instead of the attention mask, RoPE rotates every token by the wrong angle, and only the padded sequences in the batch get corrupted position information.
 
-**Fix:** always combine the padding mask with the causal mask via a logical AND before applying $-\infty$; compute `position_ids` as a cumulative sum over the attention mask (so pad tokens consume no position slots) rather than a plain `arange`.
+**Fix:** combine the padding mask with the causal mask via logical AND before applying $-\infty$. Compute `position_ids` as a cumulative sum over the attention mask, so pad tokens take no position slots, instead of a plain `arange`.
 
-**Detection:** run the same real sequence once alone and once inside a padded batch (with different padding amounts) and confirm the outputs for that sequence match; any divergence means masking or position indices are wrong.
+**Detection:** run one real sequence alone and again inside padded batches with different padding amounts. Its outputs should match. Any divergence means the masking or position indices are wrong.
 
 ## 6. Missing or wrong attention scale collapses entropy
 
-**Symptom:** loss plateaus at a stubbornly high value; per-head attention weights look nearly one-hot (or, less commonly, perfectly uniform) from very early in training.
+**Symptom:** loss plateaus at a stubbornly high value. Per-head attention weights look nearly one-hot (or, less commonly, perfectly uniform) from very early in training.
 
-**Cause:** omitting the $1/\sqrt{d_{head}}$ scale, or — a common copy-paste bug when multi-head splitting is bolted onto a single-head prototype — scaling by $d_{model}$ instead of $d_{head}$. Since $\text{Var}(S_{ij}) \propto d_k$, an unscaled or under-scaled score matrix has inflated variance, which pushes softmax into a saturated, near-one-hot regime and starves gradient flow through all but a handful of positions.
+**Cause:** the $1/\sqrt{d_{head}}$ scale is missing, or the code scales by $d_{model}$ instead of $d_{head}$. The second is a common copy-paste bug when multi-head splitting gets bolted onto a single-head prototype. Since $\text{Var}(S_{ij}) \propto d_k$, an unscaled or under-scaled score matrix has inflated variance. Softmax saturates into a near-one-hot regime and gradient flows through only a handful of positions.
 
-**Fix:** scale scores by $1/\sqrt{d_{head}}$, computed per-head, after the $QK^T$ product and before the softmax — not by $d_{model}$, and not once globally if heads have different widths.
+**Fix:** scale scores by $1/\sqrt{d_{head}}$, per head, after the $QK^T$ product and before the softmax. Don't use $d_{model}$, and don't scale once globally if heads have different widths.
 
-**Detection:** log per-head attention entropy during the first few hundred steps; a scale bug shows up as entropy collapsing toward zero almost immediately, rather than the gradual sharpening a healthy run shows over many steps.
+**Detection:** log per-head attention entropy over the first few hundred steps. With a scale bug, entropy collapses toward zero almost immediately. A healthy run sharpens gradually over many steps.
 
 ## 7. Softmax computed in bf16/fp16 loses probability mass
 
-**Symptom:** intermittent NaNs in the loss, or — more insidiously — no crash at all but a small, persistent quality gap against a reference implementation that never shows up in the aggregate loss number.
+**Symptom:** intermittent NaNs in the loss. Or, worse, no crash at all, just a small persistent quality gap against a reference that never shows in the aggregate loss.
 
-**Cause:** computing softmax directly in low precision lets the exponentials of large (unmasked, unscaled-relative) scores overflow bf16/fp16's reduced dynamic range, and the running sum-of-exponentials in the denominator loses precision during accumulation — silently dropping probability mass rather than crashing outright. This is exactly the numerical structure [[Deep Dive - FlashAttention|FlashAttention]]'s kernel manages explicitly with fp32 accumulators while never materializing the full score matrix.
+**Cause:** in low precision, the exponentials of large (unmasked, unscaled-relative) scores overflow the reduced dynamic range of bf16/fp16, and the running sum of exponentials in the denominator loses precision as it accumulates. Probability mass disappears without a crash. [[Deep Dive - FlashAttention|FlashAttention]]'s kernel handles this same numerical structure explicitly, with fp32 accumulators and without ever materializing the full score matrix.
 
-**Fix:** upcast scores to fp32 immediately before the max-subtraction and softmax, and cast the resulting weights back to bf16/fp16 only for the subsequent $AV$ matmul — see [[Concept - Floating Point for Deep Learning]] for why low-precision reductions are the recurring culprit.
+**Fix:** upcast scores to fp32 right before the max-subtraction and softmax. Cast the weights back to bf16/fp16 only for the $AV$ matmul that follows. [[Concept - Floating Point for Deep Learning]] explains why low-precision reductions keep being the culprit.
 
-**Detection:** run the identical forward pass once fully in fp32 and once in your target mixed precision, and diff the attention weight tensors directly rather than only the final loss — precision bugs here are frequently invisible in aggregate loss but visible immediately in per-position weight diffs.
+**Detection:** run the same forward pass fully in fp32 and again in your target mixed precision, then diff the attention weight tensors directly. Precision bugs here are frequently invisible in aggregate loss and obvious in per-position weight diffs.
 
 ## Connections
 - [[Concept - Attention Mechanism]] — the mechanism every gotcha above is a bug in; read this first if the scale/mask/softmax terms are unfamiliar.

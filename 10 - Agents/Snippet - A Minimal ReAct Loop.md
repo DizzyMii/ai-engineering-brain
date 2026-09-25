@@ -6,7 +6,7 @@ summary: "A complete ~65-line tool-use agent loop: schemas, dispatch, id matchin
 
 # Snippet - A Minimal ReAct Loop
 
-**What it does:** implements the core mechanics of the [[Deep Dive - The Agent Loop|agent loop]] -- call the model, dispatch tool calls, append results, repeat until the model stops calling tools -- against two toy tools (a calculator and a stubbed web search). This is the concrete counterpart to [[Concept - Tool Use and Function Calling]] and the [[Playbook - Building a Tool-Use Agent from Scratch]]: read those for the mechanism and the procedure, this file for the ~65 lines that actually run.
+**What it does:** the core mechanics of the [[Deep Dive - The Agent Loop|agent loop]] (call the model, dispatch tool calls, append results, repeat until the model stops calling tools) against two toy tools, a calculator and a stubbed web search. It pairs with [[Concept - Tool Use and Function Calling]] and the [[Playbook - Building a Tool-Use Agent from Scratch]]. Read those for the mechanism and the procedure, and this file for the ~65 lines that run.
 
 **Dependencies:** `anthropic>=0.40` (`pip install anthropic`). Auth via `export ANTHROPIC_API_KEY=sk-ant-...`.
 
@@ -127,10 +127,10 @@ if __name__ == "__main__":
 
 ## Why it's written this way
 
-- **Id matching is load-bearing, not cosmetic.** Every `tool_result` carries `tool_use_id=call.id`; get this wrong (e.g., zip results to calls by position instead of by id) and the Anthropic API rejects the next turn outright, or -- with a more permissive provider -- silently attaches the wrong result to the wrong call. See [[Concept - Tool Use and Function Calling]] for why the harness, not the model, owns this bookkeeping.
-- **Errors become tool-result text, never exceptions.** `calculator` and the dispatch loop both catch and stringify failures instead of raising, because a raised exception kills the whole run while an error string lets the model read the failure and retry with corrected arguments -- this is the mechanism behind in-loop self-correction, not a nicety.
-- **`MAX_ITERATIONS` is a hard circuit breaker, not a performance tweak.** A model rationalizing a failing calculator call (see [[Gotchas - Tool Use and Function Calling]]) will otherwise burn tokens indefinitely. Ten iterations is generous for a two-tool task; production agents tune this against the task's real expected step count.
-- **The stop condition is structural, not text-parsed.** The loop exits when a turn's content contains no `tool_use` blocks -- matching on content type, not scanning generated text for a phrase like "I'm done" -- because text-based stop detection is exactly the brittle-parsing failure mode that native tool calling replaced (see [[Concept - The ReAct Pattern]]'s note on the original text-parsed implementation).
+- **Id matching is required.** Every `tool_result` carries `tool_use_id=call.id`. Get it wrong (say, zip results to calls by position instead of by id) and the Anthropic API rejects the next turn outright, or a more permissive provider silently attaches the wrong result to the wrong call. [[Concept - Tool Use and Function Calling]] explains why the harness, not the model, owns this bookkeeping.
+- **Errors become tool-result text, never exceptions.** `calculator` and the dispatch loop both catch and stringify failures. A raised exception kills the whole run; an error string lets the model read the failure and retry with corrected arguments. That's how in-loop self-correction works at all.
+- **`MAX_ITERATIONS` is a hard circuit breaker.** Without it, a model rationalizing a failing calculator call (see [[Gotchas - Tool Use and Function Calling]]) burns tokens indefinitely. Ten iterations is generous for a two-tool task; production agents tune this to the task's real expected step count.
+- **The stop condition checks content type.** The loop exits when a turn contains no `tool_use` blocks. It doesn't scan generated text for a phrase like "I'm done," because text-based stop detection is the brittle-parsing failure that native tool calling replaced (see [[Concept - The ReAct Pattern]] on the original text-parsed implementation).
 
 ## Connections
 - [[Deep Dive - The Agent Loop]] -- the full theory (termination logic, context accumulation, evolution) this snippet is the minimal runnable instance of.

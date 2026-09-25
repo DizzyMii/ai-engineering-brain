@@ -6,7 +6,7 @@ summary: "Lookup table of bit layout, dynamic range, precision, and memory cost 
 
 # Reference - Floating Point Formats
 
-Mid-task lookup. For the mechanism and why bf16 beat fp16 for training, see [[Concept - Floating Point for Deep Learning]]. All values are IEEE-754 style layouts unless noted; DL-specific formats (tf32, fp8, fp4) follow vendor/OCP conventions rather than a formal IEEE standard.
+A lookup table for mid-task use. The mechanism, and why bf16 beat fp16 for training, lives in [[Concept - Floating Point for Deep Learning]]. Layouts are IEEE-754 style unless noted. The DL-specific formats (tf32, fp8, fp4) follow vendor/OCP conventions, not a formal IEEE standard.
 
 ## Bit layout and range/precision
 
@@ -21,13 +21,13 @@ Mid-task lookup. For the mechanism and why bf16 beat fp16 for training, see [[Co
 | fp8 e5m2 | 1 | 5 | 2 | 15 | 57,344 | ~6.10e-5 | ~1.53e-5 | 0.25 | ~0.7 | 1 |
 | fp4 e2m1³ | 1 | 2 | 1 | 1 | 6 | 1 | 0.5 | 0.5 | <1 | 0.5 (packed) |
 
-¹ Machine epsilon = $2^{-\text{mantissa bits}}$, the gap between 1.0 and the next representable value — not the same as the smallest representable number (which is set by the exponent field and subnormals; see [[Concept - Subnormal Numbers and Gradual Underflow]]).
-² tf32 keeps fp32's 8-bit exponent (hence identical range) but truncates to 10 mantissa bits; it is computed on tensor cores from fp32-stored operands, not stored as a distinct 19-bit type in memory.
-³ fp4 e2m1 is the microscaling (MX) convention (OCP Microscaling spec); values are always used with a shared block exponent (see below) since 1 mantissa bit alone is nearly useless.
+¹ Machine epsilon = $2^{-\text{mantissa bits}}$, the gap between 1.0 and the next representable value. Don't confuse it with the smallest representable number, which comes from the exponent field and subnormals (see [[Concept - Subnormal Numbers and Gradual Underflow]]).
+² tf32 keeps fp32's 8-bit exponent (so the range is identical) and truncates to 10 mantissa bits. Tensor cores compute it from fp32-stored operands; it never exists in memory as a separate 19-bit type.
+³ fp4 e2m1 is the microscaling (MX) convention (OCP Microscaling spec); values always come with a shared block exponent (see below), since 1 mantissa bit on its own is nearly useless.
 
 ## Exact-integer range
 
-The largest $N$ such that every integer $0 \ldots N$ is exactly representable (mantissa bits exhausted beyond this):
+Largest $N$ such that every integer $0 \ldots N$ is exactly representable. Past this the mantissa bits run out:
 
 | Format | Exact integers up to |
 |---|---|
@@ -36,14 +36,14 @@ The largest $N$ such that every integer $0 \ldots N$ is exactly representable (m
 | fp32 | $2^{24}$ = 16,777,216 |
 | fp64 | $2^{53}$ ≈ 9.007e15 |
 
-This is why token counts, position indices, and large loop counters belong in int or fp32 — bf16 silently starts skipping integers past 256, corrupting counters that look like they should "just work."
+So token counts, position indices and large loop counters go in int or fp32. bf16 silently starts skipping integers past 256, and a counter that looks like it should "just work" gets corrupted.
 
 ## Rounding and scaling
 
-- **Default:** round-to-nearest-even (IEEE default; ties round to the even last bit) for both storage and tensor-core accumulation.
-- **Stochastic rounding:** rounds up or down with probability proportional to distance from each neighbor, so the *expected* rounding error is zero rather than systematically biased low; used for low-precision weight updates where round-to-nearest would silently zero out a long run of small updates.
-- **Loss scaling (fp16 only):** multiply the loss by a constant, typically $2^{10}$–$2^{16}$, before backprop to shift small gradients up into fp16's representable band; see [[Lore - Loss Scaling and the fp16 Underflow Crisis]] for the full mechanism and history.
-- **Block scaling (fp8/fp4):** per-tensor scaling assigns one scale factor to an entire tensor; microscaling (mxfp) assigns one shared exponent per block of 32 elements, trading a small amount of memory overhead (extra scale bytes) for much better dynamic range coverage than per-tensor scaling at 4-bit precision.
+- **Default:** round-to-nearest-even (the IEEE default; ties go to the even last bit), for storage and for tensor-core accumulation.
+- **Stochastic rounding:** rounds up or down with probability proportional to the distance from each neighbor, so the *expected* rounding error is zero instead of biased low. Used for low-precision weight updates, where round-to-nearest would silently zero out a long run of small updates.
+- **Loss scaling (fp16 only):** multiply the loss by a constant, typically $2^{10}$–$2^{16}$, before backprop so small gradients land inside fp16's representable band. Mechanism and history: [[Lore - Loss Scaling and the fp16 Underflow Crisis]].
+- **Block scaling (fp8/fp4):** per-tensor scaling gives a whole tensor one scale factor. Microscaling (mxfp) gives each block of 32 elements a shared exponent. You pay a little memory for the extra scale bytes and get much better dynamic range coverage than per-tensor scaling at 4-bit precision.
 
 ## Memory cost per value
 
@@ -54,9 +54,9 @@ This is why token counts, position indices, and large loop counters belong in in
 | fp8 | 1 | 0.25x |
 | fp4 (packed) | 0.5 | 0.125x |
 
-Cross-reference [[Reference - Memory Math for Transformers]] for how these per-value costs roll up into parameter, optimizer-state, and activation memory totals.
+[[Reference - Memory Math for Transformers]] rolls these per-value costs up into parameter, optimizer-state and activation memory totals.
 
-**Date-stamped (as of 2026):** bf16 is the default training dtype on GPU and TPU; fp8 (e4m3/e5m2) is mainstream for training and inference on Hopper-class hardware; fp4/mxfp formats are arriving on Blackwell-class hardware and remain primarily an inference/quantization format rather than a training default.
+Status (as of 2026): bf16 is the default training dtype on GPU and TPU. fp8 (e4m3/e5m2) is mainstream for training and inference on Hopper-class hardware. fp4/mxfp formats are arriving on Blackwell-class hardware and are still mainly an inference/quantization format, not a training default.
 
 ## Connections
 

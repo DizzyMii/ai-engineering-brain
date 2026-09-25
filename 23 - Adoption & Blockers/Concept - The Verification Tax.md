@@ -6,7 +6,7 @@ summary: "Human review of AI output taxes every use; net value = generation savi
 
 # Concept - The Verification Tax
 
-> **One-paragraph hook:** Every ROI model for AI-assisted work quietly assumes the output is used as-is. It never is. Someone reads it, checks it, and fixes it — and that time is a tax levied on every single use. Net value is generation savings *minus* verification cost, and teams that only measure the first term keep shipping deployments that feel faster and are slower. The [[Concept - The Verification Tax]] is why "the AI did 80% of the work" almost never means "we saved 80%."
+> **One-paragraph hook:** Every ROI model for AI-assisted work assumes the output gets used as-is. It never is. Someone reads it, checks it and fixes it, and that time is a tax on every single use. Net value is generation savings *minus* verification cost. Teams that measure only the first term keep shipping deployments that feel faster and are slower. [[Concept - The Verification Tax]] is why "the AI did 80% of the work" almost never means "we saved 80%."
 
 ## The mechanism
 
@@ -14,37 +14,37 @@ Model the value of an AI-assisted task as:
 
 $$V_{net} = (t_{human} - t_{gen}) - t_{verify} - p_{miss} \cdot C_{error}$$
 
-where $t_{human}$ is the unaided time, $t_{gen}$ is the time to generate with AI, $t_{verify}$ is the time to read and correct the output, $p_{miss}$ is the probability a defect slips through review, and $C_{error}$ is the downstream cost of that defect. Vendor ROI decks report $t_{human} - t_{gen}$ and stop. The last two terms are the tax, and they are frequently the whole story.
+$t_{human}$ is the unaided time, $t_{gen}$ the time to generate with AI, $t_{verify}$ the time to read and correct the output, $p_{miss}$ the probability a defect gets past review, and $C_{error}$ the downstream cost of that defect. Vendor ROI decks report $t_{human} - t_{gen}$ and stop. The last two terms are the tax, and they're frequently the whole story.
 
-The decisive property is the **generation–verification asymmetry**. AI is a net win only where checking is much cheaper than doing:
+What decides it is the **generation–verification asymmetry**. AI is a net win only where checking is much cheaper than doing:
 
-- **Cheap to verify:** code that a test suite exercises, a SQL query you can run, a retrieval answer with citations you can click, a structured diff you can eyeball. Here $t_{verify} \ll t_{human}$ and the tax is small.
-- **Expensive to verify:** a legal argument, a medical summary, a market forecast, any unlabeled generative task where confirming the answer means substantially redoing the work. Here $t_{verify} \approx t_{human}$ and the tax eats the benefit.
+- **Cheap to verify:** code a test suite exercises, a SQL query you can run, a retrieval answer with citations you can click, a structured diff you can eyeball. $t_{verify} \ll t_{human}$, and the tax is small.
+- **Expensive to verify:** a legal argument, a medical summary, a market forecast, any unlabeled generative task where confirming the answer means largely redoing the work. $t_{verify} \approx t_{human}$, and the tax eats the benefit.
 
-This is the same reason "P vs NP" intuition shows up in practice: some problems are far easier to check than to solve, and AI captures value exactly in proportion to that gap. Where no verification shortcut exists, a fluent generator just relocates the labor from *producing* to *auditing* — and auditing confident prose is cognitively worse than writing it, because you are hunting for errors you have no independent signal to find.
+It's the "P vs NP" intuition in practice: some problems are far easier to check than to solve, and AI's value tracks that gap. Where there's no verification shortcut, a fluent generator just moves the labor from *producing* to *auditing*. Auditing confident prose is cognitively worse than writing it, because you're hunting for errors with no independent signal to find them.
 
 ## In practice
 
-The sharpest measurement is the **METR RCT** (Becker, Rush, Barnes, Rein — METR, 10 Jul 2025). 16 experienced open-source developers completed 246 real tasks on mature repos they averaged ~5 years on; tasks were randomized to allow or forbid early-2025 AI (mostly Cursor Pro with Claude 3.5/3.7 Sonnet). Result: developers were measured **19% slower** with AI, while forecasting a **24% speedup** beforehand and still reporting a **~20% speedup** after finishing (E2, single RCT — small n, narrow population of expert maintainers on familiar code; do not over-generalize to juniors or greenfield work). The slowdown is the verification tax made visible: time went into prompting, reading, and reconciling AI output against a codebase the developer already held in their head.
+The sharpest measurement is the **METR RCT** (Becker, Rush, Barnes, Rein; METR, 10 Jul 2025). 16 experienced open-source developers did 246 real tasks on mature repos they'd worked on for ~5 years on average. Tasks were randomized to allow or forbid early-2025 AI (mostly Cursor Pro with Claude 3.5/3.7 Sonnet). Developers were measured **19% slower** with AI, after forecasting a **24% speedup** and while still reporting a **~20% speedup** afterward (E2, single RCT; small n, a narrow population of expert maintainers on familiar code, so don't over-generalize to juniors or greenfield work). The slowdown is the verification tax on the clock: time went into prompting, reading, and reconciling AI output against a codebase the developer already held in their head.
 
-Contrast with the optimistic anchor: GitHub's own controlled study reported developers completing a from-scratch HTTP-server task **~55% faster** with Copilot (E2, GitHub-claimed, 2022). Both can be true. Greenfield boilerplate with a runnable end-state is cheap to verify; modifying a mature system you understand deeply is not. The task's verification cost, not the model, decides the sign of the outcome — see [[Breakdown - GitHub Copilot's Measured Productivity Impact]] and [[Reference - Developer Productivity Studies]] for the full spread.
+In GitHub's own controlled study, the optimistic anchor, developers finished a from-scratch HTTP-server task **~55% faster** with Copilot (E2, GitHub-claimed, 2022). Both can hold. Greenfield boilerplate with a runnable end-state is cheap to verify; changing a mature system you know deeply isn't. Verification cost, more than the model, sets the sign of the outcome. [[Breakdown - GitHub Copilot's Measured Productivity Impact]] and [[Reference - Developer Productivity Studies]] have the full spread.
 
-Design levers that lower the tax:
+Ways to lower the tax:
 
-- **Make outputs self-verifying.** Force citations, generate tests alongside code, emit structured diffs rather than prose rewrites. You are buying down $t_{verify}$.
-- **Route by confidence.** Auto-accept only high-confidence, low-stakes cases; escalate the rest to humans. This concentrates the tax where it is cheap.
-- **Measure fully-loaded cost per *accepted* output**, not raw generation speed — the metric that actually appears in [[Concept - Unit Economics of LLM Products]].
+- **Make outputs self-verifying.** Force citations, generate tests with the code, emit structured diffs instead of prose rewrites. You're buying down $t_{verify}$.
+- **Route by confidence.** Auto-accept only high-confidence, low-stakes cases and send the rest to humans, so the tax lands where it's cheap.
+- **Measure fully-loaded cost per *accepted* output**, not raw generation speed. That's the number in [[Concept - Unit Economics of LLM Products]].
 
 ## Failure modes
 
-- **ROI computed on generation alone.** The pilot looks like a win because reviewers were senior, motivated, and few. At scale the review labor dominates and the [[Concept - The Pilot-to-Production Gap]] swallows the project.
-- **Self-reported productivity trusted as data.** The METR perception gap (+24% forecast vs −19% actual) means surveys asking "does AI make you faster?" measure sentiment, not throughput. Feeding that into an adoption decision launders vibes into strategy — a direct instance of the [[Concept - The Evaluation Gap]].
-- **Verification skipped under deadline.** When review is the tax, the tempting "fix" is to stop reviewing — which converts a productivity problem into a liability problem (the hallucination-becomes-a-representation path).
-- **Autonomy raises the tax silently.** Hand work to an agent and the review surface grows from one output to a whole trajectory of side-effecting steps; the tax scales with autonomy — see [[Concept - Agentic Deployment Risk]].
+- **ROI computed on generation alone.** The pilot looks like a win because its reviewers were senior, motivated and few. At scale review labor dominates, and [[Concept - The Pilot-to-Production Gap]] swallows the project.
+- **Self-reported productivity treated as data.** The METR perception gap (+24% forecast vs −19% actual) means "does AI make you faster?" surveys measure sentiment, not throughput. Feeding them into an adoption decision launders vibes into strategy, a direct case of [[Concept - The Evaluation Gap]].
+- **Verification skipped under deadline.** If review is the tax, the tempting "fix" is to stop reviewing. That turns a productivity problem into a liability problem (the hallucination-becomes-a-representation path).
+- **Autonomy raises the tax without anyone noticing.** Give work to an agent and the review surface grows from one output to a whole trajectory of side-effecting steps. The tax scales with autonomy; see [[Concept - Agentic Deployment Risk]].
 
 ## The non-obvious
 
-**Capability gains can *raise* the verification tax, not lower it.** A weaker model produces obviously-wrong output that a reviewer discards in seconds. A stronger, more fluent model produces plausibly-wrong output — the right shape, the right tone, a fabricated citation buried in paragraph three — and $p_{miss}$ climbs precisely because the errors are harder to spot. So "just upgrade the model" is not a reliable way to cut review cost; past a point, better generation demands *better* verification, and the human reviewer becomes the bottleneck the model quietly outran. This is why the durable winning use cases are the ones where verification is structurally cheap (tests, citations, reversibility), not the ones where the model is merely smart — the lesson every entry in the [[Lore - Failed Enterprise AI Deployments]] graveyard re-teaches.
+**Capability gains can *raise* the verification tax.** A weaker model produces obviously wrong output a reviewer throws out in seconds. A stronger, more fluent model produces plausibly wrong output: the right shape, the right tone, a fabricated citation buried in paragraph three. $p_{miss}$ climbs because the errors are harder to spot. Upgrading the model isn't a reliable way to cut review cost. Past some point better generation needs *better* verification, and the human reviewer becomes the bottleneck the model has outrun. The use cases that keep winning are the ones where verification is cheap by construction (tests, citations, reversibility), not the ones where the model is merely smart. Every entry in the [[Lore - Failed Enterprise AI Deployments]] graveyard teaches this again.
 
 ## Connections
 

@@ -5,17 +5,17 @@ summary: "Cross-library map of the same gradient-boosting knob across XGBoost, L
 ---
 # Reference - Gradient Boosting Hyperparameters
 
-> Same underlying knob, three different names and three different defaults. Open this mid-tuning-run, not start-to-finish — for the order to touch these in, see [[Playbook - Tuning Gradient Boosted Trees]]; for what breaks when you set them wrong, see [[Gotchas - Gradient Boosting in Practice]]. Date-stamped to XGBoost 2.x / LightGBM 4.x / CatBoost 1.2 *(as of 2026)*.
+> Same knob, three names, three defaults. This is for looking things up mid-tuning, not for reading start to finish. The order to touch them in is in [[Playbook - Tuning Gradient Boosted Trees]]; what breaks when you set them wrong is in [[Gotchas - Gradient Boosting in Practice]]. Date-stamped to XGBoost 2.x / LightGBM 4.x / CatBoost 1.2 *(as of 2026)*.
 
 ## Learning rate and boosting rounds
 
 | Knob | XGBoost | LightGBM | CatBoost | Typical range | Controls |
 |---|---|---|---|---|---|
-| Shrinkage | `eta` (default 0.3) | `learning_rate` (default 0.1) | `learning_rate` (default 0.03) | 0.01–0.1 | Multiplier $\nu$ on each new tree in $F_m(x) = F_{m-1}(x) + \nu \cdot h_m(x)$ (see [[Concept - Gradient Boosting]]). Lower $\nu$ needs proportionally more rounds — the classic $\nu$-vs-$M$ tradeoff. |
-| Number of trees | `num_boost_round` / `n_estimators` | `num_iterations` | `iterations` | set high, let early stopping choose | Upper bound only — never grid-search this directly, it's coupled to the learning rate. |
-| Early stopping | `early_stopping_rounds` | `early_stopping_round` | `early_stopping_rounds` | 20–100 rounds | Halts once a matched `eval_metric` on a held-out set stops improving — the correct way to pick tree count. |
+| Shrinkage | `eta` (default 0.3) | `learning_rate` (default 0.1) | `learning_rate` (default 0.03) | 0.01–0.1 | Multiplier $\nu$ on each new tree in $F_m(x) = F_{m-1}(x) + \nu \cdot h_m(x)$ (see [[Concept - Gradient Boosting]]). Lower $\nu$ needs proportionally more rounds: the classic $\nu$-vs-$M$ tradeoff. |
+| Number of trees | `num_boost_round` / `n_estimators` | `num_iterations` | `iterations` | set high, let early stopping choose | Upper bound only. Never grid-search it directly; it's coupled to the learning rate. |
+| Early stopping | `early_stopping_rounds` | `early_stopping_round` | `early_stopping_rounds` | 20–100 rounds | Halts once a matched `eval_metric` on a held-out set stops improving. The right way to pick tree count. |
 
-## Tree complexity — the single biggest structural difference between the three
+## Tree complexity: the biggest structural difference between the three
 
 | Library | Growth strategy | Primary knob | Typical range |
 |---|---|---|---|
@@ -23,15 +23,15 @@ summary: "Cross-library map of the same gradient-boosting knob across XGBoost, L
 | LightGBM | Leaf-wise / best-first (deepest-loss-reduction leaf splits next) | `num_leaves` | 31–255, **must stay `< 2^max_depth`**¹ |
 | CatBoost | Oblivious trees (same split rule at every node of a given depth) | `depth` | 6–10 |
 
-¹ Setting `num_leaves` larger than `2^max_depth` implies is the single most common LightGBM overfitting footgun (see [[Gotchas - Gradient Boosting in Practice]]) — leaf-wise growth with no matching depth cap produces deep, asymmetric, over-specialized trees.
+¹ Setting `num_leaves` above what `2^max_depth` implies is the most common LightGBM overfitting footgun (see [[Gotchas - Gradient Boosting in Practice]]). Leaf-wise growth with no matching depth cap produces deep, lopsided, over-specialized trees.
 
 ## Regularization
 
 | Knob | XGBoost | LightGBM | Controls |
 |---|---|---|---|
-| L1 / L2 on leaf weights | `reg_alpha` / `reg_lambda` | `lambda_l1` / `lambda_l2` | Shrinks leaf weight $w^* = -\sum g_i / (\sum h_i + \lambda)$ toward zero — the term added by [[Breakdown - XGBoost]]'s regularized objective $\Omega(f) = \gamma T + \tfrac12 \lambda \lVert w \rVert^2$. |
-| Min samples/weight per leaf | `min_child_weight` (min Hessian sum in a leaf) | `min_child_samples` / `min_data_in_leaf` (min row count) | Refuses a split that would create a leaf with too little statistical support — the primary defense against overfitting on small leaves. |
-| Min gain to split | `gamma` / `min_split_loss` | `min_gain_to_split` | A split executes only if its gain exceeds this threshold — directly prunes low-value splits before they're made. |
+| L1 / L2 on leaf weights | `reg_alpha` / `reg_lambda` | `lambda_l1` / `lambda_l2` | Shrinks leaf weight $w^* = -\sum g_i / (\sum h_i + \lambda)$ toward zero; it's the term added by [[Breakdown - XGBoost]]'s regularized objective $\Omega(f) = \gamma T + \tfrac12 \lambda \lVert w \rVert^2$. |
+| Min samples/weight per leaf | `min_child_weight` (min Hessian sum in a leaf) | `min_child_samples` / `min_data_in_leaf` (min row count) | Refuses a split that would create a leaf with too little statistical support. The main defense against overfitting on small leaves. |
+| Min gain to split | `gamma` / `min_split_loss` | `min_gain_to_split` | A split happens only if its gain exceeds this threshold, which prunes low-value splits before they're made. |
 
 ## Row / column sampling
 
@@ -47,10 +47,10 @@ Both add bagging-style regularization *inside* the sequential boosting loop (Fri
 | Library | Mechanism | Key knobs |
 |---|---|---|
 | LightGBM | Native: sorts categories by gradient statistic, finds optimal binary partition (Fisher 1958) | `categorical_feature`, `max_cat_threshold`, `cat_smooth` |
-| CatBoost | Ordered target statistics — online, permutation-based mean encoding that avoids leakage by construction | `one_hot_max_size` |
+| CatBoost | Ordered target statistics: online, permutation-based mean encoding that avoids leakage by construction | `one_hot_max_size` |
 | XGBoost | Native categorical splits (added 2.x) | `enable_categorical` |
 
-Footnote: none of these are free lunches — native handling of a high-cardinality ID-like column (user ID, SKU) overfits without smoothing and proper cross-validation, same failure as naive target encoding (see [[Snippet - Leakage-Free Target Encoding]]).
+Footnote: none of these is a free lunch. Native handling of a high-cardinality ID-like column (user ID, SKU) overfits without smoothing and proper cross-validation, the same failure as naive target encoding (see [[Snippet - Leakage-Free Target Encoding]]).
 
 ## Class imbalance
 
@@ -60,7 +60,7 @@ Footnote: none of these are free lunches — native handling of a high-cardinali
 | LightGBM | `is_unbalance` or `scale_pos_weight` |
 | CatBoost | `class_weights` |
 
-Setting any of these reweights the loss and **breaks the meaning of the output as a probability** — recalibrate downstream (see [[Concept - Probability Calibration]]) before using scores as probabilities.
+Setting any of these reweights the loss and **breaks the meaning of the output as a probability**. Recalibrate downstream (see [[Concept - Probability Calibration]]) before using scores as probabilities.
 
 ## Backend / reproducibility
 
@@ -69,7 +69,7 @@ Setting any of these reweights the loss and **breaks the meaning of the output a
 | Histogram vs exact split search | `tree_method = hist` / `gpu_hist` | `device = cpu` / `gpu`, `max_bin` (bin count for histogram, default 255) |
 | Thread count | `nthread` | `num_threads` |
 
-Footnote: GPU and multi-threaded histogram builds are **not bit-reproducible** run-to-run (floating-point reduction order varies) — pin seeds *and* thread counts if you need audit-reproducible splits.
+Footnote: GPU and multi-threaded histogram builds are **not bit-reproducible** run to run, because floating-point reduction order varies. Pin seeds *and* thread counts if you need audit-reproducible splits.
 
 ## Connections
 - [[Concept - Gradient Boosting]] — the functional-gradient-descent mechanism every knob above parameterizes.

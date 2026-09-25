@@ -6,51 +6,51 @@ summary: "The ordered, leak-checked procedure for tuning XGBoost/LightGBM/CatBoo
 
 # Playbook - Tuning Gradient Boosted Trees
 
-> **Goal:** turn a default-hyperparameter gradient-boosted tree model into a properly regularized, near-optimal one without overfitting the *tuning process* itself. **When to run this:** after a working, leak-free baseline exists and before shipping a tabular model to production. **Prerequisites:** a working train/eval pipeline, [[Concept - Gradient Boosting]] fundamentals, and the hyperparameter meanings catalogued in [[Reference - Gradient Boosting Hyperparameters]].
+> **Goal:** take a default-hyperparameter gradient-boosted tree model to a properly regularized, near-optimal one without overfitting the *tuning process* itself. **When to run this:** once a working, leak-free baseline exists and before a tabular model ships. **Prerequisites:** a working train/eval pipeline, [[Concept - Gradient Boosting]] fundamentals, and the hyperparameter meanings in [[Reference - Gradient Boosting Hyperparameters]].
 
 ## Steps
 
 **1. Build a leak-free CV scheme first.**
-Action: set up stratified k-fold for i.i.d. tabular data, or forward-chaining / time-aware CV for temporal data ([[Concept - Time Series Cross-Validation and Leakage]]).
-Expected observation: fold scores cluster tightly — standard deviation small relative to the mean.
-What deviation means: high fold-to-fold variance signals leakage, too little data, or a CV scheme mismatched to the data's actual structure. Stop here and fix it — every later step inherits whatever bias this one has, and tuning on top of a broken CV scheme just optimizes the leak harder.
+Action: stratified k-fold for i.i.d. tabular data, or forward-chaining / time-aware CV for temporal data ([[Concept - Time Series Cross-Validation and Leakage]]).
+Expected observation: fold scores cluster tightly, with standard deviation small relative to the mean.
+What deviation means: high fold-to-fold variance points to leakage, too little data, or a CV scheme that doesn't match the data's structure. Stop and fix it. Every later step inherits this one's bias, and tuning on a broken CV scheme just optimizes the leak harder.
 
-**2. Fix the learning rate, let early stopping choose the tree count.**
+**2. Fix the learning rate; let early stopping pick the tree count.**
 Action: set `learning_rate`/`eta = 0.1`, a large `num_boost_round` (several thousand), and `early_stopping_rounds ≈ 50` on the CV eval metric.
-Expected observation: the validation metric improves, plateaus, then rises; the selected best-iteration sits comfortably below the round ceiling.
-What deviation means: best-iteration pinned at the ceiling means `num_boost_round` wasn't large enough — raise it. Near-instant early stopping (a handful of rounds) suggests the learning rate is too high, or — more worryingly — that the model is "solving" the problem trivially because of leakage. Never grid-search the number of trees directly; it is mechanically coupled to the learning rate and early stopping already answers this question correctly.
+Expected observation: the validation metric improves, plateaus, then worsens, and the best iteration lands comfortably below the round ceiling.
+What deviation means: a best iteration pinned at the ceiling means `num_boost_round` was too small, so raise it. Early stopping after a handful of rounds suggests the learning rate is too high or, more worrying, that leakage lets the model "solve" the problem trivially. Never grid-search the number of trees. It's mechanically tied to the learning rate, and early stopping already answers the question correctly.
 
 **3. Tune tree complexity.**
-Action: sweep `max_depth` (3-10) with `min_child_weight` (XGBoost), or `num_leaves` (31-255, kept below `2^max_depth`) with `min_data_in_leaf` (LightGBM) — via Bayesian/TPE search (e.g. Optuna) rather than an exhaustive grid, since the useful region of this space is much smaller than the full grid.
-Expected observation: the CV metric improves noticeably — this is usually the single biggest lever in the whole procedure.
-What deviation means: if increasing complexity barely moves the CV metric, the model is likely feature- or data-limited rather than complexity-limited; stop tuning complexity and go back to feature engineering instead of continuing to search this axis.
+Action: sweep `max_depth` (3-10) with `min_child_weight` (XGBoost), or `num_leaves` (31-255, kept below `2^max_depth`) with `min_data_in_leaf` (LightGBM). Use Bayesian/TPE search (e.g. Optuna) instead of an exhaustive grid; the useful region is much smaller than the full grid.
+Expected observation: the CV metric improves noticeably. This is usually the biggest lever in the whole procedure.
+What deviation means: if more complexity barely moves the CV metric, the model is probably limited by features or data, not complexity. Stop searching this axis and go back to feature engineering.
 
 **4. Tune sampling.**
-Action: sweep `subsample`/`bagging_fraction` and `colsample_bytree`/`feature_fraction`, typically in the 0.6-0.9 range.
-Expected observation: a modest further CV improvement, faster wall-clock training, and a narrower train-validation gap.
-What deviation means: if sampling hurts the CV score, the dataset is likely too small for stochastic subsampling to pay off — push these back toward 1.0 rather than forcing regularization the data doesn't need.
+Action: sweep `subsample`/`bagging_fraction` and `colsample_bytree`/`feature_fraction`, typically in 0.6-0.9.
+Expected observation: a modest CV gain, faster wall-clock training, and a narrower train-validation gap.
+What deviation means: if sampling hurts CV, the dataset is probably too small for stochastic subsampling to pay off. Push these back toward 1.0 instead of forcing regularization the data doesn't need.
 
 **5. Tune regularization.**
 Action: sweep `reg_lambda`/`reg_alpha` (L2/L1 on leaf weights) and `gamma`/`min_split_loss` (minimum gain required to split).
-Expected observation: the train-validation gap narrows further without the validation score itself dropping.
-What deviation means: if closing the gap costs real validation score, you were regularizing away genuine signal, not just noise — back off toward the step-4 configuration.
+Expected observation: the train-validation gap narrows further and the validation score doesn't drop.
+What deviation means: if closing the gap costs real validation score, you were regularizing away signal along with the noise. Back off toward the step-4 configuration.
 
 **6. Lower the learning rate for the final squeeze.**
-Action: drop `learning_rate` to 0.01-0.03, refit with proportionally more rounds (early stopping again decides the final count), then recalibrate probabilities and, if the task is imbalanced, retune the decision threshold ([[Concept - Probability Calibration]], [[Concept - Learning from Imbalanced Data]]).
+Action: drop `learning_rate` to 0.01-0.03 and refit with proportionally more rounds (early stopping sets the final count again). Then recalibrate probabilities and, on imbalanced tasks, retune the decision threshold ([[Concept - Probability Calibration]], [[Concept - Learning from Imbalanced Data]]).
 Expected observation: a final, usually modest, accuracy gain over the step 3-5 model.
-What deviation means: no gain here is normal and fine — it means steps 3-5 already found a good complexity/regularization balance. A *large* jump at this stage is worth treating with suspicion rather than celebration; re-check for leakage before shipping it.
+What deviation means: no gain here is normal and fine; steps 3-5 already found a good complexity/regularization balance. A *large* jump at this stage deserves suspicion, not celebration. Re-check for leakage before shipping.
 
 ## Verification
-The CV score should improve step over step while the train-validation gap stays sane rather than widening, and the improvement must survive on a genuinely held-out test set that was never touched during tuning — or nested CV — not merely on the folds used for the search itself. A model that only looks better on the tuning folds and not on the untouched set has been tuned *to the folds*, not to the problem, which is the same multiple-comparisons trap that [[Concept - Hypothesis Testing and p-values|repeated significance testing]] runs into: enough configurations tried against the same folds will eventually look good by chance alone.
+The CV score should improve step over step while the train-validation gap stays sane. The improvement has to hold on a truly held-out test set that tuning never touched (or under nested CV), not just on the folds used for the search. A model that looks better only on the tuning folds has been tuned *to the folds*, not to the problem. It's the multiple-comparisons trap from [[Concept - Hypothesis Testing and p-values|repeated significance testing]]: try enough configurations against the same folds and one will look good by chance alone.
 
 ## When it goes wrong
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Validation score far below train (big gap) | Overfitting: complexity too high, or too little data | Reduce `max_depth`/`num_leaves`, raise `min_child_weight`/`min_data_in_leaf`, add subsampling and L2 — return to step 3 |
+| Validation score far below train (big gap) | Overfitting: complexity too high, or too little data | Reduce `max_depth`/`num_leaves`, raise `min_child_weight`/`min_data_in_leaf`, add subsampling and L2; return to step 3 |
 | Both train and validation score low (underfit) | Complexity too low, or too few effective rounds | Increase depth/leaves, lower the learning rate with more rounds, reduce `min_data_in_leaf` |
-| Fold scores noisy and unstable throughout tuning | The CV scheme itself is leaking, or the dataset is too small/nonstationary for stable folds | Stop tuning immediately, return to step 1, and audit for leakage (see [[Gotchas - Gradient Boosting in Practice]]) |
-| Tuning improves CV but the production metric doesn't move | `eval_metric` mismatched to the actual business objective, or train/serve preprocessing skew | Re-derive `eval_metric` from the deployed cost function; audit the serving pipeline for preprocessing drift before touching hyperparameters further |
+| Fold scores noisy and unstable throughout tuning | The CV scheme itself is leaking, or the dataset is too small/nonstationary for stable folds | Stop tuning, return to step 1, and audit for leakage (see [[Gotchas - Gradient Boosting in Practice]]) |
+| Tuning improves CV but the production metric doesn't move | `eval_metric` mismatched to the actual business objective, or train/serve preprocessing skew | Re-derive `eval_metric` from the deployed cost function; audit the serving pipeline for preprocessing drift before touching hyperparameters again |
 
 ## Connections
 - [[Concept - Gradient Boosting]] — the mechanism (`learning_rate`, sequential trees, bias reduction) this playbook's step order is built around.

@@ -19,16 +19,16 @@ The factor of 2 is for storing both K and V. See [[Concept - KV Cache]] for the 
 | Llama-3-70B | 80 | 8 (GQA) | 128 | 327,680 B ≈ 0.31 MB | ≈ 0.156 MB |
 | DeepSeek-V2/V3 (MLA)¹ | — | — (compressed latent) | — | ≈ 93% smaller than an equal-quality MHA model² | further reduced |
 
-¹ MLA (DeepSeek-AI 2024) replaces per-head K,V with a shared low-rank latent, so the layers/heads columns don't apply the same way; treat the row as an order-of-magnitude pointer, not a literal plug-in to the formula above.
-² DeepSeek-V2 technical report figure, reported relative to a comparable standard-MHA model at similar quality — company-reported, not independently re-derived here.
+¹ MLA (DeepSeek-AI 2024) replaces per-head K,V with a shared low-rank latent, so the layers/heads columns don't apply the same way. Read the row as an order-of-magnitude pointer; don't plug it into the formula above.
+² DeepSeek-V2 technical report figure, reported relative to a comparable standard-MHA model at similar quality. Company-reported, not independently re-derived here.
 
-**Total live KV** = (bytes/token) × Σ(sequence lengths of all live requests). This, not model weights, is usually the binding constraint on concurrency at long context — see [[Concept - PagedAttention]] for why it's allocated in blocks rather than reserved contiguously.
+**Total live KV** = (bytes/token) × Σ(sequence lengths of all live requests). At long context this, more than the model weights, is usually what caps concurrency. [[Concept - PagedAttention]] explains why it's allocated in blocks instead of reserved contiguously.
 
 ## Decode step time (batch = 1)
 
 $$t_{\text{step}} \approx \frac{\text{model\_weight\_bytes}}{\text{HBM\_bandwidth}}$$
 
-Every decode step re-reads the full weight tensor from HBM (see [[Concept - Prefill and Decode Phases]]); at batch 1 this dominates because arithmetic intensity is far below the compute roof (see [[Concept - The Roofline Model]]).
+Every decode step re-reads the full weight tensor from HBM (see [[Concept - Prefill and Decode Phases]]). At batch 1 that read dominates, because arithmetic intensity is far below the compute roof ([[Concept - The Roofline Model]]).
 
 GPU HBM bandwidth (as of 2026, per vendor datasheets)³:
 
@@ -40,7 +40,7 @@ GPU HBM bandwidth (as of 2026, per vendor datasheets)³:
 | H200 SXM | HBM3e | 4.8 TB/s |
 | B200 | HBM3e | ≈ 8 TB/s |
 
-³ Datasheet bandwidth is a ceiling; achieved bandwidth in a real decode kernel is typically 70-90% of this figure. Treat the table as an upper bound for the estimates below.
+³ Datasheet bandwidth is a ceiling. A real decode kernel typically achieves 70-90% of it, so treat the table as an upper bound for the estimates below.
 
 Using $t_{\text{ms}} \approx \text{weight\_GB} / \text{bandwidth\_TBps}$:
 
@@ -50,17 +50,17 @@ Using $t_{\text{ms}} \approx \text{weight\_GB} / \text{bandwidth\_TBps}$:
 | Llama-3-70B, fp16 | 140 GB | 41.8 ms/tok | 29.2 ms/tok | 17.5 ms/tok |
 | Llama-3-70B, fp8 | 70 GB | 20.9 ms/tok | 14.6 ms/tok | 8.75 ms/tok |
 
-These are single-stream (batch-1) numbers. Batching amortizes the same weight read across many concurrent sequences, which is the entire mechanistic case for [[Concept - Continuous Batching]] — decode step time barely rises with batch size until the GPU crosses from memory-bound to compute-bound.
+These are single-stream (batch-1) numbers. Batching spreads the same weight read across many concurrent sequences, and that's the whole mechanical case for [[Concept - Continuous Batching]]: decode step time barely rises with batch size until the GPU crosses from memory-bound to compute-bound.
 
 ## Max concurrent tokens (KV budget)
 
 $$N_{\text{tokens}} \approx \frac{\text{VRAM} - \text{weight\_bytes} - \text{activation/framework overhead}}{\text{KV\_bytes\_per\_token}}$$
 
-**Worked example:** Llama-3-70B fp16 (~140 GB weights) on 2×H100 80GB with tensor-parallel=2. After weights and framework/activation overhead, real deployments typically have on the order of ~20 GB/GPU of headroom for KV. At 0.3125 MB/token (fp16 KV, from the table above):
+**Worked example:** Llama-3-70B fp16 (~140 GB weights) on 2×H100 80GB with tensor-parallel=2. After weights and framework/activation overhead, real deployments typically keep something on the order of ~20 GB/GPU of headroom for KV. At 0.3125 MB/token (fp16 KV, from the table above):
 
 $$\frac{20{,}480 \text{ MB}}{0.3125 \text{ MB/token}} \approx 65{,}536 \text{ tokens per GPU}$$
 
-Switching KV to fp8 (see [[Concept - KV Cache Quantization]]) roughly doubles that ceiling to ~131,000 tokens/GPU — the same GPUs, twice the concurrent-request budget, at the cost of KV precision.
+Switching KV to fp8 (see [[Concept - KV Cache Quantization]]) roughly doubles that ceiling to ~131,000 tokens/GPU. Same GPUs, twice the concurrent-request budget, paid for in KV precision.
 
 ## Latency, throughput, and goodput definitions
 
@@ -70,11 +70,11 @@ Switching KV to fp8 (see [[Concept - KV Cache Quantization]]) roughly doubles th
 | **TPOT / ITL** | Time per output token / inter-token latency = mean decode step time |
 | **End-to-end latency** | TTFT + TPOT × output_length |
 | **Throughput** | Aggregate tokens/sec or requests/sec served by the engine |
-| **Goodput** | Requests/sec that meet the target (TTFT, TPOT) SLO jointly — not just completed, but completed *on time* |
+| **Goodput** | Requests/sec that meet the target (TTFT, TPOT) SLO jointly: completed *on time*, not merely completed |
 
-Always report **p50/p90/p99**, not just the mean: batching creates fat tails, since a request queued behind a large prefill or a chunked-prefill iteration (see [[Concept - Chunked Prefill]]) can see TTFT or TPOT far worse than the median request in the same window.
+Always report **p50/p90/p99** alongside the mean. Batching creates fat tails: a request queued behind a large prefill or a chunked-prefill iteration (see [[Concept - Chunked Prefill]]) can see TTFT or TPOT far worse than the median request in the same window.
 
-Typical human-facing latency targets (as of 2026 — UX thresholds, not hardware limits):
+Typical human-facing latency targets (as of 2026; these are UX thresholds, not hardware limits):
 
 | Use case | TTFT target | TPOT target |
 |---|---|---|
@@ -85,19 +85,19 @@ Typical human-facing latency targets (as of 2026 — UX thresholds, not hardware
 
 $$\frac{\$}{\text{1M output tokens}} = \frac{\text{GPU\_\$/hr} / 3600}{\text{decode\_tokens\_per\_sec (aggregate)}} \times 10^{6}$$
 
-Worked example: an H100 at ~$2.50/hr (as of 2026, illustrative — varies by cloud, region, and commitment level) sustaining ~2,500 output tok/s aggregate across a full batch:
+Worked example: an H100 at ~$2.50/hr (as of 2026, illustrative; varies by cloud, region, and commitment level) sustaining ~2,500 output tok/s aggregate across a full batch:
 
 $$\frac{2.50/3600}{2500} \times 10^{6} \approx \$0.28 \text{ per 1M output tokens (hardware cost only, before margin/overhead)}$$
 
-Input tokens are cheap relative to output tokens (API pricing typically runs input at roughly 1/3 to 1/5 of output price) because prefill is parallel and compute-rich while decode is serialized and memory-bandwidth-bound — see [[Concept - Latency, Throughput, and Cost in LLM Serving]].
+Input tokens are cheap next to output tokens (API pricing typically puts input at roughly 1/3 to 1/5 of output price). Prefill is parallel and compute-rich; decode is serialized and memory-bandwidth-bound. See [[Concept - Latency, Throughput, and Cost in LLM Serving]].
 
 ## Benchmarking tools
 
-- **`vllm bench serve`** (vLLM's built-in serving benchmark) — sweeps request rate/concurrency against a target engine and reports TTFT/TPOT/throughput percentiles.
-- **NVIDIA `genai-perf`** — protocol-aware (OpenAI-compatible) load generator with the same percentile reporting, vendor-neutral across engines.
-- **`llmperf`** — similar sweep-and-report tool, commonly used for cross-provider API benchmarking.
+- **`vllm bench serve`** (vLLM's built-in serving benchmark): sweeps request rate/concurrency against a target engine and reports TTFT/TPOT/throughput percentiles.
+- **NVIDIA `genai-perf`**: protocol-aware (OpenAI-compatible) load generator with the same percentile reporting, vendor-neutral across engines.
+- **`llmperf`**: a similar sweep-and-report tool, common for cross-provider API benchmarking.
 
-Use a realistic input/output length distribution (a ShareGPT-style trace, not a fixed 128/128 tokens) — fixed short lengths systematically understate both TTFT variance and KV pressure relative to production traffic.
+Use a realistic input/output length distribution (a ShareGPT-style trace, not a fixed 128/128 tokens). Fixed short lengths understate both TTFT variance and KV pressure compared with production traffic.
 
 ## Connections
 

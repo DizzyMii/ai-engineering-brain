@@ -6,7 +6,7 @@ summary: "Sourced hyperparameters of real frontier pretraining runs, surfacing f
 
 # Reference - LLM Pretraining Hyperparameters
 
-*Values as of 2026. Each row is sourced below. Cells marked `n/d` were not disclosed; `*` = approximate/partially disclosed; footnote markers explain non-obvious cells. Published numbers dominate; folklore is called out in its own section.*
+*Values as of 2026. Every row is sourced below. `n/d` = not disclosed; `*` = approximate or partially disclosed; footnote markers explain the odd cells. Most numbers are published; folklore gets its own section.*
 
 ## Optimizer, LR, and schedule
 
@@ -40,36 +40,36 @@ summary: "Sourced hyperparameters of real frontier pretraining runs, surfacing f
 | Llama-3 8B | 8B | 15T | 1,875 | bf16 | AdamW | 128,256 |
 | DeepSeek-V3 | 671B (37B act) | 14.8T | 22 total / 400 active ⁸ | fp8 ⁹ | AdamW | 128,815 |
 
-## Folklore constants (the near-universal defaults)
+## Folklore constants
 
-These are the values that show up run after run, mostly unexplained in the papers, and are the practical defaults for a new dense run — the reasoning is owned by [[Concept - AdamW at Scale]]:
+These show up run after run, mostly unexplained in the papers, and they're the practical defaults for a new dense run. Reasoning lives in [[Concept - AdamW at Scale]].
 
-- **β2 = 0.95**, not Adam's 0.999 — a faster second-moment estimate tracks gradient-variance jumps and cuts spike sensitivity (GPT-3, OPT, Llama-1/2/3, DeepSeek-V3).
-- **β1 = 0.9** — essentially never changed.
-- **weight decay = 0.1** (decoupled/AdamW), **excluded from 1D params** — norms, biases, and often embeddings get no decay. Rarely written down; nearly always done.
-- **global-norm gradient clip = 1.0** — tightened to 0.3–0.5 only during an instability ([[Concept - Training Stability and Loss Spikes]]).
-- **warmup ≈ 0.1–2% of steps** (commonly ~2000 steps); **min LR = 10% of peak**, not 0, so a checkpoint can be continued.
-- **z-loss coefficient ≈ 1e-4** on the output softmax where used (PaLM); router z-loss ≈ 1e-3 for MoE — see [[Concept - z-loss and Logit Soft-Capping]].
-- **ε = 1e-8** standard; **Llama used 1e-5** ⁶, a rare deliberate outlier.
+- **β2 = 0.95** instead of Adam's 0.999. A faster second-moment estimate tracks gradient-variance jumps and cuts spike sensitivity (GPT-3, OPT, Llama-1/2/3, DeepSeek-V3).
+- **β1 = 0.9**. Almost nobody changes it.
+- **weight decay = 0.1** (decoupled/AdamW), **excluded from 1D params**: norms, biases, and often embeddings get no decay. Rarely written down, nearly always done.
+- **global-norm gradient clip = 1.0**, tightened to 0.3–0.5 only during an instability ([[Concept - Training Stability and Loss Spikes]]).
+- **warmup ≈ 0.1–2% of steps** (commonly ~2000 steps); **min LR = 10% of peak** (not 0), so a checkpoint can be continued.
+- **z-loss coefficient ≈ 1e-4** on the output softmax where used (PaLM); router z-loss ≈ 1e-3 for MoE. See [[Concept - z-loss and Logit Soft-Capping]].
+- **ε = 1e-8** is standard. **Llama used 1e-5** ⁶, a rare deliberate outlier.
 
-## Trends across the rows
+## Trends
 
-- **Overtraining (tokens/param) exploded**: Chinchilla-optimal ≈ 20 → Llama-3 8B ≈ 1,875, a deliberate trade of extra training cost for a smaller, cheaper-to-serve model ([[Concept - Scaling Laws]]).
-- **Precision migrated fp16 → bf16 → fp8**: GPT-3/OPT (fp16, loss-scale battles) → Gopher onward (bf16) → DeepSeek-V3 (first production fp8), tracked in [[Concept - Mixed Precision Training]].
-- **Batch-size ramping is standard**: GPT-3 went 32k → 3.2M tokens, DeepSeek-V3 ramped to ~63M — exploiting the growing critical batch ([[Concept - Critical Batch Size]]).
-- **Optimizer**: AdamW dominates; PaLM's Adafactor and the newer Muon/Shampoo experiments ([[Concept - muP and Hyperparameter Transfer]] covers how HPs transfer across scale) are the exceptions, not the rule.
+- **Overtraining (tokens/param) exploded**, from Chinchilla-optimal ≈ 20 to Llama-3 8B ≈ 1,875. A deliberate trade of training cost for a smaller, cheaper-to-serve model ([[Concept - Scaling Laws]]).
+- **Precision moved fp16 → bf16 → fp8**: GPT-3/OPT on fp16 (with loss-scale battles), bf16 from Gopher onward, then DeepSeek-V3 as the first production fp8 run. See [[Concept - Mixed Precision Training]].
+- **Batch-size ramping is standard.** GPT-3 went 32k → 3.2M tokens and DeepSeek-V3 ramped to ~63M, riding the growing critical batch ([[Concept - Critical Batch Size]]).
+- **Optimizer**: AdamW dominates. PaLM's Adafactor and the newer Muon/Shampoo experiments are exceptions ([[Concept - muP and Hyperparameter Transfer]] covers how HPs transfer across scale).
 
 ## Footnotes
 
-1. **Global batch in tokens** = (sequences per step) × (sequence length). Papers report sequences; converted here at each run's context length (2048 for GPT-3/OPT-era, 4096 for Llama-2/3 and DeepSeek-V3).
-2. **`a→b` = batch-size warmup**: the batch is ramped from `a` to `b` early in training; the value shown is the terminal steady batch.
-3. **PaLM LR**: constant 1e-2 for the first 10k steps, then decays as 1/√(step); there is no fixed minimum.
-4. **PaLM used Adafactor** (without factorization), with β1 = 0.9 and second-moment decay 1 − k⁻·⁸, and **weight decay = lr²** (coupled to the current LR). The β2 = 0.95 folklore applies to the AdamW runs, not PaLM.
+1. **Global batch in tokens** = (sequences per step) × (sequence length). Papers report sequences; converted at each run's context length (2048 for GPT-3/OPT-era, 4096 for Llama-2/3 and DeepSeek-V3).
+2. **`a→b` = batch-size warmup**: the batch ramps from `a` to `b` early in training. The shown value is the terminal steady batch.
+3. **PaLM LR**: constant 1e-2 for the first 10k steps, then decays as 1/√(step). No fixed minimum.
+4. **PaLM used Adafactor** (without factorization), with β1 = 0.9 and second-moment decay 1 − k⁻·⁸, and **weight decay = lr²** (coupled to the current LR). The β2 = 0.95 folklore is about the AdamW runs, not PaLM.
 5. **OPT-175B** lowered global-norm clip from 1.0 to 0.3 during instability episodes (see the logbook).
-6. **Llama** used AdamW **ε = 1e-5**, unusually large versus the standard 1e-8 — a rare published deviation.
-7. **DeepSeek-V3** LR is multi-stage: constant 2.2e-4, then cosine decay, then constant 2.2e-5, then a 7.3e-6 tail; batch ramped 3,072 → 15,360 sequences (× 4,096 = ~62.9M tokens).
-8. **MoE tokens/param** is ambiguous: 14.8T / 671B total ≈ 22; 14.8T / 37B active ≈ 400. Report both.
-9. **fp8** = mixed fp8 with per-tile/per-block scaling and fp32 accumulation; sensitive layers stay bf16/fp32 ([[Concept - FP8 Training]]).
+6. **Llama** used AdamW **ε = 1e-5**, unusually large next to the standard 1e-8. Published deviations like this are rare.
+7. **DeepSeek-V3** LR is multi-stage: constant 2.2e-4, cosine decay, then constant 2.2e-5, then a 7.3e-6 tail; batch ramped 3,072 → 15,360 sequences (× 4,096 = ~62.9M tokens).
+8. **MoE tokens/param** is ambiguous. 14.8T / 671B total ≈ 22; 14.8T / 37B active ≈ 400. Report both.
+9. **fp8** = mixed fp8 with per-tile/per-block scaling and fp32 accumulation; sensitive layers stay in bf16/fp32 ([[Concept - FP8 Training]]).
 
 ## Connections
 - [[Concept - AdamW at Scale]] — the reasoning behind the β2=0.95 / wd=0.1 / clip=1.0 folklore surfaced in this table.

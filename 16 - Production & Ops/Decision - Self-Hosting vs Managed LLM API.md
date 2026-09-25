@@ -5,7 +5,7 @@ summary: "Choosing a managed LLM API vs serving open-weights models on your own 
 ---
 # Decision - Self-Hosting vs Managed LLM API
 
-> Default for the 80% case: **start on a managed API; move to self-hosting only once volume is high and steady enough to keep GPUs busy most of the time, compliance forces on-prem, or you need an open/custom model with no closed-frontier equivalent.** The naive version of this decision compares $/token; the real decision is a utilization bet, and idle GPUs are the way teams lose it.
+> Default for the 80% case: **start on a managed API. Move to self-hosting only when volume is high and steady enough to keep GPUs busy most of the time, compliance forces on-prem, or you need an open/custom model with no closed-frontier equivalent.** The naive version compares $/token. The actual decision is a bet on utilization, and idle GPUs are how teams lose it.
 
 ## Decision flow
 
@@ -25,36 +25,36 @@ flowchart TD
     I -->|No| E
 ```
 
-The whole tree collapses to one question: **will the GPUs you'd buy or rent actually stay busy?** Every other criterion — compliance, model choice, rate limits — either forces the answer directly or feeds into whether sustained utilization is achievable.
+The tree comes down to one question: **will the GPUs you'd buy or rent stay busy?** The other criteria (compliance, model choice, rate limits) either force the answer outright or feed into whether you can sustain that utilization.
 
 ## Tradeoff matrix
 
 | Criterion | Managed API | Self-hosted (own/rented GPUs) | Hybrid |
 |---|---|---|---|
-| $/M tokens at low/bursty volume | Lowest — pay only for what you use | Highest — idle GPUs bill 24/7 regardless of traffic | Managed API absorbs the burst; baseline stays cheap |
-| $/M tokens at high, steady volume | Fixed per-token rate, no ceiling on savings | Lowest, once utilization clears the breakeven floor | Baseline captures self-host economics, overflow pays API rate |
-| Latency / tail control | Shared multi-tenant infra; you don't control the queue | Full control over batching, hardware, and colocation | Full control on the baseline path only |
-| Data residency / compliance | Depends on provider ZDR/DPA terms, see [[Concept - PII Redaction and Data Retention]] | Full control — data never leaves your infra | Route by sensitivity: PII on-prem, rest to API |
-| Model choice | Whatever the provider ships | Any open-weights model, any custom fine-tune, any number of fine-tuned variants sharing a GPU fleet (see [[Concept - GPU Orchestration on Kubernetes]]) | Best of both, at the cost of running two paths |
-| Ops burden | ~Zero — the provider runs the fleet | Real: serving-engine tuning, GPU fleet health, on-call | Both burdens, at smaller scale each |
-| Time to first token in production | Hours (an API key) | Weeks (procurement, serving-stack setup — see [[Breakdown - vLLM]] — and load testing) | Managed API ships first; self-host baseline added later |
+| $/M tokens at low/bursty volume | Lowest; pay only for what you use | Highest; idle GPUs bill 24/7 regardless of traffic | Managed API absorbs the burst; baseline stays cheap |
+| $/M tokens at high, steady volume | Fixed per-token rate, no ceiling on savings | Lowest, once utilization clears the breakeven floor | Baseline gets self-host economics, overflow pays API rate |
+| Latency / tail control | Shared multi-tenant infra; you don't control the queue | Full control over batching, hardware and colocation | Full control on the baseline path only |
+| Data residency / compliance | Depends on provider ZDR/DPA terms, see [[Concept - PII Redaction and Data Retention]] | Full control; data never leaves your infra | Route by sensitivity: PII on-prem, rest to API |
+| Model choice | Whatever the provider ships | Any open-weights model, any custom fine-tune, any number of fine-tuned variants sharing a GPU fleet (see [[Concept - GPU Orchestration on Kubernetes]]) | Both, at the cost of running two paths |
+| Ops burden | ~Zero; the provider runs the fleet | Real: serving-engine tuning, GPU fleet health, on-call | Both burdens, each at smaller scale |
+| Time to first token in production | Hours (an API key) | Weeks (procurement, serving-stack setup per [[Breakdown - vLLM]], load testing) | Managed API ships first; self-host baseline added later |
 | Rate-limit ceiling | Bounded by your provider tier | None beyond your own hardware | API ceiling only bites on the overflow path |
 
-**The breakeven math**, worth having memorized:
+**The breakeven math.** Worth memorizing:
 
 $$
 \$/\text{M tokens}_{\text{self-host}} = \frac{\text{GPU }\$/\text{hr}}{\text{tokens/hr throughput} \times \text{utilization}} \times 10^6
 $$
 
-Illustrative order-of-magnitude example (as of 2026, not a benchmark result): an H100 at roughly \$2-3/hr sustaining on the order of a few thousand output tokens/sec aggregate under [[Concept - Continuous Batching]] for a mid-sized open-weights model works out to well under \$1/M output tokens at high utilization — but at 20% utilization (the classic "we run it because we bought it" outcome) that same math is 4-5x worse, and a small/cheap managed model at roughly \$0.1-0.6/M output (see [[Concept - Cost Engineering for LLM Applications]]) wins outright. The picture flips hardest at the frontier end: a frontier-class API model running \$10-75/M output makes self-hosting an equivalent-capability open model pay off at a much lower utilization floor, because the API alternative is so much more expensive per token in the first place.
+An illustrative order-of-magnitude example (as of 2026, not a benchmark result): an H100 at roughly \$2-3/hr, sustaining on the order of a few thousand output tokens/sec aggregate under [[Concept - Continuous Batching]] for a mid-sized open-weights model, comes out well under \$1/M output tokens at high utilization. At 20% utilization (the classic "we run it because we bought it" outcome) the same math is 4-5x worse, and a small, cheap managed model at roughly \$0.1-0.6/M output (see [[Concept - Cost Engineering for LLM Applications]]) wins outright. The picture flips hardest at the frontier end. A frontier-class API model at \$10-75/M output lets an equivalent-capability self-hosted open model pay off at a much lower utilization floor, because the API is so much more expensive per token to begin with.
 
 ## The details that flip the decision
 
-- **Batch and offline workloads are the strongest self-host case.** If work can be queued and processed continuously rather than served interactively, utilization is trivial to keep near 100% — the breakeven math favors self-host even at moderate total volume, because there's no idle time to pay for.
-- **Data residency and compliance override the cost math entirely.** On-prem requirements (financial, health, government data) or a provider's data-handling terms that don't clear your bar force self-hosting regardless of utilization — see [[Concept - PII Redaction and Data Retention]] for what the alternative (ZDR endpoints, signed DPAs, regional residency) actually covers and where it falls short.
-- **Provider rate-limit ceilings force the decision when volume is bursty but bounded.** A workload that occasionally needs more throughput than your provider tier allows can't just "pay more" past a hard TPM/RPM ceiling — self-hosting or a hybrid burst-overflow path becomes mandatory, independent of steady-state cost.
-- **Hidden self-host costs routinely eat the projected savings.** GPU-failure mean-time-to-repair, autoscaling cold starts on a fresh replica, the engineering effort to actually reach the throughput the breakeven math assumed, and the ongoing cost of tracking new model releases are all real line items the naive \$/token comparison omits — this is the "we saved on tokens but hired an infra team and ran cards at 20%" failure mode, and it's the modal way this decision goes wrong in practice.
-- **Hybrid architectures are usually the mature end state, not a compromise.** Self-host a steady baseline and overflow bursts to a managed API, route by data sensitivity (PII on-prem, everything else to the API), or run a cascade — cheap self-hosted model first, escalate to a frontier API model only when needed, per [[Concept - Model Routing and Cascades]]. None of these require picking one side permanently.
+- **Batch and offline workloads are the strongest self-host case.** Work that can be queued and processed continuously keeps utilization near 100% trivially, so the breakeven math favors self-hosting even at moderate total volume. There's no idle time to pay for.
+- **Data residency and compliance override the cost math.** On-prem requirements (financial, health, government data), or provider data-handling terms that don't clear your bar, force self-hosting whatever the utilization. [[Concept - PII Redaction and Data Retention]] says what the alternative (ZDR endpoints, signed DPAs, regional residency) handles and where it falls short.
+- **Provider rate-limit ceilings force the decision when volume is bursty but bounded.** A workload that sometimes needs more throughput than your tier allows can't "pay more" past a hard TPM/RPM ceiling. Self-hosting or a hybrid burst-overflow path becomes mandatory, whatever the steady-state cost.
+- **Hidden self-host costs routinely eat the projected savings.** GPU-failure mean-time-to-repair, autoscaling cold starts on a fresh replica, the engineering work to actually reach the throughput the breakeven math assumed, and the ongoing cost of tracking new model releases are all real line items the naive \$/token comparison leaves out. This is the "we saved on tokens but hired an infra team and ran cards at 20%" failure, and it's the modal way this decision goes wrong in practice.
+- **Hybrid is usually the mature end state.** It isn't a compromise. Self-host a steady baseline and overflow bursts to a managed API; route by data sensitivity (PII on-prem, everything else to the API); or run a cascade, with a cheap self-hosted model first and escalation to a frontier API model only when needed ([[Concept - Model Routing and Cascades]]). None of these commit you to one side permanently.
 
 ## Connections
 

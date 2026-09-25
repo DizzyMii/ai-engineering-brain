@@ -6,7 +6,7 @@ summary: "The defining agentic-coding benchmark: real GitHub issues graded by hi
 
 # Breakdown - SWE-bench
 
-> SWE-bench (Jimenez et al., Princeton, 2023) is the benchmark that came to define "can an AI agent do software engineering." It grades a model on whether it can produce a patch that resolves a real GitHub issue and passes the repository's hidden tests. It matters because almost every headline agentic-coding claim from 2024–2026 — Devin's launch, every "our model scores X% on SWE-bench" — is a SWE-bench number, and reading those numbers correctly is the difference between a sound and a fooled deployment decision. Date-stamped: as of mid-2026 the benchmark's flagship variant was effectively retired by OpenAI over contamination.
+> SWE-bench (Jimenez et al., Princeton, 2023) is the benchmark that came to define "can an AI agent do software engineering." A model is graded on whether its patch resolves a real GitHub issue and passes the repository's hidden tests. Almost every headline agentic-coding claim from 2024–2026 is a SWE-bench number, from Devin's launch to every "our model scores X% on SWE-bench." Read those numbers wrong and you make a fooled deployment decision. Date-stamped: as of mid-2026 OpenAI had effectively retired the flagship variant over contamination.
 
 ## The headline numbers
 
@@ -21,11 +21,11 @@ summary: "The defining agentic-coding benchmark: real GitHub issues graded by hi
 | Same models on SWE-bench Pro (2026) | ~23–58% | E2 |
 | OpenAI audit (Feb 2026) | ≥**59.4%** of a hard subset had flawed tests; Verified retired | E2 (OpenAI's own) |
 
-The two rows that matter: the 2023→2026 climb from 1.96% to ~80% looks like solved software engineering, and it is not. The Verified→Pro drop of 20–50 points on the *same models* is the number that tells the truth.
+Two rows matter. The 2023→2026 climb from 1.96% to ~80% looks like solved software engineering, and it isn't. The Verified→Pro drop of 20–50 points on the *same models* is the number that tells the truth.
 
-## How it actually works
+## How it works
 
-Construction is the clever, honest core of the design:
+The construction is the honest core of the design:
 
 ```
 Mine 12 popular Python repos (django, sympy, scikit-learn, flask, ...)
@@ -43,28 +43,28 @@ Grade a model's patch by EXECUTION, not similarity:
 Resolved = every FAIL_TO_PASS and PASS_TO_PASS test passes.
 ```
 
-The elegance is that the ground truth is *execution of the human-written tests that accompanied the real fix* — no LLM judge, no string match. That is why SWE-bench became the standard and why it belongs in any [[Deep Dive - Designing an Eval Harness]] discussion: a hidden, executable oracle is the gold standard, and most benchmarks don't have one. It is the concrete instance of the [[Concept - AI in Software Testing]] insight that a correct test *is* the specification.
+Ground truth is *execution of the human-written tests that came with the real fix*. There's no LLM judge and no string match. That's how SWE-bench became the standard, and why it belongs in any [[Deep Dive - Designing an Eval Harness]] discussion: a hidden, executable oracle is the gold standard, and most benchmarks lack one. It's also the concrete case of the [[Concept - AI in Software Testing]] idea that a correct test *is* the specification.
 
 ## The clever parts
 
-- **Execution-graded, real issues.** No rubric, no judge model — the repo's own regression tests decide. This resists the gaming that plagues [[Concept - LLM-as-Judge]] evals and makes a passing patch mean something concrete.
-- **Verified: paying down the noise floor.** OpenAI's SWE-bench Verified (Aug 2024, 500 tasks) had human engineers filter out underspecified issues and broken/over-strict tests from the original set — a real improvement that made the benchmark a cleaner signal, and the reason "Verified" became the quoted number.
-- **The scaffold is part of the score.** The same model scores wildly differently under different agent harnesses (retrieval strategy, how many turns, whether it can run tests, prompt). A "SWE-bench score" is a **model + scaffold + prompt** tuple, not a property of the model. This is why [[Deep Dive - Agentic Coding in Production]] treats the scaffold as first-class, and why cross-vendor leaderboard comparisons are frequently apples-to-oranges.
+- **Execution-graded, real issues.** No rubric, no judge model. The repo's own regression tests decide, which resists the gaming common in [[Concept - LLM-as-Judge]] evals and gives a passing patch a concrete meaning.
+- **Verified paid down the noise floor.** For SWE-bench Verified (Aug 2024, 500 tasks), OpenAI had human engineers filter out underspecified issues and broken or over-strict tests from the original set. It was a real improvement in signal, and it's why "Verified" became the quoted number.
+- **The scaffold is part of the score.** The same model scores wildly differently under different agent harnesses: retrieval strategy, turn budget, whether it can run tests, the prompt. A "SWE-bench score" belongs to a **model + scaffold + prompt** tuple, not to the model. So [[Deep Dive - Agentic Coding in Production]] treats the scaffold as a primary design concern, and cross-vendor leaderboard comparisons are frequently apples-to-oranges.
 
 ## What it got wrong / what's dated
 
-This is where the note earns its keep — SWE-bench is simultaneously the best public proxy and actively misleading as an absolute number.
+SWE-bench is the best public proxy and, read as an absolute number, actively misleading.
 
-- **The Devin score-inflation episode (2024).** Cognition's March 2024 launch quoted 13.86%, ~7x the prior public SOTA, and a viral Upwork demo of Devin completing a paid job. Carl Brown's "Debunking Devin" (April 2024) showed the benchmark figure was on a non-standard subset and the demo was oversold — the canonical [[Concept - The Capability-Reliability Gap]] cautionary tale, and a fixture of [[Lore - AI Coding War Stories]]. Treat any launch-day benchmark number as an upper bound produced under ideal conditions.
-- **Contamination is now the dominant confound.** The tasks come from public GitHub predating model training cutoffs, so models may have *seen the fix*. In Feb 2026 OpenAI reported frontier models could reproduce gold-patch solutions from the task ID alone — a fingerprint of training-data leakage — and independent work found ~32% of successful Verified patches involved solution leakage and correct file-path recall up to ~76% of the time. This is [[Concept - Benchmark Contamination]] in its purest form.
-- **Even the tests are flawed.** OpenAI (Feb 23, 2026) stopped evaluating on Verified after auditing a ~27.6% subset (~138 of the 500, drawn from frequently-failed tasks) and finding **≥59.4% had flawed test cases**: ~35.5% too strict (rejecting functionally correct patches by enforcing implementation details) and ~18.8% too loose (checking behavior the issue never specified). It shifted to **SWE-bench Pro** — while itself acknowledging Pro is also imperfect (E1, no clean independent audit of Pro's task quality as of mid-2026). No benchmark here is clean.
-- **The format omits most real work.** Python bug-fix with a known failing test excludes code review, security, ambiguous requirements, private stacks, cross-service effects, and greenfield design — i.e., most of the job. The Verified→Pro collapse to ~23–58% is the quantified [[Concept - The Evaluation Gap]], and it mirrors the [[Breakdown - The METR Developer Slowdown RCT]] finding that benchmark competence doesn't equal real-repo productivity.
+- **The Devin score inflation (2024).** Cognition's March 2024 launch quoted 13.86%, ~7x the prior public SOTA, plus a viral Upwork demo of Devin completing a paid job. Carl Brown's "Debunking Devin" (April 2024) showed the figure came from a non-standard subset and the demo was oversold. It's the standard [[Concept - The Capability-Reliability Gap]] cautionary tale and a fixture of [[Lore - AI Coding War Stories]]. Treat any launch-day benchmark number as an upper bound produced under ideal conditions.
+- **Contamination is now the dominant confound.** The tasks come from public GitHub history that predates training cutoffs, so models may have *seen the fix*. In Feb 2026 OpenAI reported frontier models could reproduce gold-patch solutions from the task ID alone, a fingerprint of training-data leakage. Independent work found ~32% of successful Verified patches involved solution leakage, with correct file-path recall up to ~76% of the time. [[Concept - Benchmark Contamination]] doesn't get purer than this.
+- **The tests are flawed too.** OpenAI (Feb 23, 2026) stopped evaluating on Verified after auditing a ~27.6% subset (~138 of the 500, drawn from frequently-failed tasks). **≥59.4% had flawed test cases**: ~35.5% too strict, rejecting functionally correct patches by enforcing implementation details, and ~18.8% too loose, checking behavior the issue never specified. It moved to **SWE-bench Pro** while acknowledging Pro is imperfect too (E1, no clean independent audit of Pro's task quality as of mid-2026). No benchmark here is clean.
+- **The format leaves out most real work.** Python bug-fixes with a known failing test exclude code review, security, ambiguous requirements, private stacks, cross-service effects and greenfield design, which is most of the job. The Verified→Pro collapse to ~23–58% is [[Concept - The Evaluation Gap]] put in numbers. It matches the [[Breakdown - The METR Developer Slowdown RCT]] finding that benchmark competence doesn't equal real-repo productivity.
 
 ## What to steal
 
-- **Score deltas under a fixed scaffold, never absolute percentages.** Because the number is a model+scaffold+prompt tuple and the dataset is contaminated, the only defensible internal use is comparing models *under identical harnesses* and treating the absolute value as meaningless. This is the reading discipline the [[Reference - Developer Productivity Studies]] catalog applies to every study.
-- **Never quote a Verified % as "% of real engineering work."** It is the single most common misuse. An 80% Verified model is not 80% of an engineer; the [[Concept - AI Coding Assistants]] framing and the [[Concept - METR Time Horizons]] measurement both exist because benchmark peaks overstate deployed reliability.
-- **Build your own held-out, post-cutoff, execution-graded eval.** The transferable design pattern is SWE-bench's oracle (hidden real tests) applied to *your* private codebase — contamination-free and representative — rather than a public leaderboard. This is where the [[Concept - AI's Effect on Code Quality and Security]] concern about tests that freeze buggy behavior also bites: a benchmark is only as honest as its tests, and SWE-bench's own tests were 59% flawed.
+- **Compare score deltas under a fixed scaffold, never absolute percentages.** The number belongs to a model+scaffold+prompt tuple and the dataset is contaminated. The only defensible internal use is comparing models *under identical harnesses* and ignoring the absolute value. The [[Reference - Developer Productivity Studies]] catalog applies the same discipline to every study.
+- **Never quote a Verified % as "% of real engineering work."** It's the most common misuse. An 80% Verified model is not 80% of an engineer. The [[Concept - AI Coding Assistants]] framing and the [[Concept - METR Time Horizons]] measurement both exist because benchmark peaks overstate deployed reliability.
+- **Build your own held-out, post-cutoff, execution-graded eval.** Take SWE-bench's oracle (hidden real tests) and apply it to *your* private codebase, which is contamination-free and representative, instead of trusting a public leaderboard. The [[Concept - AI's Effect on Code Quality and Security]] worry about tests that freeze buggy behavior applies here as well. A benchmark is only as honest as its tests, and SWE-bench's own tests were 59% flawed.
 
 ## Connections
 

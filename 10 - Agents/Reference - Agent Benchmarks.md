@@ -5,7 +5,7 @@ summary: "Lookup matrix of agent capability benchmarks — coding, web, general-
 ---
 # Reference - Agent Benchmarks
 
-Scores below move quarterly and many task sources predate model training cutoffs, so treat every number as *(as of 2026)* and re-verify before quoting. See [[Concept - Benchmark Contamination]] for why contamination is close to unavoidable in this category, [[Concept - Agent Evaluation Challenges]] for the deeper reasons agent numbers are harder to trust than single-turn benchmark scores, and [[Deep Dive - Designing an Eval Harness]] for how to build the infrastructure these benchmarks assume you already have.
+Scores here move quarterly and many task sources predate model training cutoffs, so read every number as *(as of 2026)* and re-verify before quoting. [[Concept - Benchmark Contamination]] explains why contamination is close to unavoidable in this category. [[Concept - Agent Evaluation Challenges]] covers why agent numbers are harder to trust than single-turn scores, and [[Deep Dive - Designing an Eval Harness]] covers the infrastructure these benchmarks assume you already have.
 
 ## Coding
 
@@ -21,28 +21,28 @@ Scores below move quarterly and many task sources predate model training cutoffs
 |---|---|---|---|
 | WebArena | Realistic tasks across 5 self-hosted site categories | Task success rate | DOM-based, no visual grounding required |
 | VisualWebArena | WebArena + visual grounding | Task success rate | Adds screenshots as the primary observation |
-| WebVoyager | Real, live production websites | Task success rate | Non-sandboxed — higher variance, environment drifts under you |
-| BrowseComp | Hard retrieval-style browsing/search (OpenAI, 2025) | Accuracy | Deliberately designed to resist answer-memorization |
+| WebVoyager | Real, live production websites | Task success rate | Non-sandboxed: higher variance, the environment drifts under you |
+| BrowseComp | Hard retrieval-style browsing/search (OpenAI, 2025) | Accuracy | Designed to resist answer memorization |
 
 ## General assistant
 
 | Benchmark | What it tests | Metric | Notes |
 |---|---|---|---|
 | GAIA | Real multi-step tasks, 3 difficulty tiers (Meta, 2023) | % solved | Humans ~92% vs. early GPT-4-class agents ~15% at launch; gap narrowed sharply through 2025–26 |
-| AgentBench | Multi-environment (OS, DB, web, games, more) | Aggregate score across environments | Breadth over depth — weak signal on any single environment |
+| AgentBench | Multi-environment (OS, DB, web, games, more) | Aggregate score across environments | Breadth over depth; weak signal on any single environment |
 
 ## Tool-agent-user
 
 | Benchmark | What it tests | Metric | Notes |
 |---|---|---|---|
-| tau-bench / tau2-bench | Retail/airline agent with a simulated user in the loop | pass^k (succeeds k independent times) | pass^k drops sharply relative to pass@1 — measures reliability, not one-shot capability |
+| tau-bench / tau2-bench | Retail/airline agent with a simulated user in the loop | pass^k (succeeds k independent times) | pass^k drops sharply relative to pass@1; it measures reliability, not one-shot capability |
 
 ## Computer use
 
 | Benchmark | What it tests | Metric | Notes |
 |---|---|---|---|
 | OSWorld | Real desktop tasks across real applications and OS | Task success rate | [[Concept - Computer Use and GUI Grounding|Claude Computer Use]] scored roughly mid-teens vs. ~72% human (late 2024); improved through 2025–26 but still well below human reliability |
-| ScreenSpot | Pixel-to-coordinate grounding accuracy | Grounding accuracy | Isolated grounding metric — doesn't capture full-task success |
+| ScreenSpot | Pixel-to-coordinate grounding accuracy | Grounding accuracy | Isolated grounding metric; says nothing about full-task success |
 
 ## Specialized
 
@@ -52,17 +52,17 @@ Scores below move quarterly and many task sources predate model training cutoffs
 | Cybench | Security / CTF-style tasks | % solved |
 | Terminal-Bench | Terminal / shell-driven tasks | % solved |
 
-An alternative capability framing that sidesteps fixed-task-suite saturation entirely is [[Concept - METR Time Horizons]], which measures the length of task an agent can complete autonomously at 50% success rather than a pass rate on a static suite — useful when the tables above start clustering near ceiling.
+[[Concept - METR Time Horizons]] frames capability differently and avoids fixed-suite saturation: it measures how long a task an agent can complete autonomously at 50% success, in place of a pass rate on a static suite. Use it when the tables above start clustering near ceiling.
 
 ## Metric definitions
 
 | Metric | Meaning |
 |---|---|
 | pass@1 | Succeeds on one independent attempt |
-| pass^k | Succeeds all k times across k independent attempts — a reliability metric, not a capability ceiling |
+| pass^k | Succeeds all k times across k independent attempts; a reliability metric, not a capability ceiling |
 | resolved-rate | % of tasks where an automated hidden-test oracle passes (SWE-bench family) |
 
-pass@1, pass^k, and resolved-rate are **not comparable across benchmarks** — a 70% resolved-rate on SWE-bench Verified and a 70% pass@1 on GAIA measure structurally different things (unit-test ground truth vs. a scored/judged answer). Always footnote which metric a headline number uses before citing it, and don't take a single-run headline score at face value without the [[Concept - Statistical Rigor in Model Evaluation|variance/significance discipline]] applied to any other benchmark number. [[Concept - LLM-as-Judge|LLM-judged]] scoring (parts of GAIA and AgentBench) additionally inherits judge bias on top of run-to-run variance.
+pass@1, pass^k and resolved-rate are **not comparable across benchmarks**. A 70% resolved-rate on SWE-bench Verified and a 70% pass@1 on GAIA measure different things (unit-test ground truth vs. a scored/judged answer). Footnote which metric a headline number uses before citing it, and don't accept a single-run headline score without the same [[Concept - Statistical Rigor in Model Evaluation|variance/significance discipline]] you'd apply to any other benchmark number. [[Concept - LLM-as-Judge|LLM-judged]] scoring (parts of GAIA and AgentBench) also inherits judge bias on top of run-to-run variance.
 
 ## Connections
 

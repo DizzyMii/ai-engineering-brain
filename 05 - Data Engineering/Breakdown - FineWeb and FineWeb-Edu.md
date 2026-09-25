@@ -6,18 +6,18 @@ summary: "How Hugging Face built the 15T-token FineWeb corpus and its ablation-v
 
 # Breakdown - FineWeb and FineWeb-Edu
 
-> FineWeb is Hugging Face's 15-trillion-token open web corpus, and FineWeb-Edu is its educational-value-filtered subset — both released by Penedo et al. in 2024 as the first web-scale corpus where nearly every filtering decision was validated by actually training models rather than argued from intuition. It matters because it replaced "trust me, we cleaned it" with a public, reusable ablation harness, and by 2026 it — or its DataTrove tooling — sits somewhere in the ancestry of a large share of open pretraining corpora (see [[Reference - Model Genealogy]]).
+> FineWeb is Hugging Face's 15-trillion-token open web corpus. FineWeb-Edu is its subset filtered for educational value. Penedo et al. released both in 2024, and it was the first web-scale corpus where nearly every filtering decision was checked by training models instead of argued from intuition. That swapped "trust me, we cleaned it" for a public, reusable ablation harness. By 2026 FineWeb, or its DataTrove tooling, shows up somewhere in the ancestry of a large share of open pretraining corpora (see [[Reference - Model Genealogy]]).
 
 ## The headline numbers
 
 - **FineWeb**: 15T tokens extracted from 96 Common Crawl dumps spanning 2013-2024.
-- **FineWeb-Edu**: two released cuts drawn from the FineWeb pool — 1.3T tokens at an aggressive educational-value threshold, and 5.4T tokens at a looser one.
-- **Ablation unit**: every design decision was tested by training a 1.82B-parameter model on 350B tokens of the candidate variant — about 192 tokens/parameter, far past the ~20-tokens/parameter [[Concept - Scaling Laws|Chinchilla-optimal]] point, a deliberate overtraining choice that turns the proxy model into a low-noise measuring instrument rather than a compute-efficient one — and comparing on a curated early-signal eval suite (HellaSwag, MMLU, ARC-style tasks).
-- **Result**: FineWeb matched or beat RefinedWeb, C4, Dolma, and RedPajama-v2 on that suite; FineWeb-Edu produced 5-7 point jumps on MMLU/ARC-style benchmarks over base FineWeb at equal token count.
+- **FineWeb-Edu**: two cuts drawn from the FineWeb pool. 1.3T tokens at an aggressive educational-value threshold, 5.4T tokens at a looser one.
+- **Ablation unit**: each design decision was tested by training a 1.82B-parameter model on 350B tokens of the candidate variant and comparing on a curated early-signal eval suite (HellaSwag, MMLU, ARC-style tasks). That's about 192 tokens/parameter, far past the ~20-tokens/parameter [[Concept - Scaling Laws|Chinchilla-optimal]] point. The overtraining is deliberate: it makes the proxy a low-noise measuring instrument, not a compute-efficient model.
+- **Result**: FineWeb matched or beat RefinedWeb, C4, Dolma, and RedPajama-v2 on that suite. FineWeb-Edu gave 5-7 point jumps on MMLU/ARC-style benchmarks over base FineWeb at equal token count.
 
-## How it actually works
+## How it works
 
-FineWeb instantiates the generic [[Deep Dive - The Pretraining Data Pipeline]] stage graph end to end, run independently per Common Crawl dump before a final merge:
+FineWeb runs the generic [[Deep Dive - The Pretraining Data Pipeline]] stage graph end to end, independently per Common Crawl dump, then merges:
 
 ```mermaid
 flowchart LR
@@ -34,25 +34,35 @@ flowchart LR
     J -- no --> L[discarded]
 ```
 
-Between extraction and dedup sits a Gopher/C4-style heuristic filter stack, with thresholds tabulated in [[Reference - Data Filtering Heuristics]]. Two findings anchor the rest of the pipeline. First, extraction: FineWeb re-extracts from raw WARC with [[Concept - Text Extraction from Web Pages|trafilatura]] instead of using Common Crawl's pre-extracted WET files, replicating RefinedWeb's (Penedo et al. 2023) central claim that extraction quality alone is a major lever — menus, nav chrome, and cookie banners in WET output are training-signal poison. Second, [[Concept - Deduplication at Scale|deduplication]]: MinHash-LSH runs *per dump*, not globally across all 96 dumps, because a global pass was ablated and found to hurt downstream accuracy (see "the clever parts" below).
+Between extraction and dedup is a Gopher/C4-style heuristic filter stack; the thresholds are tabulated in [[Reference - Data Filtering Heuristics]]. On extraction, FineWeb re-extracts from raw WARC with [[Concept - Text Extraction from Web Pages|trafilatura]] and skips Common Crawl's pre-extracted WET files. This replicates the central claim of RefinedWeb (Penedo et al. 2023) that extraction quality alone is a major lever. Menus, nav chrome and cookie banners in WET output poison the training signal. On [[Concept - Deduplication at Scale|deduplication]], MinHash-LSH runs *per dump*, not globally across all 96 dumps. A global pass was ablated and hurt downstream accuracy (explained below).
 
-FineWeb-Edu adds a second filtering pass on top of the finished FineWeb pool: sample ~460k documents, prompt Llama-3-70B-Instruct to rate each 0-5 for "educational value," then train a cheap linear classifier over document embeddings to replicate those scores across all 15T tokens, and keep documents scoring ≥3 (or a lower threshold for the 5.4T cut).
+FineWeb-Edu adds a second filtering pass over the finished FineWeb pool. Sample ~460k documents, prompt Llama-3-70B-Instruct to rate each 0-5 for "educational value," train a cheap linear classifier over document embeddings to reproduce those scores across all 15T tokens, and keep documents scoring ≥3 (a lower threshold gives the 5.4T cut).
 
 ## The clever parts
 
-1. **Ablation-as-methodology.** Every claim — extraction tool, filter thresholds, dedup granularity — is a measured result from the 1.82B/350B proxy protocol, not an argument from priors. This is the paper's real contribution: a reusable harness, not just a dataset ([[Concept - The Data-Centric View of Model Quality]] cites exactly this kind of evidence).
-2. **Re-extraction from WARC**, confirming the extractor is as consequential as any downstream filter — a lesson easy to skip because extraction "isn't filtering," but it dominates.
-3. **Per-dump dedup, counterintuitively.** Global cross-dump MinHash dedup was tried and *hurt* performance: content duplicated across many crawls tends to be duplicated *because it's good* (canonical reference pages, popular articles), so global dedup preferentially strips high-quality repeated text while leaving unique low-quality junk over-represented in relative terms. Per-dump dedup avoids this survivorship inversion.
-4. **Teacher-label-then-distill for "educational value."** Llama-3-70B-Instruct is far too expensive to score 15T tokens directly, so it scores a 460k sample and a cheap classifier over embeddings replicates its judgment at negligible per-token cost — the same expensive-teacher/cheap-distilled-scorer pattern used throughout [[Concept - Quality Filtering for Pretraining Data]].
-5. **Threshold as a tunable knob, not a fixed verdict.** Shipping both a 1.3T aggressive cut and a 5.4T permissive cut lets downstream users pick their point on the quality/quantity frontier rather than being handed one dataset with one implicit tradeoff baked in.
+The main contribution is the method. Extraction tool, filter thresholds, dedup granularity: each is a measured result from the 1.82B/350B proxy protocol. You get a reusable harness as well as a dataset, and [[Concept - The Data-Centric View of Model Quality]] cites this kind of evidence.
+
+Re-extracting from WARC showed the extractor matters as much as any downstream filter. Easy to skip because extraction "isn't filtering," but it dominates.
+
+**Per-dump dedup** is the counterintuitive one. Global cross-dump MinHash dedup was tried and *hurt* performance. Content duplicated across many crawls tends to be duplicated *because it's good* (canonical reference pages, popular articles). Global dedup strips that repeated high-quality text and leaves unique low-quality junk relatively over-represented. Per-dump dedup avoids this survivorship inversion.
+
+**Teacher-label, then distill.** Llama-3-70B-Instruct costs far too much to score 15T tokens directly. It scores a 460k sample, and a cheap classifier over embeddings copies its judgment at negligible per-token cost. The same expensive-teacher/cheap-scorer pattern runs through [[Concept - Quality Filtering for Pretraining Data]].
+
+**The threshold is a knob.** Shipping a 1.3T aggressive cut and a 5.4T permissive cut lets users pick their own point on the quality/quantity frontier, where a single dataset would bake in one implicit tradeoff.
 
 ## What it got wrong / what's dated
 
-FineWeb's ablation suite and educational classifier were built and validated primarily on English (multilingual FineWeb-2 arrived later). "Educational" is a *proxy*, not ground truth: the classifier inherits Llama-3-70B's notion of what counts as educational, which skews toward formal, Wikipedia/textbook-register prose and under-represents dialogue, creative writing, and informal-but-useful text — the same distribution-narrowing failure mode as [[Lore - The C4 Blocklist Incident]], arrived at through a smarter mechanism instead of a blunt wordlist. At release, FineWeb was web-only with no heavy [[Concept - Synthetic Training Data|synthetic]] augmentation, unlike some of the recipes that followed it, and its per-dump MinHash dedup still only catches *lexical* near-duplicates — paraphrase-level duplication was left for follow-up work like [[Concept - Semantic Deduplication]]. The 1.82B/350B proxy, while far better than vibes, is still a small-scale stand-in; conclusions validated there can in principle fail to transfer at 70B+ scale and multi-trillion-token budgets — the same transfer risk documented for [[Concept - Learned Data Mixing (DoReMi and Mixing Laws)]].
+The ablation suite and the educational classifier were built and validated mostly on English; multilingual FineWeb-2 came later. "Educational" is a *proxy*, not ground truth. The classifier inherits Llama-3-70B's idea of what's educational, which skews toward formal Wikipedia/textbook-register prose and under-represents dialogue, creative writing and informal-but-useful text. That's the distribution-narrowing failure of [[Lore - The C4 Blocklist Incident]], reached through a smarter mechanism than a blunt wordlist.
+
+At release FineWeb was web-only, without the heavy [[Concept - Synthetic Training Data|synthetic]] augmentation some later recipes used. Its per-dump MinHash dedup still only catches *lexical* near-duplicates; paraphrase-level duplication was left to follow-up work like [[Concept - Semantic Deduplication]]. And the 1.82B/350B proxy, though far better than vibes, is a small-scale stand-in. Conclusions validated there can in principle fail to transfer at 70B+ scale and multi-trillion-token budgets, the same transfer risk documented for [[Concept - Learned Data Mixing (DoReMi and Mixing Laws)]].
 
 ## What to steal
 
-Never trust a filter's internal precision score — validate every filtering decision by training a small model and measuring real downstream benchmarks, exactly as FineWeb did, rather than assuming a classifier's confidence means anything about the model it will train. If you dedup across multiple partitions (crawls, sources, time windows), test per-partition versus global dedup empirically before assuming more aggressive dedup is strictly better — the FineWeb result generalizes beyond web text. The teacher-labels/cheap-distill pattern is reusable for any expensive-judgment-at-scale problem, not just "educational value." And in most production stacks FineWeb or FineWeb-Edu isn't used alone — it becomes one component of a larger [[Concept - Data Mixtures|data mixture]], blended with code, math, and domain-specific sources; the public ablation logs and blog series (a named instance of [[Reference - Where Real AI Knowledge Lives]]) are worth reading directly for the negative results, which are rarer to find published than the positive ones.
+Don't trust a filter's internal precision score. Validate each filtering decision the way FineWeb did, by training a small model and measuring real downstream benchmarks. A classifier's confidence says nothing about the model it will train.
+
+If you dedup across partitions (crawls, sources, time windows), test per-partition against global dedup before assuming more aggressive is better. The FineWeb result generalizes beyond web text. Teacher labels plus a cheap distilled scorer works for any expensive-judgment-at-scale problem, not only "educational value."
+
+In most production stacks FineWeb or FineWeb-Edu isn't used alone. It becomes one component of a larger [[Concept - Data Mixtures|data mixture]] alongside code, math and domain-specific sources. Read the public ablation logs and blog series (a named instance of [[Reference - Where Real AI Knowledge Lives]]) for the negative results, which get published less often than positive ones.
 
 ## Connections
 - [[Concept - Quality Filtering for Pretraining Data]] — FineWeb-Edu's teacher-label/distill classifier is the canonical worked example of the LLM-annotator paradigm this concept catalogs.

@@ -5,7 +5,7 @@ summary: "Whether to train your own model, buy API access, or wrap a product on 
 ---
 # Decision - Build vs Buy vs Wrap
 
-> **The decision in one sentence:** as of 2026, the default answer for the 80% case is **buy or wrap** — pretraining a frontier model costs $100M-$1B+ and deflating token prices make owning a model economically irrational for all but labs and a handful of vertical/sovereign plays; the real strategic question almost every team actually faces is not "build vs. buy" but "wrap well vs. wrap thin."
+> **The decision in one sentence:** as of 2026, the default for the 80% case is **buy or wrap**. Pretraining a frontier model costs $100M-$1B+, and deflating token prices make owning one economically irrational for everyone except labs and a handful of vertical/sovereign plays. The question almost every team actually faces is "wrap well or wrap thin?"
 
 ## Decision flow
 
@@ -28,27 +28,41 @@ flowchart TD
 
 | | Build | Buy (raw API) | Wrap (product on API) |
 |---|---|---|---|
-| **Upfront cost** | $100M-$1B+ for a frontier-class pretrain (E1 estimate); lower but still $1M-$10M+ for a serious fine-tune of an open-weight base | Near-zero — pay per token | Near-zero model cost; real cost is product engineering |
-| **Time to capability** | 6-18+ months for a training run before anything ships | Immediate | Immediate, bounded by product build time |
-| **Ongoing cost trajectory** | Your own compute + retraining cadence to stay competitive with frontier releases | Falls with [[Concept - Token Price Deflation]] — but you don't control the curve | Same as buy, plus product COGS (see [[Concept - Unit Economics of LLM Products]]) |
-| **Platform risk** | None — you are the platform | High — a lab can ship your feature for free in a point release | High, mitigated only by owning something the lab doesn't (workflow, data, integrations) |
-| **Defensibility if it works** | Strongest, if the model itself is the product (rare outside labs) | None on its own | Depends entirely on what's wrapped — see "thin wrapper" test below |
+| **Upfront cost** | $100M-$1B+ for a frontier-class pretrain (E1 estimate); lower but still $1M-$10M+ for a serious fine-tune of an open-weight base | Near zero; pay per token | Near-zero model cost; the real cost is product engineering |
+| **Time to capability** | 6-18+ months of training before anything ships | Immediate | Immediate, bounded by product build time |
+| **Ongoing cost trajectory** | Your own compute plus a retraining cadence to keep up with frontier releases | Falls with [[Concept - Token Price Deflation]], but you don't control the curve | Same as buy, plus product COGS (see [[Concept - Unit Economics of LLM Products]]) |
+| **Platform risk** | None; you are the platform | High: a lab can ship your feature for free in a point release | High, mitigated only by owning something the lab doesn't (workflow, data, integrations) |
+| **Defensibility if it works** | Strongest, if the model itself is the product (rare outside labs) | None on its own | Depends entirely on what's wrapped; see the "thin wrapper" test below |
 | **Who actually does this (2026)** | Frontier labs; a few sovereign/vertical plays (e.g., regulated-industry, on-prem models) | Prototype-stage teams, low-differentiation internal tools | Nearly all successful AI-native product companies |
-| **Failure signature** | Burns capital training a model that's obsolete relative to the frontier before it ships | Commodity product with no moat, vulnerable to the lab's own first-party feature | "Thin wrapper" collapse — see Jasper below |
+| **Failure signature** | Burns capital on a model that's obsolete against the frontier before it ships | Commodity product with no moat, exposed to the lab's own first-party feature | "Thin wrapper" collapse; see Jasper below |
 
 ## The details that flip the decision
 
-**Why "buy or wrap" is the default.** Pretraining a frontier-class model costs an estimated **$100M-$1B+** (E1, estimates compiled around frontier lab economics — no public, audited per-model figure exists; see [[Breakdown - Frontier Lab Economics]]), and [[Concept - Token Price Deflation]] means the API alternative gets cheaper every quarter you wait. The economics only favor "build" when the marginal cost of *not* owning the model exceeds that capital outlay — true for a handful of labs racing for frontier capability, and true for specific verticals with proprietary data, extreme sustained query volume, or hard regulatory/data-residency requirements that no API vendor will satisfy. For nearly everyone else, "build" is a distraction from the actual product problem. See [[Decision - Fine-Tuning vs RAG vs Prompting]] for the calibrated middle ground (fine-tuning an open-weight base) that captures some of "build's" control without its capital cost.
+### Why buy or wrap is the default
 
-**The "thin wrapper" test.** The pejorative "thin wrapper" — a product that adds nothing a model vendor won't ship for free in its next release — is not about *whether* you wrapped a foundation model (nearly everyone does); it's about whether the wrapper owns anything durable. The test: do you own the **workflow**, the **data exhaust** the workflow generates, the **integrations** that make switching costly, and the **distribution** channel to the user — or do you own only a prompt template and a thin UI around someone else's completion endpoint? [[Concept - Moats in the AI Application Layer]] catalogs what a durable wrap looks like mechanically.
+Pretraining a frontier-class model costs an estimated **$100M-$1B+** (E1, estimates compiled around frontier lab economics; no public, audited per-model figure exists, see [[Breakdown - Frontier Lab Economics]]). Meanwhile [[Concept - Token Price Deflation]] makes the API alternative cheaper every quarter you wait. Build only pays when the marginal cost of *not* owning the model exceeds that capital outlay. That's true for a handful of labs racing for frontier capability, and for specific verticals with proprietary data, extreme sustained query volume, or hard regulatory/data-residency requirements no API vendor will meet. For nearly everyone else, building is a distraction from the product problem. The calibrated middle ground is fine-tuning an open-weight base, which gets some of build's control without its capital cost ([[Decision - Fine-Tuning vs RAG vs Prompting]]).
 
-**Cursor as the wrap-done-right case.** Cursor (Anysphere) wraps Anthropic and OpenAI models and still built a business valued at **$9.9B** with **$500M+ ARR by June 2025** (E2, TechCrunch, June 2025) — direct evidence that "wrap" is not inherently a weak position. What made it durable rather than thin: the IDE workflow itself, deep codebase-context retrieval, and the switching cost of a developer's daily tool — none of which a model API alone provides, and none of which OpenAI or Anthropic can trivially replicate without becoming an IDE company themselves. See [[Breakdown - The Cursor Ramp]] for the full mechanism.
+### The thin-wrapper test
 
-**Jasper as the platform-risk case, with the timeline corrected.** Jasper raised a **$125M Series A at a $1.5B valuation on October 18, 2022** (E3, TechCrunch/PR Newswire, Oct 2022). ChatGPT launched **November 30, 2022** — about six weeks later — and its free, general-purpose writing capability directly undercut Jasper's core product (AI copywriting), which had no comparable moat beyond prompt templates over GPT-3. The damage was not instantaneous: Jasper cut its 2023 ARR forecast by at least 30% and ran layoffs in July 2023, with an internal valuation reset of roughly 20% (down toward ~$1.2B) following in **September 2023** — about ten months after ChatGPT's launch, not "a month after" as a simplified version of this story sometimes claims (E2, The Information, Maginative reporting, Sept 2023). The corrected lesson still holds: a wrapper with no data moat, no workflow lock-in, and no distinct integration surface inherits its vendor's roadmap as direct competition, and the erosion can take months to show up in the numbers even after the competitive threat is obvious. See [[Lore - AI Wrapper Graveyard]] for more cases in this pattern.
+"Thin wrapper" is the insult for a product that adds nothing a model vendor won't ship for free next release. Nearly everyone wraps a foundation model, so wrapping isn't the issue. What matters is whether the wrapper owns anything durable. Ask: do you own the **workflow**, the **data exhaust** it generates, the **integrations** that make switching costly, and the **distribution** channel to the user? Or just a prompt template and a thin UI around someone else's completion endpoint? [[Concept - Moats in the AI Application Layer]] catalogs what a durable wrap looks like mechanically.
 
-**Platform risk is a spectrum, not a binary.** The question to ask before wrapping: "if [the model vendor] shipped this exact feature natively next quarter, would my product still have a reason to exist?" A "no" answer doesn't mean don't wrap — it means the wrap needs a data/workflow/distribution moat *before* it scales, not after a competitor's roadmap update makes the gap visible.
+### Cursor: wrap done right
 
-**"Buy" is rarely a permanent choice.** The strongest pattern observed among teams that eventually do some form of "build": start on the best available API to find product-market fit fast, instrument [[Concept - Unit Economics of LLM Products]] carefully, and only later selectively self-host or fine-tune the specific slice of traffic — often as little as 5% — where unit economics or control (latency, compliance, cost at volume) demand it. This sequencing avoids paying the capital cost of "build" before knowing whether the product justifies it, and it means the fine-tune/self-host decision is made with real usage data rather than a guess.
+Cursor (Anysphere) wraps Anthropic and OpenAI models and still built a business valued at **$9.9B** with **$500M+ ARR by June 2025** (E2, TechCrunch, June 2025). So wrapping isn't inherently weak. Cursor's durability came from the IDE workflow, deep codebase-context retrieval, and the switching cost of a developer's daily tool. A model API provides none of those, and OpenAI or Anthropic can't easily copy them without becoming an IDE company. Full mechanism in [[Breakdown - The Cursor Ramp]].
+
+### Jasper: platform risk, timeline corrected
+
+Jasper raised a **$125M Series A at a $1.5B valuation on October 18, 2022** (E3, TechCrunch/PR Newswire, Oct 2022). ChatGPT launched **November 30, 2022**, about six weeks later. Its free, general-purpose writing undercut Jasper's core product (AI copywriting), which had no moat beyond prompt templates over GPT-3.
+
+The damage took a while. Jasper cut its 2023 ARR forecast by at least 30% and ran layoffs in July 2023, and an internal valuation reset of roughly 20% (down toward ~$1.2B) followed in **September 2023**. That's about ten months after ChatGPT's launch, not "a month after" as simplified tellings sometimes claim (E2, The Information, Maginative reporting, Sept 2023). The lesson survives the correction. A wrapper with no data moat, no workflow lock-in and no distinct integration surface inherits its vendor's roadmap as direct competition, and the erosion can take months to reach the numbers even when the threat is obvious. More cases in [[Lore - AI Wrapper Graveyard]].
+
+### Platform risk is a spectrum
+
+Before wrapping, ask: "if [the model vendor] shipped this exact feature natively next quarter, would my product still have a reason to exist?" A "no" doesn't mean don't wrap. It means you need the data/workflow/distribution moat *before* you scale, not after a competitor's roadmap update exposes the gap.
+
+### Buy is rarely permanent
+
+The strongest pattern among teams that eventually build something: start on the best available API to find product-market fit fast, instrument [[Concept - Unit Economics of LLM Products]] carefully, and later self-host or fine-tune only the slice of traffic (often as little as 5%) where unit economics or control (latency, compliance, cost at volume) demand it. You avoid paying build's capital cost before knowing the product justifies it, and the fine-tune/self-host call gets made on real usage data instead of a guess.
 
 ## Connections
 

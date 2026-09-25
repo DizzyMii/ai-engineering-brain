@@ -6,7 +6,7 @@ summary: "Large-scale migrations are AI's most defensible ROI — Amazon Q and G
 
 # Breakdown - AI-Driven Code Migrations
 
-> The strongest real-world evidence that AI writes economically valuable code is not autocomplete or agents building features — it is boring, high-volume migrations: version upgrades, framework ports, and type-widening across huge codebases. Amazon (Q Developer, 2024) and Google (a 2025 research paper) both ran production programs and published numbers. The reason it works is not model brilliance; it is that a migration ships with a built-in oracle — *does it still compile and pass the tests?* — which is exactly the condition that narrows the [[Concept - The Capability-Reliability Gap]]. (as of 2026)
+> The strongest real-world evidence that AI writes economically valuable code comes from boring, high-volume migrations (version upgrades, framework ports, type-widening across huge codebases), more than from autocomplete or feature-building agents. Amazon (Q Developer, 2024) and Google (a 2025 research paper) both ran production programs and published numbers. Model brilliance isn't why it works. A migration ships with a built-in oracle, *does it still compile and pass the tests?*, and that condition narrows the [[Concept - The Capability-Reliability Gap]]. (as of 2026)
 
 ## The headline numbers
 
@@ -15,11 +15,11 @@ summary: "Large-scale migrations are AI's most defensible ROI — Amazon Q and G
 | Amazon Q Developer | Java 8/11 → 17 | ~30,000 internal apps | 4,500 developer-years saved; $260M/yr efficiency; ~50 dev-days → a few hours per app; >half of prod Java modernized "in a small number of months" | E2 (Amazon's own, Jassy Q2-2024 earnings call, Aug 2024) |
 | Google (Ziftci et al.) | 32-bit → 64-bit integer ID widening | 39 migrations, 3 developers, 12 months | 595 change-lists, 93,574 edits; **74.45% of change-lists and 69.46% of edits LLM-generated**; developers self-reported ~50% less total time vs manual | E2 (company study, self-reported time; arXiv 2504.09691, Apr 2025) |
 
-The two numbers to hold onto: Amazon's **$260M/yr and 4,500 developer-years** (a modeled counterfactual, not a measured line-item saving — note the $260M is partly the *runtime performance* win of newer Java, not purely labor), and Google's **~70% of edits machine-generated** while still cutting developer time in half. Both are the vendor grading its own homework; both are still the most credible AI-coding ROI claims in existence, precisely because migrations are measurable.
+Two numbers to remember. Amazon's **$260M/yr and 4,500 developer-years** is a modeled counterfactual, not a measured line-item saving, and part of the $260M is the *runtime performance* win of newer Java, not labor. Google's **~70% of edits machine-generated** came with developer time cut in half. Both are the vendor grading its own homework. They're still the most credible AI-coding ROI claims around, because migrations are measurable.
 
-## How it actually works
+## How it works
 
-A migration is a search-and-transform problem with a verifier attached. The generic pipeline both programs converge on:
+A migration is a search-and-transform problem with a verifier attached. Both programs converge on the same pipeline:
 
 ```
 ┌─────────────┐   ┌──────────────────┐   ┌─────────────────┐   ┌──────────────┐
@@ -37,31 +37,37 @@ A migration is a search-and-transform problem with a verifier attached. The gene
                                                                     └──────────┘
 ```
 
-- **Discovery, not generation, is the hard part.** Google's system uses Kythe (its code-index graph) to walk direct and indirect references to a field up to a fixed reference distance, then buckets each site by confidence that it needs changing — including sites identified with 100% confidence as *not* needing a change, so the LLM is never invoked there. The model only fires where a human-scale judgment is actually required.
-- **The LLM does the local rewrite.** Given a specific location plus surrounding context, the model produces the edit (change the type, update the call site, fix the resulting compile break). Google used an internal LLM trained on its monorepo and developer activity (the DIDACT line of work — E2/E1, Google's own description); Amazon Q wraps frontier models behind an agentic "code transformation" job.
-- **The oracle closes the loop.** Compilation and the existing test suite decide whether an edit is accepted. This is what makes migrations different from feature work: the specification is implicit-but-checkable ("behave identically, just on the new version/type"), so wrong edits are caught mechanically instead of shipping. This is the same principle behind Meta's assured-LLMSE filter in [[Concept - AI in Software Testing]] — keep only output that passes an automated gate. It is also why migrations largely dodge the [[Concept - The Verification Tax]] that plagues most enterprise AI deployments: the tax collapses toward zero when the oracle is a compiler and a test suite instead of a human reading a diff.
-- **Human-in-the-loop is load-bearing, not decorative.** Google kept 3 developers steering 39 migrations; Amazon kept engineers reviewing transformations. The win is *throughput per engineer* (one dev drives thousands of edits), not autonomy.
+Discovery is harder than generation. Google's system uses Kythe, its code-index graph, to walk direct and indirect references to a field up to a fixed reference distance. It then buckets each site by confidence that it needs changing. Some sites are identified with 100% confidence as *not* needing a change, and the LLM never runs on them. The model only fires where a human-scale judgment is required.
+
+The LLM does the local rewrite. Given a specific location and its surrounding context, it produces the edit: change the type, update the call site, fix the resulting compile break. Google used an internal LLM trained on its monorepo and developer activity (the DIDACT line of work, E2/E1, Google's own description). Amazon Q wraps frontier models behind an agentic "code transformation" job.
+
+The oracle closes the loop. Compilation and the existing test suite decide whether an edit is accepted. Feature work lacks this. A migration's spec is implicit but checkable ("behave identically, just on the new version/type"), so wrong edits get caught mechanically before they ship. Meta's assured-LLMSE filter in [[Concept - AI in Software Testing]] runs on the same principle: keep only output that passes an automated gate. It also explains how migrations mostly dodge the [[Concept - The Verification Tax]] that drags down most enterprise AI deployments. The tax falls toward zero when the oracle is a compiler and a test suite, not a human reading a diff.
+
+Humans stay in the loop, and they're needed. Google had 3 developers steering 39 migrations; Amazon had engineers reviewing transformations. The gain is *throughput per engineer* (one dev drives thousands of edits), not autonomy.
 
 ## The clever parts
 
-- **Pick tasks where verification is nearly free.** The entire ROI case rests on the oracle. A Java version bump or an int32→int64 widening has a crisp pass/fail (compiles, tests green, behavior preserved). That collapses the reliability problem: you don't need the model to be *right*, you need it to be right *often enough that checking the batch is cheaper than writing it*. This is the verification tax driven to near-zero — the transferable insight, and it generalizes far beyond code (link [[Concept - Support Deflection Economics]] — same logic, different function).
-- **Confidence-bucketed change discovery.** Not invoking the model on the ~majority of sites that provably don't need changing is what makes 93,574 edits tractable with 3 people. The expensive resource (LLM calls + human review) is spent only on genuine ambiguity.
-- **Batch parallelism over depth.** Migrations decompose into thousands of small, independent, individually verifiable edits — the ideal shape for an agent fleet. Contrast a single long-horizon feature, where errors compound (see [[Deep Dive - Agentic Coding in Production]]).
-- **Modeled savings framed as headline results.** Cynically clever: "4,500 developer-years" is a counterfactual (what the manual path *would* have cost), which is unfalsifiable and enormous. It is not a lie, but it is not an audited E3 number either.
+**Pick tasks where verification is nearly free.** The whole ROI case rests on the oracle. A Java version bump or an int32→int64 widening has a crisp pass/fail: it compiles, tests are green, behavior is preserved. You don't need the model to be *right*. You need it right *often enough that checking the batch is cheaper than writing it*. That's the verification tax driven to near zero, and the idea transfers well beyond code ([[Concept - Support Deflection Economics]] runs the same logic in a different function).
+
+**Confidence-bucketed discovery.** Skipping the model on the ~majority of sites that provably need no change is how 93,574 edits stay tractable for 3 people. LLM calls and human review go only to real ambiguity.
+
+**Batch parallelism over depth.** Migrations break into thousands of small, independent, separately verifiable edits, which suits an agent fleet. A single long-horizon feature is the opposite case, where errors compound (see [[Deep Dive - Agentic Coding in Production]]).
+
+**Modeled savings as headline results.** Cynically clever. "4,500 developer-years" is a counterfactual, what the manual path *would* have cost, so it's enormous and unfalsifiable. It isn't a lie. It isn't an audited E3 number either.
 
 ## What it got wrong / what's dated
 
-- **Every big number is self-reported by the tool's vendor.** Amazon sells Q; Google published to show its internal capability. There is no independent audit of "$260M/yr" or "4,500 developer-years." Treat as E2, and remember "developer-years saved" is a model, not a measurement.
-- **Narrow task class.** Google's paper is one migration *type* (ID widening); Amazon's headline is one upgrade (Java LTS). Neither demonstrates general "AI migrates anything." A migration with no clean oracle — semantics change, no test coverage, cross-service contracts — loses the property that makes this work.
-- **Selection and survivorship.** We hear about the migrations that succeeded and were worth publishing. The 30% of Google edits that were *not* LLM-generated, and the human review time, are the part the headline compresses away.
-- **The contrast that dates the hype.** The same tooling that "saved 4,500 developer-years" on migrations made experienced developers **19% slower** on open-ended tasks in the [[Breakdown - The METR Developer Slowdown RCT]]. Task structure, not model IQ, decides the sign of the outcome.
+- **Every big number comes from the tool's vendor.** Amazon sells Q; Google published to show off its internal capability. Nobody has independently audited "$260M/yr" or "4,500 developer-years." Treat them as E2, and remember that "developer-years saved" is a model output.
+- **Narrow task class.** Google's paper covers one migration *type* (ID widening). Amazon's headline is one upgrade (Java LTS). Neither shows that "AI migrates anything." Take away the clean oracle (semantics change, no test coverage, cross-service contracts) and the property that makes this work is gone.
+- **Selection and survivorship.** We hear about the migrations that succeeded and were publishable. The 30% of Google edits that were *not* LLM-generated, and the human review time, get compressed out of the headline.
+- **The contrast that dates the hype.** The same tooling that "saved 4,500 developer-years" on migrations made experienced developers **19% slower** on open-ended tasks in the [[Breakdown - The METR Developer Slowdown RCT]]. Task structure decides the sign of the outcome. Model IQ doesn't.
 
 ## What to steal
 
-- **AI value scales with how cheaply you can verify output, not with how smart the model is.** If you can build or already have a cheap correctness oracle (compiler, type checker, golden tests, idempotent re-run), AI is a genuine force multiplier. If you can't, you are buying speed and paying it back in review and rework.
-- **Route work by verifiability.** Migrations, dependency bumps, and mechanical refactors → high autonomy behind an automatic gate. Ambiguous, semantic, cross-service work → assist-only. This is the core of [[Decision - Choosing an AI Coding Workflow]].
-- **Instrument the oracle before the model.** The first engineering investment in an AI migration is test coverage and a reproducible build/verify loop — that is what converts a plausible-code generator into a trustworthy one.
-- **Measure the counterfactual honestly.** "Developer-years saved" is a fine internal planning number and a terrible external truth claim. Report throughput per engineer and review load alongside it (link [[Reference - AI Impact by Business Function]], and [[Playbook - Measuring AI ROI]] for how to instrument the counterfactual without laundering it into fact).
+- **AI value scales with how cheaply you can verify output.** How smart the model is matters less. With a cheap correctness oracle (compiler, type checker, golden tests, idempotent re-run), AI multiplies output. Without one, you buy speed and pay it back in review and rework.
+- **Route work by verifiability.** Migrations, dependency bumps and mechanical refactors get high autonomy behind an automatic gate. Ambiguous, semantic, cross-service work stays assist-only. That's the core of [[Decision - Choosing an AI Coding Workflow]].
+- **Build the oracle before you bring in the model.** The first engineering spend on an AI migration is test coverage and a reproducible build/verify loop. That's what turns a plausible-code generator into one you can trust.
+- **Measure the counterfactual honestly.** "Developer-years saved" is a fine internal planning number and a bad external truth claim. Report throughput per engineer and review load next to it (see [[Reference - AI Impact by Business Function]], and [[Playbook - Measuring AI ROI]] for instrumenting the counterfactual without laundering it into fact).
 
 ## Connections
 

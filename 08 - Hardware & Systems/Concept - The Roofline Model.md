@@ -3,19 +3,19 @@ tags: [concept, domain/hardware-systems, level/core]
 aliases: [roofline analysis, arithmetic intensity, ridge point]
 summary: "Predicts whether a kernel is compute- or memory-bound from FLOPs-per-byte, and gives a single plot to decide what to optimize."
 ---
-> **One-paragraph hook:** Before you spend an afternoon hand-tuning a kernel, the roofline model tells you in one division whether tuning compute can help at all. Most non-GEMM operations in a transformer — softmax, LayerNorm, naive attention — are capped not by how fast the chip can multiply, but by how fast it can move bytes from HBM, and no amount of instruction-level cleverness fixes a bandwidth problem. The roofline model is the formalization of [[Concept - The Memory Wall]]: a two-line plot that tells you which wall you're actually up against.
+> **One-paragraph hook:** Before you spend an afternoon hand-tuning a kernel, the roofline model tells you with one division whether tuning compute can help at all. Most non-GEMM operations in a transformer (softmax, LayerNorm, naive attention) are limited by how fast the chip moves bytes from HBM, not how fast it multiplies, and instruction-level cleverness doesn't fix a bandwidth problem. The roofline model formalizes [[Concept - The Memory Wall]] as a two-line plot that shows which wall you're up against.
 
 ## The mechanism
 
-Define **arithmetic intensity** as the ratio of compute to data movement for a kernel, where "data movement" means traffic to and from HBM — the bottom, highest-capacity, lowest-bandwidth tier of the [[Concept - GPU Memory Hierarchy]], not the fast on-chip tiers above it:
+**Arithmetic intensity** is a kernel's ratio of compute to data movement, where data movement means traffic to and from HBM, the bottom tier of the [[Concept - GPU Memory Hierarchy]] with the most capacity and least bandwidth, not the fast on-chip tiers above it:
 
 $$I = \frac{\text{FLOPs}}{\text{bytes moved from HBM}}$$
 
-The model's core claim is that attainable performance is capped by the *lower* of two ceilings — what the chip can compute, and what the memory system can feed it:
+The model's claim is that attainable performance is capped by the *lower* of two ceilings: what the chip can compute, and what the memory system can feed it:
 
 $$\text{Attainable FLOP/s} = \min(\pi, \; I \times \beta)$$
 
-where $\pi$ is the chip's peak FLOP/s and $\beta$ is its peak HBM bandwidth. Plotted with $I$ (FLOP/byte) on the x-axis (log scale) and attainable FLOP/s on the y-axis (log scale), this traces a diagonal "memory roof" ($I \times \beta$) that rises until it hits a flat "compute roof" ($\pi$) — the shape that gives the model its name:
+where $\pi$ is peak FLOP/s and $\beta$ is peak HBM bandwidth. Plot $I$ (FLOP/byte) on a log x-axis and attainable FLOP/s on a log y-axis and you get a diagonal "memory roof" ($I \times \beta$) rising until it meets a flat "compute roof" ($\pi$). That shape is where the name comes from:
 
 ```
  FLOP/s (log)
@@ -31,26 +31,32 @@ where $\pi$ is the chip's peak FLOP/s and $\beta$ is its peak HBM bandwidth. Plo
    memory-bound  |  compute-bound
 ```
 
-The **ridge point** $I^*= \pi / \beta$ is the intensity at which the two roofs meet — below it, a kernel is memory-bound and its speed scales linearly with intensity; above it, a kernel is compute-bound and more intensity buys nothing. On an H100 (BF16 tensor cores): $I^* \approx 989\,\text{TFLOP/s} / 3.35\,\text{TB/s} \approx 295$ FLOP/byte. That number is the practical takeaway: **you must reuse every byte loaded from HBM roughly 300 times** before the H100's tensor cores stop being starved.
+The **ridge point** $I^*= \pi / \beta$ is where the two roofs meet. Below it a kernel is memory-bound and its speed scales linearly with intensity. Above it the kernel is compute-bound and more intensity buys nothing. On an H100 (BF16 tensor cores), $I^* \approx 989\,\text{TFLOP/s} / 3.35\,\text{TB/s} \approx 295$ FLOP/byte. The takeaway: **every byte loaded from HBM has to be reused roughly 300 times** before the H100's tensor cores stop starving.
 
-Worked intensities make the ridge point concrete:
-- A large FP16/BF16 GEMM has intensity that grows with the matrix dimension ($O(N)$ for an $N\times N \times N$ multiply, since FLOPs grow as $N^3$ but bytes moved as $N^2$) — for large enough matrices it comfortably clears 295 and is compute-bound.
-- Softmax, LayerNorm/RMSNorm, and other elementwise or reduction ops have intensity $O(1)$ — a handful of FLOPs per element loaded — and are deeply memory-bound regardless of how well the arithmetic itself is optimized.
-- Naive attention (materializing the full $N \times N$ score matrix in HBM) is memory-bound because it writes and rereads that matrix; [[Deep Dive - FlashAttention]] doesn't reduce the FLOP count, it *raises the effective arithmetic intensity* by tiling the computation so the score matrix never leaves SRAM — the roofline model is exactly why that trick works and exactly what it's optimizing.
+Some worked intensities:
+- A large FP16/BF16 GEMM's intensity grows with matrix dimension ($O(N)$ for an $N\times N \times N$ multiply, since FLOPs grow as $N^3$ and bytes moved as $N^2$). Large enough matrices clear 295 comfortably and are compute-bound.
+- Softmax, LayerNorm/RMSNorm and other elementwise or reduction ops have intensity $O(1)$, a handful of FLOPs per element loaded. They're deeply memory-bound however well the arithmetic is optimized.
+- Naive attention (materializing the full $N \times N$ score matrix in HBM) is memory-bound because it writes and rereads that matrix. [[Deep Dive - FlashAttention]] leaves the FLOP count alone and *raises effective arithmetic intensity* by tiling so the score matrix never leaves SRAM. The roofline model explains why that works and what it optimizes.
 
 ## In practice
 
-Using the model on a real kernel means measuring, not guessing: profile with Nsight Compute's Speed-of-Light and roofline sections to get achieved FLOP/s and achieved HBM bytes moved, compute $I$ = FLOPs / bytes, and place the point on the chart. If the point sits well below the memory roof at its intensity, you have unrealized bandwidth headroom (something else — occupancy, launch overhead — is the actual bottleneck, not the roofline ceiling itself; see [[Concept - Occupancy and Latency Hiding]]). If it sits near the memory roof but at low intensity, the fix is to raise intensity: [[Concept - Kernel Fusion]] cuts the number of HBM round-trips, and tiling reuses each loaded operand more times (see [[Concept - Matmul Tiling on GPUs]]). If it sits near the compute roof, you're done optimizing memory traffic and further gains require touching the algorithm's FLOP count or moving to a faster numeric format (see [[Concept - Tensor Cores]]). The same reasoning applied outside training explains a core fact about serving economics: autoregressive decode processes one token at a time per sequence, so its intensity is pinned near the memory-bound end of the chart regardless of how big the model is — which is why [[Concept - Latency, Throughput, and Cost in LLM Serving]] treats decode bandwidth, not FLOPs, as the binding constraint.
+On a real kernel you measure instead of guessing. Profile with Nsight Compute's Speed-of-Light and roofline sections to get achieved FLOP/s and achieved HBM bytes, compute $I$ = FLOPs / bytes, and put the point on the chart.
+
+- **Well below the memory roof at its intensity:** you have unused bandwidth. Something else, such as occupancy or launch overhead, is the bottleneck, not the roofline ceiling (see [[Concept - Occupancy and Latency Hiding]]).
+- **Near the memory roof at low intensity:** raise intensity. [[Concept - Kernel Fusion]] cuts HBM round-trips, and tiling reuses each loaded operand more times ([[Concept - Matmul Tiling on GPUs]]).
+- **Near the compute roof:** memory traffic is done. More speed means cutting the algorithm's FLOP count or moving to a faster numeric format ([[Concept - Tensor Cores]]).
+
+The same reasoning explains a core fact of serving economics. Autoregressive decode handles one token at a time per sequence, so its intensity stays near the memory-bound end of the chart however big the model is. [[Concept - Latency, Throughput, and Cost in LLM Serving]] treats decode bandwidth, not FLOPs, as the limit for that reason.
 
 ## Failure modes
 
-- **Treating the model as gospel for small kernels**: the roofline assumes the chip can perfectly overlap memory access with compute and reach steady-state bandwidth; it says nothing about launch latency, warp-scheduling stalls, or a kernel too small to saturate the memory system before it finishes. A grid of only a few blocks can sit far below even the memory roof for reasons the roofline model doesn't model — a latency ceiling has to be added on top for these regimes.
-- **Using vendor peak instead of achievable peak**: peak FLOP/s and peak bandwidth numbers on a spec sheet often assume boost clocks or sparsity; using them as $\pi$ and $\beta$ inflates the ridge point and makes a kernel look worse-bound than it is. Use sustained, dense numbers (see [[Concept - GPU Clocks, Power, and Thermal Throttling]] and the caveat in [[Concept - Model FLOPs Utilization (MFU)]]).
-- **Ignoring cache effects**: the basic model treats "bytes moved" as HBM traffic only; a kernel with high L2 reuse can look memory-bound by the naive HBM-bytes calculation while actually being bound by something else entirely, because a lot of its traffic never left the chip. Nsight Compute's L2 hit-rate metric is the check.
+- **Treating it as gospel for small kernels.** The roofline assumes perfect overlap of memory access and compute at steady-state bandwidth. It says nothing about launch latency, warp-scheduling stalls, or a kernel too small to saturate memory before it finishes. A grid of a few blocks can sit far below even the memory roof for reasons the model doesn't cover, and those regimes need a latency ceiling added on top.
+- **Using vendor peak instead of achievable peak.** Spec-sheet peak FLOP/s and bandwidth often assume boost clocks or sparsity. Use them as $\pi$ and $\beta$ and the ridge point inflates, making a kernel look worse-bound than it is. Use sustained, dense numbers (see [[Concept - GPU Clocks, Power, and Thermal Throttling]] and the caveat in [[Concept - Model FLOPs Utilization (MFU)]]).
+- **Ignoring cache effects.** The basic model counts only HBM traffic as bytes moved. A kernel with high L2 reuse can look memory-bound by the naive calculation while being bound by something else entirely, because much of its traffic never left the chip. Check Nsight Compute's L2 hit rate.
 
 ## The non-obvious
 
-The most common misuse of the roofline model isn't in the math, it's in the framing: engineers new to GPU performance work assume "optimize" means "make the compute faster," and reach for loop unrolling or instruction-level tricks on a kernel that the roofline model would immediately reveal is memory-bound — where those tricks are a rounding error next to fixing the memory access pattern. Running the ridge-point division *first*, before touching any code, is the highest-leverage five minutes in kernel optimization: it tells you which of two completely different toolkits (data-movement reduction vs. compute-throughput tricks) is even worth opening.
+The usual misuse is in the framing, not the math. Engineers new to GPU performance assume "optimize" means "make the compute faster" and reach for loop unrolling or instruction-level tricks on a kernel the roofline would show is memory-bound. There, those tricks are a rounding error next to fixing the access pattern. Do the ridge-point division *first*, before touching code. Those five minutes pay off more than any others in kernel optimization, because they tell you which of two very different toolkits (reducing data movement vs. compute-throughput tricks) is worth opening.
 
 ## Connections
 - [[Concept - GPU Memory Hierarchy]] — the bandwidth and latency numbers per tier that the memory roof is built from.

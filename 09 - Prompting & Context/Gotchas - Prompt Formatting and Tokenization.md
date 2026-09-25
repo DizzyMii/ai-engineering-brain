@@ -5,55 +5,55 @@ summary: "Token- and format-level prompting bugs: template mismatches, double BO
 ---
 # Gotchas - Prompt Formatting and Tokenization
 
-These are the pitfalls that live below the level of "what should I write in the prompt" — they're bugs in how your prompt gets turned into token IDs, and they're insidious precisely because there's no exception, no stack trace, no lint error. The model just quietly does something worse, and everyone blames the model instead of the pipeline. Ordered roughly by how much production pain they cause.
+These bugs live below "what should I write in the prompt". They happen when your prompt gets turned into token IDs, and they're nasty because nothing raises: no exception, no stack trace, no lint error. The model just does something worse, and everyone blames the model instead of the pipeline. Roughly ordered by how much production pain they cause.
 
 ## 1. Chat template mismatch after a model swap silently tanks quality
-**Symptom:** You swap a Llama-3-Instruct deployment for a fine-tuned Mistral checkpoint (or point the same serving code at a new model version) and eval scores drop 10-30 points with zero errors, exceptions, or warnings anywhere in the stack.
-**Cause:** Every instruction-tuned model is trained against one exact literal string layout — the [[Concept - Chat Templates and Special Tokens]] — whether that's ChatML's `<|im_start|>system...<|im_end|>`, Llama-2's `[INST] <<SYS>>...<</SYS>>...[/INST]`, or Llama-3's `<|start_header_id|>`. If serving code hardcodes one template (or reuses the previous model's) instead of resolving the new checkpoint's own template, the resulting string is out-of-distribution but still perfectly parseable text — there's no error because there's no parser, just an autoregressive model continuing whatever it's handed.
-**Fix:** Resolve the template from the model's own tokenizer config (`AutoTokenizer.apply_chat_template`) every time, and treat the template as a versioned artifact bound to the checkpoint, never cached independently of it.
-**Detection:** Gate every model swap behind the full eval suite (see [[Concept - Prompt Evaluation and Versioning]]) before rollout — a template mismatch shows up as an unexplained, fleet-wide accuracy regression correlated with a model change and nothing else.
+**Symptom:** You replace a Llama-3-Instruct deployment with a fine-tuned Mistral checkpoint (or point the same serving code at a new model version), and eval scores drop 10-30 points with no errors, exceptions or warnings anywhere in the stack.
+**Cause:** Every instruction-tuned model is trained on one exact literal layout, its [[Concept - Chat Templates and Special Tokens]]: ChatML's `<|im_start|>system...<|im_end|>`, Llama-2's `[INST] <<SYS>>...<</SYS>>...[/INST]`, Llama-3's `<|start_header_id|>`. If serving code hardcodes one template (or keeps the previous model's) instead of resolving the new checkpoint's own, the string is out of distribution but still perfectly parseable text. Nothing errors because there's no parser, only an autoregressive model continuing whatever it's given.
+**Fix:** Resolve the template from the model's own tokenizer config (`AutoTokenizer.apply_chat_template`) every time. Treat the template as a versioned artifact tied to the checkpoint and never cache it separately.
+**Detection:** Gate every model swap on the full eval suite (see [[Concept - Prompt Evaluation and Versioning]]) before rollout. A template mismatch looks like an unexplained, fleet-wide accuracy drop that lines up with a model change and nothing else.
 
-## 2. Double BOS token quietly degrades every request
-**Symptom:** Outputs are subtly worse across the board — slightly less coherent, occasionally repetitive — with no obvious single cause, and it survives prompt-content changes.
-**Cause:** Most chat templates prepend a beginning-of-sequence token automatically. If serving code also manually prepends `<s>`, or a tokenizer call downstream of `apply_chat_template` runs with `add_special_tokens=True` again, the model sees two BOS tokens back-to-back — a sequence shape it essentially never saw during training, since BOS ordinarily occurs exactly once, at position 0.
-**Fix:** Let the chat template own all special-token insertion; any raw tokenizer call applied after templating must pass `add_special_tokens=False`.
-**Detection:** Decode the actual `input_ids` sent to the model (not the source string) and confirm BOS appears exactly once, at index 0 — this bug is invisible in the rendered prompt text and only shows up at the token-ID level.
+## 2. A double BOS token degrades every request
+**Symptom:** Outputs are slightly worse across the board (a bit less coherent, sometimes repetitive) with no obvious single cause, and it persists through prompt-content changes.
+**Cause:** Most chat templates prepend a beginning-of-sequence token automatically. If serving code also prepends `<s>` by hand, or a tokenizer call after `apply_chat_template` runs with `add_special_tokens=True` again, the model sees two BOS tokens in a row. It essentially never saw that during training, where BOS appears once, at position 0.
+**Fix:** Let the chat template own all special-token insertion. Any raw tokenizer call after templating passes `add_special_tokens=False`.
+**Detection:** Decode the actual `input_ids` sent to the model (not the source string) and confirm BOS appears once, at index 0. The bug doesn't show in the rendered prompt text, only at the token-ID level.
 
 ## 3. Control-token strings inside user text break turn structure
-**Symptom:** A user pastes text containing something like `<|im_end|>` into a chat field, and the model appears to end its turn early, or treats the pasted string as a role boundary that was never intended.
-**Cause:** Special/control tokens are single vocabulary IDs, not ordinary character sequences. If prompt assembly does naive string concatenation instead of inserting control-token IDs directly, a user-supplied substring that matches a control token's literal text can get BPE-merged into that exact same token ID at encode time — indistinguishable to the model from a "real," system-inserted boundary. This sits adjacent to the pathology cataloged in [[Lore - Glitch Tokens]], where rarely- or never-trained vocabulary entries produce erratic completions whenever they get sampled or injected.
-**Fix:** Sanitize or escape literal control-token substrings in any untrusted input segment, or — more robust — assemble prompts at the token-ID level so a "fake" control token can never collide with the real one's ID.
-**Detection:** Fuzz the input pipeline with literal control-token strings pulled from the tokenizer vocabulary and confirm turn/role boundaries survive intact.
+**Symptom:** A user pastes text containing something like `<|im_end|>` into a chat field, and the model seems to end its turn early or treats the pasted string as an unintended role boundary.
+**Cause:** Special/control tokens are single vocabulary IDs, not ordinary character sequences. If prompt assembly concatenates strings naively instead of inserting control-token IDs directly, a user substring matching a control token's literal text can get BPE-merged into that same token ID at encode time. The model can't tell it from a real, system-inserted boundary. It's close to the pathology in [[Lore - Glitch Tokens]], where rarely or never trained vocabulary entries cause erratic completions when sampled or injected.
+**Fix:** Sanitize or escape literal control-token substrings in any untrusted input. More robust: assemble prompts at the token-ID level so a fake control token can never collide with the real one's ID.
+**Detection:** Fuzz the input pipeline with literal control-token strings taken from the tokenizer vocabulary and check that turn and role boundaries survive.
 
 ## 4. Prompt-cache busting from prefix instability
-**Symptom:** [[Concept - Prompt Caching]] hit rate is far below expectation — you pay near-full per-request prefill cost even though the system prompt, few-shot block, and RAG context are identical call to call.
-**Cause:** Cache matching is exact and positional, starting at token 0 of the prefix. A timestamp, request ID, UUID, or a JSON object whose key order isn't fixed changes even one early token, and everything downstream of that point is treated as new — regardless of how much of the actual meaning is unchanged.
-**Fix:** Order the prompt so every static element (system prompt, tool schemas, few-shot exemplars) comes first, and push anything variable — the current date if truly required, the user turn, retrieved-doc IDs — to the very end. Serialize JSON with a fixed key order.
-**Detection:** Monitor the provider's reported cache-read token count per call (Anthropic and OpenAI both surface it) and alert when hit rate drops below the endpoint's expected baseline.
+**Symptom:** [[Concept - Prompt Caching]] hit rate is far below what you expected. You pay close to full prefill per request although the system prompt, few-shot block and RAG context are identical from call to call.
+**Cause:** Cache matching is exact and positional, starting at token 0 of the prefix. A timestamp, request ID, UUID, or JSON object with unfixed key order changes one early token, and everything after it counts as new, however little the meaning changed.
+**Fix:** Order the prompt so every static element (system prompt, tool schemas, few-shot exemplars) comes first, and push anything variable (the current date if you really need it, the user turn, retrieved-doc IDs) to the end. Serialize JSON with a fixed key order.
+**Detection:** Monitor the provider's reported cache-read token count per call (Anthropic and OpenAI both expose it) and alert when hit rate falls below the endpoint's expected baseline.
 
-## 5. Trailing whitespace shifts the model onto a different token boundary
-**Symptom:** A prompt edit that looks purely cosmetic — adding or removing a trailing newline or space — changes the completion: an extra leading space, a broken word start, an unexpected first token.
-**Cause:** [[Concept - Byte-Pair Encoding]] tokenizes `" word"` and `"word"` as two different token IDs in most modern byte-level BPE schemes, because the leading space is folded into the token itself. A trailing space or newline at the end of a prompt changes which token ID the model actually conditions on for its first generated token, since generation resumes from wherever the prefix's tokenization landed, not from the character boundary a human reads.
-**Fix:** Strip trailing whitespace deterministically before sending, and standardize newline counts between every prompt section.
-**Detection:** Inspect the last few token IDs of the encoded prompt (not the raw string) in a debugging harness whenever completion quality looks suspicious for no content reason.
+## 5. Trailing whitespace moves the model onto a different token boundary
+**Symptom:** A purely cosmetic-looking edit, adding or removing a trailing newline or space, changes the completion: an extra leading space, a broken word start, an unexpected first token.
+**Cause:** In most modern byte-level BPE schemes, [[Concept - Byte-Pair Encoding]] turns `" word"` and `"word"` into different token IDs, because the leading space is folded into the token. A trailing space or newline at the end of the prompt changes which token ID the model conditions on for its first generated token. Generation resumes from wherever the prefix's tokenization landed, not from the character boundary a human sees.
+**Fix:** Strip trailing whitespace deterministically before sending, and standardize newline counts between prompt sections.
+**Detection:** When completion quality looks off for no content reason, inspect the last few token IDs of the encoded prompt (not the raw string) in a debugging harness.
 
 ## 6. Few-shot exemplars formatted differently from the live query teach the wrong pattern
-**Symptom:** Adding few-shot examples makes accuracy worse than zero-shot, or the model copies an exemplar's formatting quirk — an odd delimiter, a wrong field name — into its answer for the live input.
-**Cause:** In-context learning is highly sensitive to surface form. If exemplars use `Q:`/`A:` and the live query uses `Question:`/`Answer:`, or exemplars use JSON without trailing commas that the live prompt happens to include, the model treats the live turn as a distributional break rather than "one more of the same" and imitates whatever pattern is most locally salient instead of the intended task.
-**Fix:** Route exemplars and the live query through the exact same formatting function; never hand-format one and generate the other programmatically.
-**Detection:** Diff the rendered exemplar block against the rendered live-query block, ignoring content, to confirm structural identity.
+**Symptom:** Adding few-shot examples makes accuracy worse than zero-shot, or the model copies an exemplar's formatting quirk (an odd delimiter, a wrong field name) into its answer for the live input.
+**Cause:** In-context learning is very sensitive to surface form. If exemplars use `Q:`/`A:` and the live query uses `Question:`/`Answer:`, or the exemplars' JSON has no trailing commas and the live prompt does, the model sees the live turn as a distributional break instead of one more of the same. It then imitates whatever pattern is most locally salient instead of doing the task.
+**Fix:** Send exemplars and the live query through the same formatting function. Never hand-format one and generate the other.
+**Detection:** Diff the rendered exemplar block against the rendered live-query block, ignoring content, to confirm the structure matches.
 
 ## 7. "Do not X" negations underperform positive instructions
-**Symptom:** A system prompt says "do not use bullet points" or "do not mention pricing," and the model does it anyway, more often than when the same constraint is phrased positively.
-**Cause:** Negation is weakly and inconsistently represented in autoregressive language models — the token sequence "do not use bullet points" still shares heavy surface and semantic overlap with "use bullet points," and next-token prediction has no hard logical negation operator; it's a soft distributional nudge, not an enforced rule. This tracks the broader instruction-sensitivity picture in [[Concept - Prompt Formatting and Sensitivity]] rather than resting on one specific paper.
-**Fix:** State the desired positive behavior directly ("write your answer as 2-3 prose paragraphs" rather than "don't use bullet points"), and reserve hard negatives for structural sections you can also validate programmatically.
-**Detection:** A/B the positive vs. negative phrasing on your eval set ([[Concept - Prompt Evaluation and Versioning]]) — the failure-rate gap is usually large enough to see on a few hundred examples.
+**Symptom:** The system prompt says "do not use bullet points" or "do not mention pricing", and the model does it anyway, more often than when the same constraint is phrased positively.
+**Cause:** Negation is weakly and inconsistently represented in autoregressive language models. "do not use bullet points" still overlaps heavily, on the surface and semantically, with "use bullet points", and next-token prediction has no hard logical negation operator. The instruction is a soft distributional nudge, not an enforced rule. This follows the broader instruction-sensitivity picture in [[Concept - Prompt Formatting and Sensitivity]]; no single paper establishes it.
+**Fix:** State the behavior you want directly ("write your answer as 2-3 prose paragraphs", not "don't use bullet points"), and keep hard negatives for things you can also check in code.
+**Detection:** A/B positive vs. negative phrasing on your eval set ([[Concept - Prompt Evaluation and Versioning]]). The failure-rate gap is usually big enough to see on a few hundred examples.
 
 ## 8. Markdown code fences around JSON break naive parsers
-**Symptom:** `json.loads()` (or a schema validator) throws on a response that visually looks like valid JSON.
-**Cause:** Instruction-tuned models default to wrapping code-shaped output in triple-backtick fences (` ```json ... ``` `) because that's the dominant training-data convention for presenting code and JSON in chat UIs — a strong stylistic prior, not a model bug, but it breaks any parser expecting bare JSON.
-**Fix:** Instruct explicitly to output raw JSON with no markdown fences, and defensively strip leading/trailing triple-backtick blocks in the parsing layer regardless (see [[Playbook - Reliable Structured Output]]) — the instruction alone is not 100% reliable, so treat stripping as mandatory, not an edge case.
-**Detection:** Track parse-failure rate as a first-class metric rather than an exception you catch and ignore; a nonzero baseline of fence-wrapped responses is normal and should be handled by default.
+**Symptom:** `json.loads()` (or a schema validator) throws on a response that looks like valid JSON.
+**Cause:** Instruction-tuned models default to wrapping code-shaped output in triple-backtick fences (` ```json ... ``` `), since that's the dominant training-data convention for showing code and JSON in chat UIs. It's a strong stylistic prior, not a model bug, and it breaks any parser that expects bare JSON.
+**Fix:** Tell the model explicitly to output raw JSON without markdown fences, and strip leading/trailing triple-backtick blocks in the parsing layer anyway (see [[Playbook - Reliable Structured Output]]). The instruction alone isn't 100% reliable, so stripping is mandatory.
+**Detection:** Track parse-failure rate as a real metric, not an exception you catch and ignore. A nonzero baseline of fence-wrapped responses is normal and should be handled by default.
 
 ## Connections
 - [[Concept - Byte-Pair Encoding]] — the tokenizer boundary mechanics behind the whitespace and control-token gotchas.

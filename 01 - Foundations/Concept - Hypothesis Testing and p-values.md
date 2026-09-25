@@ -6,7 +6,7 @@ summary: "How to tell if an observed difference is real or noise, and the exact 
 
 # Concept - Hypothesis Testing and p-values
 
-> **One-paragraph hook:** Every "model B beats model A" claim in an eval report rests on hypothesis testing, and a large fraction of those claims are backed by a badly misread number. A p-value tells you how surprising your data would be *if there were no real difference* — nothing about whether the difference exists, how large it is, or whether it will replicate. Get this wrong at scale and you ship a "win" that was noise, or worse, kill a real improvement because an underpowered eval couldn't see it.
+> **One-paragraph hook:** Every "model B beats model A" claim in an eval report rests on hypothesis testing, and a large fraction of them rest on a badly misread number. A p-value tells you how surprising your data would be *if there were no real difference*. It says nothing about whether the difference exists, how large it is, or whether it will replicate. Get this wrong at scale and you ship a "win" that was noise, or worse, kill a real improvement because an underpowered eval couldn't see it.
 
 ## The mechanism
 
@@ -14,33 +14,33 @@ Null-hypothesis significance testing (NHST) starts from a null hypothesis $H_0$ 
 
 $$p = P(T \text{ at least as extreme as observed} \mid H_0 \text{ true})$$
 
-This is a tail probability computed under an assumption you are trying to falsify — it is **not** $P(H_0 \mid \text{data})$, which would require a prior and belongs to Bayesian inference, a different framework entirely.
+That's a tail probability computed under the assumption you're trying to falsify. It is **not** $P(H_0 \mid \text{data})$, which needs a prior and belongs to Bayesian inference, a different framework entirely.
 
-Two error types define the rest of the machinery. Type I error ($\alpha$) is rejecting $H_0$ when it's actually true — a false positive, fixed in advance by convention at 0.05. Type II error ($\beta$) is failing to reject $H_0$ when it's false — a miss. Power is $1-\beta$: your probability of detecting a real effect of a given size. Power, $\alpha$, sample size $N$, and effect size $\delta$ trade against each other roughly as:
+Two error types drive the rest. Type I error ($\alpha$) is rejecting $H_0$ when it's true: a false positive, fixed in advance by convention at 0.05. Type II error ($\beta$) is failing to reject $H_0$ when it's false, a miss. Power is $1-\beta$, your probability of detecting a real effect of a given size. Power, $\alpha$, sample size $N$ and effect size $\delta$ trade against each other roughly as:
 
 $$N \sim \frac{(z_\alpha + z_\beta)^2 \, \sigma^2}{\delta^2}$$
 
-Required $N$ scales with variance over *squared* effect size — halving the effect you need to detect quadruples the sample required. This single formula explains why a 300-prompt eval set reliably fails to distinguish two models that differ by half a point of accuracy, no matter how carefully it's built.
+Required $N$ scales with variance over *squared* effect size, so halving the effect you need to detect quadruples the sample. That one formula explains why a 300-prompt eval set reliably fails to separate two models half a point of accuracy apart, however carefully it's built.
 
-A $(1-\alpha)$ confidence interval (CI) is exactly the set of null values you would *fail* to reject at level $\alpha$. Its correct reading is coverage over repeated experiments ("if I ran this procedure many times, 95% of the intervals it produces would contain the true value"), not "there is a 95% probability the true value lies in this specific interval" — the true value is fixed, the interval is the random object.
+A $(1-\alpha)$ confidence interval (CI) is the set of null values you would *fail* to reject at level $\alpha$. Read it as coverage over repeated experiments ("if I ran this procedure many times, 95% of the intervals it produces would contain the true value"). It does not mean "there is a 95% probability the true value lies in this specific interval". The true value is fixed; the interval is the random object.
 
 ## In practice
 
-Test choice follows from data structure. When the same items are scored by both systems, **pair them**: a paired t-test or Wilcoxon signed-rank test cancels the item-to-item difficulty variance and is dramatically more powerful than an unpaired test on the identical data, because pairing removes the largest variance component (prompt difficulty) that otherwise swamps a small model-to-model delta. For paired win/loss outcomes, McNemar's test is the direct tool. For an arbitrary or non-normal metric, bootstrap the CI by resampling items with replacement and recomputing the statistic thousands of times. For an exact null under exchangeability, run a permutation test: shuffle the system labels, recompute the statistic, and see where the observed value falls in that empirical null distribution — no distributional assumption required.
+The data structure picks the test. When both systems score the same items, **pair them**. A paired t-test or Wilcoxon signed-rank test cancels item-to-item difficulty variance and is dramatically more powerful than an unpaired test on identical data, because prompt difficulty is the largest variance component and would otherwise swamp a small model-to-model delta. For paired win/loss outcomes, use McNemar's test. For an arbitrary or non-normal metric, bootstrap the CI: resample items with replacement and recompute the statistic thousands of times. For an exact null under exchangeability, run a permutation test. Shuffle the system labels, recompute, and see where the observed value lands in that empirical null. No distributional assumption required.
 
-Running many comparisons compounds the risk. Testing 20 metrics at $\alpha = 0.05$ expects roughly one spurious "significant" result by chance alone. Bonferroni correction divides $\alpha$ by the number of tests (simple, conservative, controls family-wise error). Benjamini-Hochberg (1995) instead controls the false discovery rate — the expected fraction of false positives among rejections — which is less conservative and the better default when screening many candidate changes (e.g. sweeping ablations). Neither rescues a run from p-hacking: trying metrics, cutoffs, and subgroups until something clears 0.05 (the "garden of forking paths") inflates the true false-positive rate far above the nominal $\alpha$, even when only a single test is ultimately reported.
+Many comparisons compound the risk. Test 20 metrics at $\alpha = 0.05$ and you expect roughly one spurious "significant" result by chance alone. Bonferroni correction divides $\alpha$ by the number of tests; it's simple, conservative, and controls family-wise error. Benjamini-Hochberg (1995) controls the false discovery rate instead (the expected fraction of false positives among rejections). It's less conservative and the better default for screening many candidate changes, e.g. sweeping ablations. Neither one rescues a p-hacked analysis. Trying metrics, cutoffs and subgroups until something clears 0.05 (the "garden of forking paths") pushes the true false-positive rate far above the nominal $\alpha$, even if only one test ends up reported.
 
 ## Failure modes
 
-The three canonical misreadings of a p-value drive most bad conclusions in practice: it is not the probability the null is true, not the effect size, and not the probability the result replicates. Treating $p = 0.03$ as "97% chance this improvement is real" is a category error that shows up constantly in eval writeups.
+Three misreadings of a p-value drive most bad conclusions. It is not the probability the null is true, not the effect size, and not the probability the result replicates. Reading $p = 0.03$ as "97% chance this improvement is real" is a category error, and it shows up constantly in eval writeups.
 
-A subtler failure is the **winner's curse** (Type M / magnitude error, Gelman & Carlin 2014): under low power, only inflated estimates clear the significance threshold, so a "significant" result from an underpowered run systematically *overestimates* the true effect. This is the mechanism behind the familiar pattern of a fine-tune that "beats baseline by 4 points" on a 200-example eval, then shows a 0.5-point gap (or none) on the full held-out set.
+The subtler one is the **winner's curse** (Type M / magnitude error, Gelman & Carlin 2014). Under low power, only inflated estimates clear the significance threshold, so a "significant" result from an underpowered run systematically *overestimates* the true effect. That's the familiar pattern where a fine-tune "beats baseline by 4 points" on a 200-example eval, then shows a 0.5-point gap (or none) on the full held-out set.
 
-Peeking at results as they accumulate and stopping once significance is hit invalidates the reported p-value, because the effective number of "looks" isn't accounted for by a fixed-$N$ test — sequential monitoring needs alpha-spending or always-valid CIs, not ad hoc early stopping.
+Peeking as results come in and stopping once you hit significance invalidates the reported p-value, because a fixed-$N$ test doesn't account for the extra "looks". Sequential monitoring needs alpha-spending or always-valid CIs; ad hoc early stopping doesn't work.
 
 ## The non-obvious
 
-Statistical significance is not practical significance. With enough $N$, a genuinely trivial 0.03% metric shift becomes $p < 0.001$ — the test is doing exactly what it's built to do (detect that the true mean isn't precisely zero), which is a different question from "does this matter for users." Always report an effect size with a confidence interval alongside the p-value; a lone p-value is close to unactionable. [[Playbook - Running a Statistically Valid Experiment]] operationalizes this discipline end to end, from pre-registration through reporting.
+Statistical significance is not practical significance. With enough $N$, a trivial 0.03% metric shift becomes $p < 0.001$. The test is doing its job (detecting that the true mean isn't precisely zero), which is a different question from "does this matter for users." Report an effect size with a confidence interval next to every p-value; a lone p-value is close to unactionable. [[Playbook - Running a Statistically Valid Experiment]] turns this into a procedure end to end, from pre-registration through reporting.
 
 ## Connections
 

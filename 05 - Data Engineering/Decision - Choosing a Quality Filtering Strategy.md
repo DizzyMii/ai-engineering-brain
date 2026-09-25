@@ -6,7 +6,7 @@ summary: "When to use heuristic, perplexity, classifier, or LLM-annotator filter
 
 # Decision - Choosing a Quality Filtering Strategy
 
-> The decision: which of heuristic rules, perplexity scoring, a trained classifier, or an LLM-annotator (or some ordered combination) should filter your pretraining corpus. **Default for the 80% case, as of 2026:** run cheap heuristics — concrete thresholds in [[Reference - Data Filtering Heuristics]] — and dedup first to remove obvious junk, then layer a classifier or LLM-annotator on the survivors, the [[Breakdown - FineWeb and FineWeb-Edu|FineWeb-Edu]] recipe, because heuristics alone plateau well before they capture semantic quality, and running an LLM-annotator over raw, unfiltered Common Crawl wastes most of its budget scoring text that heuristics would have rejected for free.
+> The decision: which of heuristic rules, perplexity scoring, a trained classifier, or an LLM-annotator (or some ordered combination) should filter your pretraining corpus. **Default for the 80% case, as of 2026:** run cheap heuristics (thresholds in [[Reference - Data Filtering Heuristics]]) and dedup first to remove obvious junk, then put a classifier or LLM-annotator on the survivors. That's the [[Breakdown - FineWeb and FineWeb-Edu|FineWeb-Edu]] recipe. Heuristics alone plateau well before they capture semantic quality, and an LLM-annotator run over raw, unfiltered Common Crawl spends most of its budget scoring text that heuristics would have rejected for free.
 
 ## Decision flow
 
@@ -31,16 +31,24 @@ flowchart TD
 
 | Strategy | Relative cost | Language coverage | Captures semantic quality | Main failure mode | Example system |
 |---|---|---|---|---|---|
-| Heuristic rules ([[Concept - Quality Filtering for Pretraining Data]]) only | ~1x (near-free) | Language-agnostic if rules are | No — structural only | Misses fluent but low-value text | C4, Gopher |
-| Perplexity (KenLM, [[Concept - Entropy and Cross-Entropy]]) | ~1-5x | Language-agnostic, cheap per language | Weak — fluency proxy only | Penalizes valid non-prose: code, poetry, lists | CCNet |
-| Classifier (fastText / embeddings) | ~10-50x | Needs a per-language reference set | Moderate — topic/formality proxy | Learns surface features, narrows distribution | GPT-3's Pareto filter |
-| LLM-annotator + distill | ~500-1000x for the labeling phase (order-of-magnitude, not measured precisely); the distilled scorer is cheap at inference | Needs a teacher fluent in the target language | Strong — genuine semantic judgment | Inherits the annotator's own biases and blind spots | FineWeb-Edu |
+| Heuristic rules ([[Concept - Quality Filtering for Pretraining Data]]) only | ~1x (near-free) | Language-agnostic if rules are | No, structural only | Misses fluent but low-value text | C4, Gopher |
+| Perplexity (KenLM, [[Concept - Entropy and Cross-Entropy]]) | ~1-5x | Language-agnostic, cheap per language | Weak, fluency proxy only | Penalizes valid non-prose: code, poetry, lists | CCNet |
+| Classifier (fastText / embeddings) | ~10-50x | Needs a per-language reference set | Moderate, topic/formality proxy | Learns surface features, narrows distribution | GPT-3's Pareto filter |
+| LLM-annotator + distill | ~500-1000x for the labeling phase (order-of-magnitude, not measured precisely); the distilled scorer is cheap at inference | Needs a teacher fluent in the target language | Strong, actual semantic judgment | Inherits the annotator's own biases and blind spots | FineWeb-Edu |
 
-Costs are relative order-of-magnitude estimates for scoring one document, not audited benchmarks — weigh them against the compute budget of the training run the corpus ultimately feeds ([[Concept - Scaling Laws]]), not in isolation. The accuracy differences these strategies produce are exactly what [[Concept - The Data-Centric View of Model Quality]] quantifies: filtering choices move downstream benchmark scores by several points at fixed compute.
+These costs are relative order-of-magnitude estimates for scoring one document, not audited benchmarks. Weigh them against the compute budget of the training run the corpus ends up feeding ([[Concept - Scaling Laws]]), not in isolation. [[Concept - The Data-Centric View of Model Quality]] quantifies the accuracy differences: filtering choices move downstream benchmark scores by several points at fixed compute.
 
-## The details that flip the decision
+## What flips the decision
 
-If your corpus spans 100+ languages and per-language reference sets don't exist, classifiers and LLM-annotators become impractical regardless of budget — fall back to perplexity plus heuristics, which is exactly CCNet's actual use case. If the target domain is already narrow and objectively checkable (code, math), a small hand-built rule set or execution-based verification often beats a general semantic classifier, because "quality" there has a ground truth rather than needing a semantic judgment call. If you're operating at ablation scale (well under a million documents), the "1000x" relative cost of LLM-annotator labeling is trivial in absolute dollars — the expensive framing only bites at trillion-token production scale. If your classifier's positive labels all come from one narrow register (Wikipedia-only, "textbook-like" only), expect the corpus to narrow toward that register's style — [[Lore - The C4 Blocklist Incident]] and FineWeb-Edu's own English/formal-prose skew are two different mechanisms producing the same shape of failure; the fix is validating with held-out downstream training ablations, not trusting a classifier's internal confidence (see [[Gotchas - Pretraining Data Pipelines]] for what happens when you skip this). And if synthetic or model-generated text is already present in your candidate pool, quality filtering interacts with [[Concept - Deduplication at Scale|dedup]] in unexpected ways — a filter tuned for "fluency" can preferentially keep the most model-generated-sounding documents already contaminating the corpus.
+Corpus spans 100+ languages and per-language reference sets don't exist? Then classifiers and LLM-annotators are impractical whatever the budget. Fall back to perplexity plus heuristics, which is CCNet's actual use case.
+
+If the target domain is already narrow and objectively checkable (code, math), a small hand-built rule set or execution-based verification often beats a general semantic classifier. "Quality" there has a ground truth; you don't need a semantic judgment call.
+
+At ablation scale (well under a million documents), the "1000x" relative cost of LLM-annotator labeling is trivial in absolute dollars. The expense only bites at trillion-token production scale.
+
+If your classifier's positive labels all come from one narrow register (Wikipedia-only, "textbook-like" only), expect the corpus to drift toward that register's style. [[Lore - The C4 Blocklist Incident]] and FineWeb-Edu's own English/formal-prose skew are two different mechanisms that produce the same shape of failure. The fix is validating with held-out downstream training ablations; a classifier's internal confidence tells you nothing here (see [[Gotchas - Pretraining Data Pipelines]] for what happens when you skip this).
+
+And if synthetic or model-generated text is already in your candidate pool, quality filtering interacts with [[Concept - Deduplication at Scale|dedup]] in unexpected ways. A filter tuned for "fluency" can preferentially keep the documents that sound most model-generated, i.e. the ones already contaminating the corpus.
 
 ## Connections
 - [[Concept - Quality Filtering for Pretraining Data]] — this decision operationalizes the three paradigms that concept catalogs into an actual choice procedure.

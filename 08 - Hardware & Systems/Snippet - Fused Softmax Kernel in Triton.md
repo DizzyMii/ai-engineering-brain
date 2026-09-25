@@ -4,9 +4,9 @@ aliases: []
 summary: "A runnable Triton kernel that fuses row-max, exp, sum, and divide into one bandwidth-bound pass, replacing four HBM round-trips with one."
 ---
 
-**What it does:** computes a numerically-stable row-wise softmax over a 2D tensor in a single fused [[Concept - Triton]] kernel — one read of the row, one write, versus the four-to-five separate HBM passes `torch.softmax`'s unfused equivalent would need if you built it from primitive ops.
+**What it does:** a numerically stable row-wise softmax over a 2D tensor in one fused [[Concept - Triton]] kernel. It reads each row once and writes it once. Building the same thing from primitive ops in eager `torch` takes four to five separate HBM passes.
 **Dependencies:** `torch>=2.1`, `triton>=2.1` (ships with recent PyTorch; `pip install triton` on Linux/CUDA).
-**Expected output:** matches `torch.softmax(x, dim=1)` to within float32 tolerance (`torch.allclose(..., atol=1e-5)` passes) and is measurably faster than an unfused eager-mode softmax on rows that don't fit in L1/registers, because it is bandwidth-bound and this kernel touches HBM half as many times.
+**Expected output:** matches `torch.softmax(x, dim=1)` within float32 tolerance (`torch.allclose(..., atol=1e-5)` passes), and runs measurably faster than an unfused eager softmax on rows that don't fit in L1/registers. The op is bandwidth-bound and this kernel touches HBM half as often.
 
 ```python
 import torch
@@ -96,14 +96,14 @@ if __name__ == "__main__":
     print(f"triton: {ms_triton:.4f} ms   torch: {ms_torch:.4f} ms")
 ```
 
-This kernel is deliberately single-block-per-row: `BLOCK_SIZE` must cover the whole row, so it caps out once a row's width times its dtype size exceeds what fits comfortably in registers/shared memory for the chosen `num_warps` (roughly tens of thousands of columns before a two-pass, cross-block reduction — the streaming pattern in [[Snippet - A Minimal FlashAttention Kernel in Triton]] — becomes necessary). For LLM-sized softmaxes over a vocabulary (32k-256k columns) or an attention row (context length), this single-block design is exactly the regime FlashAttention's online-softmax recurrence generalizes: the same max-subtract-and-rescale trick, just streamed across blocks instead of held in one.
+The kernel is single-block-per-row on purpose. `BLOCK_SIZE` has to cover the whole row, so it tops out once row width times dtype size no longer fits comfortably in registers/shared memory for the chosen `num_warps`. That's roughly tens of thousands of columns; past that you need a two-pass, cross-block reduction like the streaming pattern in [[Snippet - A Minimal FlashAttention Kernel in Triton]]. LLM-sized softmaxes over a vocabulary (32k-256k columns) or an attention row (context length) are where FlashAttention's online-softmax recurrence takes over: the same max-subtract-and-rescale trick, streamed across blocks instead of held in one.
 
 ## Why it's written this way
 
-- **Masking with `other=-float("inf")` on load, not after:** padding lanes with `-inf` before the max reduction means they can never become the row max, and `exp(-inf - anything) = 0` automatically zeroes their contribution to the sum — one mask value does the job of two separate correctness checks.
-- **fp32 accumulation of the sum regardless of I/O dtype:** [[Concept - Softmax]]'s division step means every output element inherits the sum's rounding error; summing a wide fp16 row in fp16 can lose several bits of precision, so the reduction is carried in fp32 (Triton's `tl.sum` promotes by default) even when `x` itself is fp16 — the same accumulate-high-precision discipline tensor cores use internally.
-- **One program per row, not per element or per tile:** this maps directly onto the memory-access pattern — each row is contiguous in the common `[batch, vocab]` or `[batch, seqlen]` layout, so one program reading and writing one contiguous stretch gives fully [[Concept - GPU Memory Hierarchy|coalesced]] access with zero cross-program communication.
-- **The fusion itself is the entire performance story:** an unfused `max` → `sub` → `exp` → `sum` → `div` pipeline in eager PyTorch touches HBM once per op (read+write each), roughly 8-10 tensor-sized memory transactions; this kernel does 1 read + 1 write. Per the [[Concept - The Roofline Model]], softmax is deeply memory-bound (O(1) arithmetic intensity — a handful of FLOPs per element loaded), so this ~4-5x cut in HBM traffic translates almost linearly into wall-clock speedup, not the modest gain fusion gives a compute-bound GEMM.
+- **Mask with `other=-float("inf")` at load time.** Padding lanes with `-inf` before the max reduction means they can never be the row max, and `exp(-inf - anything) = 0` zeroes their share of the sum. One mask value covers two correctness checks.
+- **Sum in fp32 whatever the I/O dtype.** Because of [[Concept - Softmax]]'s division, every output element inherits the sum's rounding error. Summing a wide fp16 row in fp16 can lose several bits, so the reduction runs in fp32 (Triton's `tl.sum` promotes by default) even when `x` is fp16. Tensor cores accumulate in high precision internally for the same reason.
+- **One program per row.** In the common `[batch, vocab]` or `[batch, seqlen]` layout each row is contiguous, so one program reading and writing one contiguous stretch gets fully [[Concept - GPU Memory Hierarchy|coalesced]] access and needs zero cross-program communication.
+- **Fusion is where all the speed comes from.** An unfused `max` → `sub` → `exp` → `sum` → `div` pipeline in eager PyTorch hits HBM once per op (a read and a write each), roughly 8-10 tensor-sized memory transactions. This kernel does 1 read + 1 write. On the [[Concept - The Roofline Model]], softmax is deep in memory-bound territory (O(1) arithmetic intensity, a handful of FLOPs per element loaded), so the ~4-5x cut in HBM traffic turns almost linearly into wall-clock speedup. Fusing a compute-bound GEMM gives only a modest gain.
 
 ## Connections
 - [[Concept - Triton]] — the block-programming language and compiler this kernel is written in; `tl.load`/`tl.store`/`tl.arange` are its core primitives.

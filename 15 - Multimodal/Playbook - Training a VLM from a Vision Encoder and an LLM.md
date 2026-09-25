@@ -6,43 +6,43 @@ summary: "Recipe for building a projector-style VLM from a pretrained vision enc
 
 # Playbook - Training a VLM from a Vision Encoder and an LLM
 
-> **Goal:** build a working projector-style [[Concept - VLM Architectures|VLM]] from an off-the-shelf pretrained vision encoder and an off-the-shelf pretrained LLM. **When to run this:** you have (or can access) a vision encoder and an LLM checkpoint and want a multimodal instruction-following model without pretraining either component from scratch. **Prerequisites:** a captioning/interleaved dataset for alignment, a multimodal instruction dataset for SFT, and GPU budget for a short (~1 epoch, single-digit-days) run.
+> **Goal:** build a working projector-style [[Concept - VLM Architectures|VLM]] from an off-the-shelf pretrained vision encoder and an off-the-shelf pretrained LLM. **When to run this:** you have (or can get) a vision encoder and an LLM checkpoint and want a multimodal instruction-following model without pretraining either one from scratch. **Prerequisites:** a captioning/interleaved dataset for alignment, a multimodal instruction dataset for SFT, and GPU budget for a short (~1 epoch, single-digit-days) run.
 
 ## Steps
 
-1. **Select components.** Pick an encoder (e.g. SigLIP-So400m or CLIP ViT-L/14 — see [[Decision - Choosing a Vision Encoder for a VLM]]), an LLM (e.g. Qwen or Llama family), and a connector (linear/MLP for simplicity, pixel-shuffle for token efficiency — see [[Concept - Vision-Language Connectors]]). Decide target resolution and image-token budget up front, since it drives every later cost number.
+1. **Select components.** Pick an encoder (e.g. SigLIP-So400m or CLIP ViT-L/14; see [[Decision - Choosing a Vision Encoder for a VLM]]), an LLM (e.g. Qwen or Llama family) and a connector (linear/MLP for simplicity, pixel-shuffle for token efficiency; see [[Concept - Vision-Language Connectors]]). Fix the target resolution and image-token budget now. Every later cost number depends on them.
    *Expected observation:* a concrete token-per-image count (e.g. 576 for one 336px tile) you can budget against context length.
-   *Deviation:* if you can't state the token count before training starts, you haven't finished this step — go compute it.
+   *Deviation:* if you can't state the token count before training starts, this step isn't done. Go compute it.
 
-2. **Stage 1 — feature alignment.** Freeze the encoder and freeze the LLM; train only the connector on ~0.5–1M caption or interleaved image-text pairs. This is the [[Breakdown - LLaVA]] recipe: the connector's only job at this stage is to map vision features into a region of LLM-embedding space the LLM already understands as "a caption of something."
+2. **Stage 1: feature alignment.** Freeze the encoder and the LLM, and train only the connector on ~0.5–1M caption or interleaved image-text pairs. This is the [[Breakdown - LLaVA]] recipe. At this stage the connector's only job is mapping vision features into a region of LLM-embedding space the LLM already reads as "a caption of something."
    *Expected observation:* alignment loss drops steadily and approaches the loss floor of a caption-only model trained on the same data.
-   *Deviation:* a high early plateau usually means the connector LR is too low, or the wrong feature layer was picked (step 3) — not that the data is bad.
+   *Deviation:* a high early plateau usually means the connector LR is too low or the wrong feature layer was picked (step 3), not bad data.
 
-3. **Wire-check before any long run.** Choose the penultimate encoder feature layer (empirically stronger than the last layer), and verify that the number of image tokens the connector emits exactly equals the number of `<image>` placeholder tokens in the chat template.
+3. **Wire-check before any long run.** Use the penultimate encoder feature layer (empirically stronger than the last), and confirm that the number of image tokens the connector emits equals the number of `<image>` placeholder tokens in the chat template.
    *Expected observation:* a unit test on one fixed image passes with an exact token-count match.
-   *Deviation:* any mismatch here is the [[Gotchas - Vision-Language Models|placeholder/chat-template gotcha]] waiting to silently wreck a multi-day run — do not proceed until this passes.
+   *Deviation:* any mismatch is the [[Gotchas - Vision-Language Models|placeholder/chat-template gotcha]], waiting to silently wreck a multi-day run. Don't go on until this passes.
 
-4. **Stage 2 — instruction tuning.** Unfreeze the LLM (keep the encoder frozen unless you have abundant data and a good reason not to); fine-tune on high-quality multimodal instruction data — a multimodal instance of [[Concept - Supervised Fine-Tuning (SFT)]] — mixed with some text-only data to prevent language-capability regression. Use LR ≈ 2e-5 for the LLM and a higher LR for the connector, for roughly one epoch.
+4. **Stage 2: instruction tuning.** Unfreeze the LLM (keep the encoder frozen unless you have abundant data and a good reason). Fine-tune on high-quality multimodal instruction data, a multimodal case of [[Concept - Supervised Fine-Tuning (SFT)]], mixed with some text-only data so language capability doesn't regress. Use LR ≈ 2e-5 for the LLM and a higher LR for the connector, for roughly one epoch.
    *Expected observation:* instruction-following and VQA metrics climb while a held-out text-only eval stays roughly flat.
    *Deviation:* if text-only capability drops noticeably, the text-only replay fraction in the mix is too low.
 
-5. **Enable resolution handling if the task needs it.** If OCR or fine-detail perception matters, turn on [[Concept - Any-Resolution Vision Encoding]] tiling and re-budget the resulting token count against context length and prefill latency — a 4-tile-plus-thumbnail image can be ~2880 tokens.
+5. **Enable resolution handling if the task needs it.** If OCR or fine detail matters, turn on [[Concept - Any-Resolution Vision Encoding]] tiling and re-budget the token count against context length and prefill latency. A 4-tile-plus-thumbnail image can be ~2880 tokens.
    *Expected observation:* OCR-slice eval score rises measurably.
-   *Deviation:* if OCR doesn't improve despite higher resolution, suspect a tiling/position mismatch rather than assuming resolution doesn't help.
+   *Deviation:* if OCR doesn't improve at higher resolution, suspect a tiling/position mismatch before concluding resolution doesn't help.
 
-6. **Verify with targeted probes, not just aggregate VQA.** Run VQA accuracy, an OCR-slice eval, a hallucination probe (POPE-style), and a counterfactual image-swap test (same question, different image — the answer must change) to confirm the model is actually conditioning on the image and not just the language prior.
+6. **Verify with targeted probes as well as aggregate VQA.** Run VQA accuracy, an OCR-slice eval, a hallucination probe (POPE-style) and a counterfactual image-swap test (same question, different image; the answer must change) to confirm the model conditions on the image and isn't running on the language prior.
    *Expected observation:* image-swap changes the answer where image content differs; POPE adversarial-negative accuracy is well above chance.
-   *Deviation:* if image-swap doesn't change answers, you have trained a [[Gotchas - Vision-Language Models|blind VLM]] — go back to step 4's data mix.
+   *Deviation:* if image-swap doesn't change answers, you've trained a [[Gotchas - Vision-Language Models|blind VLM]]. Go back to step 4's data mix.
 
-7. **Train mixed precision throughout.** Run the whole pipeline in [[Concept - Mixed Precision Training]] (bf16) for both stages; watch for loss NaNs, which in VLM training usually trace to un-normalized encoder outputs feeding an under-scaled projector rather than to the LLM side.
+7. **Train in mixed precision throughout.** Run both stages in [[Concept - Mixed Precision Training]] (bf16). Watch for loss NaNs; in VLM training they usually trace to un-normalized encoder outputs feeding an under-scaled projector, not to the LLM side.
    *Expected observation:* stable loss curves in both stages, no NaN spikes.
    *Deviation:* a NaN in Stage 1 almost always means an encoder-output/projector-init scale mismatch, not an LR issue.
 
-*Note: this recipe targets the projector-style family. Native/any-to-any fusion ([[Concept - Native and Any-to-Any Multimodal Models]]) sidesteps stages 1–3 entirely by training everything jointly from scratch — a different, more expensive playbook.*
+*Note: this recipe is for the projector-style family. Native/any-to-any fusion ([[Concept - Native and Any-to-Any Multimodal Models]]) skips stages 1–3 by training everything jointly from scratch, which is a different and more expensive playbook.*
 
 ## Verification
 
-The run is done when: (a) Stage 1 alignment loss matches the caption-model floor, (b) the wire-check in step 3 passes exactly, (c) Stage 2 VQA/instruction metrics meet target with text-only eval unchanged, (d) the counterfactual image-swap test shows the model responds to image content, and (e) POPE-style hallucination accuracy clears your target threshold on the adversarial split specifically (not just random-negative, which is easy to pass by accident).
+The run is done when (a) Stage 1 alignment loss matches the caption-model floor, (b) the step 3 wire-check passes exactly, (c) Stage 2 VQA/instruction metrics hit target with text-only eval unchanged, (d) the counterfactual image-swap test shows the model responds to image content, and (e) POPE-style hallucination accuracy clears your threshold on the adversarial split in particular. The random-negative split is easy to pass by accident.
 
 ## When it goes wrong
 

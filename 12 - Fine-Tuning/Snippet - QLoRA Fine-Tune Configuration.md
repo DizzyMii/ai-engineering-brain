@@ -7,7 +7,7 @@ summary: "Runnable QLoRA setup (transformers + bitsandbytes + peft + TRL) with e
 
 > **What it does:** fine-tunes an 8B base as a 4-bit QLoRA on a single ~16GB GPU. **Dependencies:** `transformers` 4.46, `peft` 0.13, `bitsandbytes` 0.44, `trl` 0.12, `accelerate` 1.0, `datasets` 3.0 (CUDA 12.1, Linux; see the Windows note below). **Expected output:** `trainable params: ~42M / 8.0B (~0.52%)` and a decreasing SFT loss (roughly `1.8 → 1.1` over one epoch on a small chat set).
 
-This is the config that actually matters. Everything else — the dataset, the eval — is elsewhere ([[Playbook - Preparing a Fine-Tuning Dataset]]); the flags below are the ones that silently decide whether your run trains at all, and each maps to a specific piece of the [[Concept - QLoRA]] mechanism.
+This is the config that matters. The dataset and the eval live elsewhere ([[Playbook - Preparing a Fine-Tuning Dataset]]). The flags below silently decide whether your run trains at all, and each one maps to a specific piece of the [[Concept - QLoRA]] mechanism.
 
 ```python
 # QLoRA supervised fine-tune: 4-bit NF4 frozen base + bf16 LoRA adapters on one ~16GB card.
@@ -84,7 +84,7 @@ trainer.train()
 trainer.save_model("qlora-llama3-8b/adapter")
 ```
 
-To deploy with zero inference overhead, merge — but **load the base in fp16 first**, never merge into the 4-bit weights:
+To deploy with zero inference overhead, merge, but **load the base in fp16 first**. Never merge into the 4-bit weights:
 
 ```python
 from peft import PeftModel
@@ -95,15 +95,15 @@ merged.save_pretrained("qlora-llama3-8b/merged")
 
 ## Why it's written this way
 
-- **`optim="paged_adamw_8bit"` — paged optimizer for OOM safety.** Gradient checkpointing recomputes activations in the backward pass, producing sharp transient memory spikes; a single unusually long sequence can OOM a run that was fine for thousands of steps. The paged optimizer pages [[Concept - QLoRA|Adam]] state to CPU RAM during the spike, turning a hard crash into a soft slowdown — the difference between a robust unattended run and a 3 a.m. failure on a rented spot GPU.
-- **`target_modules="all-linear"` — coverage beats rank.** The original LoRA paper adapted only `q,v`; modern practice adapts every linear (attention *and* MLP `gate/up/down`). Broadening the target set recovers far more of the full-fine-tuning gap than raising `r` does, at nearly the same cost. Defaults in [[Reference - Fine-Tuning Hyperparameters]] assume this.
-- **`bf16` compute despite 4-bit storage.** NF4 is a *storage* format; each matmul dequantizes the relevant block to bf16, multiplies, and discards the copy — the same [[Concept - Mixed Precision Training]] discipline used in pretraining, distinct from the int8/fp8 [[Concept - Post-Training Quantization Formats]] used for inference. This dequant-per-matmul is exactly the overhead [[Breakdown - Unsloth]] fuses away.
-- **`use_double_quant=True` — nearly free memory.** Quantizing the block scale constants from fp32 to 8-bit saves ~0.4 bit/param (about 3GB on a 65B model) at negligible quality cost; leave it on.
-- **`prepare_model_for_kbit_training(model)` is not optional.** It enables `gradient_checkpointing` and, critically, `enable_input_require_grads()` so gradients flow into a frozen k-bit base. Omitting it is the number-one "loss won't move" bug in [[Gotchas - LoRA Fine-Tuning]].
+- **`optim="paged_adamw_8bit"`: paged optimizer for OOM safety.** Gradient checkpointing recomputes activations in the backward pass, which causes sharp transient memory spikes, and one unusually long sequence can OOM a run that was fine for thousands of steps. The paged optimizer moves [[Concept - QLoRA|Adam]] state to CPU RAM during the spike, so a hard crash becomes a soft slowdown. That's the difference between a robust unattended run and a 3 a.m. failure on a rented spot GPU.
+- **`target_modules="all-linear"`: coverage beats rank.** The original LoRA paper adapted only `q,v`; modern practice adapts every linear (attention *and* MLP `gate/up/down`). Broadening the target set recovers far more of the full-fine-tuning gap than raising `r`, at nearly the same cost. Defaults in [[Reference - Fine-Tuning Hyperparameters]] assume this.
+- **`bf16` compute despite 4-bit storage.** NF4 is a *storage* format. Each matmul dequantizes the relevant block to bf16, multiplies, and discards the copy, the same [[Concept - Mixed Precision Training]] discipline used in pretraining. It's distinct from the int8/fp8 [[Concept - Post-Training Quantization Formats]] used for inference. The dequant-per-matmul is the overhead [[Breakdown - Unsloth]] fuses away.
+- **`use_double_quant=True`: nearly free memory.** Quantizing the block scale constants from fp32 to 8-bit saves ~0.4 bit/param (about 3GB on a 65B model) at negligible quality cost. Leave it on.
+- **`prepare_model_for_kbit_training(model)` isn't optional.** It enables `gradient_checkpointing` and also `enable_input_require_grads()`, which lets gradients flow into a frozen k-bit base. Leaving it out is the number-one "loss won't move" bug in [[Gotchas - LoRA Fine-Tuning]].
 
-**Version caveat:** TRL's trainer API churns fast. In older versions pass `tokenizer=` instead of `processing_class=`, use `TrainingArguments` + `SFTTrainer(max_seq_length=..., dataset_text_field=...)` instead of `SFTConfig`, and expect `merge_and_unload` return signatures to shift. Pin every version. On **Windows**, `bitsandbytes` historically needed a community CUDA build (`bitsandbytes-windows`) or WSL2 — check current wheel support before assuming `pip install bitsandbytes` gives you a working 4-bit kernel.
+**Version caveat:** TRL's trainer API churns fast. Older versions take `tokenizer=` instead of `processing_class=` and use `TrainingArguments` + `SFTTrainer(max_seq_length=..., dataset_text_field=...)` instead of `SFTConfig`, and `merge_and_unload` return signatures shift. Pin every version. On **Windows**, `bitsandbytes` historically needed a community CUDA build (`bitsandbytes-windows`) or WSL2. Check current wheel support before assuming `pip install bitsandbytes` gives you a working 4-bit kernel.
 
-This whole setup runs an [[Concept - Supervised Fine-Tuning (SFT)]] objective; QLoRA is orthogonal to the objective — swap `SFTTrainer` for a DPO/GRPO trainer and the `BitsAndBytesConfig`/`LoraConfig` block is identical.
+The setup runs an [[Concept - Supervised Fine-Tuning (SFT)]] objective, but QLoRA doesn't depend on the objective. Swap `SFTTrainer` for a DPO/GRPO trainer and the `BitsAndBytesConfig`/`LoraConfig` block stays the same.
 
 ## Connections
 - [[Concept - QLoRA]] — the NF4 / double-quant / paged-optimizer mechanism each flag here switches on.

@@ -5,9 +5,9 @@ summary: "A complete, runnable Python implementation of Reciprocal Rank Fusion f
 ---
 # Snippet - Reciprocal Rank Fusion
 
-> **What it does:** Fuses two or more already-ranked lists of document IDs (e.g. a BM25 result list and a dense-retrieval result list) into a single ranking, using Reciprocal Rank Fusion (Cormack, Clarke & Buettcher 2009) — see [[Concept - Hybrid Search and Reciprocal Rank Fusion]] for the mechanism this implements.
-> **Dependencies:** none beyond the Python 3.9+ standard library (`collections.defaultdict`).
-> **Expected output:** on the worked example below, the fused ranking is `doc2, doc1, doc3, doc4` — see the inline comment for the hand-verified per-document math.
+> **What it does:** fuses two or more already-ranked lists of document IDs (e.g. a BM25 result list and a dense-retrieval result list) into one ranking with Reciprocal Rank Fusion (Cormack, Clarke & Buettcher 2009). The mechanism is in [[Concept - Hybrid Search and Reciprocal Rank Fusion]].
+> **Dependencies:** only the Python 3.9+ standard library (`collections.defaultdict`).
+> **Expected output:** on the worked example below, the fused ranking is `doc2, doc1, doc3, doc4`. The inline comment has the hand-verified per-document math.
 
 ```python
 """
@@ -71,10 +71,10 @@ if __name__ == "__main__":
 
 ## Why it's written this way
 
-- **Fusing ranks, not scores, is the whole point.** BM25 scores are unbounded and corpus-dependent; cosine similarity lives in $[-1, 1]$. Adding them directly is invalid without fragile per-query score normalization. By discarding the raw scores and working only with each document's *position* in each list, RRF sidesteps the normalization problem entirely — it is scale-free by construction, which is why it needs no per-corpus tuning.
-- **`k=60` is folklore, not derivation.** It comes straight from the original paper's empirical sweep, not a principled formula. It's large enough that the difference between rank 1 and rank 2 in one list ($\frac{1}{61}$ vs. $\frac{1}{62}$, a 1.6% relative gap) doesn't swamp a document that ranks consistently well across multiple lists — the entire value of fusion is rewarding cross-system agreement over single-system extremity.
-- **`defaultdict(float)` accumulation is $O(\text{total results across all lists})$.** Each list is streamed through exactly once, adding a contribution per document; there's no pairwise comparison between lists, no sort-then-merge — just a running sum keyed by doc ID, which is why this scales to fusing many result lists (RAG-Fusion's multi-query case) without a combinatorial blowup.
-- **Rank starts at 1, not 0 — this is a real bug people ship.** If you enumerate from 0, the top-ranked document in every list gets weight $\frac{1}{k+0} = \frac{1}{60}$ instead of $\frac{1}{61}$. Because $\frac{1}{k+r}$ is most convex near $r=0$, the gap between rank-0 and rank-1 weighting is proportionally the *largest* gap on the whole curve — using a 0-indexed rank silently overweights the very top result relative to the published formula and defeats the damping the $k$ constant exists to provide. It also means your `k=60` isn't actually the paper's `k=60` anymore; it behaves like `k=59`.
+- **It fuses ranks, not scores.** BM25 scores are unbounded and corpus-dependent; cosine similarity lives in $[-1, 1]$. You can't add them without fragile per-query score normalization. RRF throws away the raw scores and uses only each document's *position* in each list, so the normalization problem never comes up. It's scale-free by construction and needs no per-corpus tuning.
+- **`k=60` is folklore.** It comes from the original paper's empirical sweep, not from any principled formula. It's large enough that the gap between rank 1 and rank 2 in one list ($\frac{1}{61}$ vs. $\frac{1}{62}$, a 1.6% relative gap) doesn't swamp a document that ranks consistently well across several lists. Fusion is worth doing because it rewards cross-system agreement over single-system extremity.
+- **`defaultdict(float)` accumulation is $O(\text{total results across all lists})$.** Each list is streamed once, adding one contribution per document. There's no pairwise comparison between lists and no sort-then-merge, just a running sum keyed by doc ID, so fusing many result lists (RAG-Fusion's multi-query case) doesn't blow up combinatorially.
+- **Rank starts at 1, not 0. People ship this bug.** Enumerate from 0 and the top document in every list gets weight $\frac{1}{k+0} = \frac{1}{60}$ instead of $\frac{1}{61}$. Since $\frac{1}{k+r}$ is most convex near $r=0$, the rank-0 vs rank-1 gap is proportionally the *largest* on the whole curve. A 0-indexed rank silently overweights the top result relative to the published formula and undoes the damping $k$ is there to provide. Your `k=60` also stops being the paper's `k=60`; it behaves like `k=59`.
 
 ## Connections
 

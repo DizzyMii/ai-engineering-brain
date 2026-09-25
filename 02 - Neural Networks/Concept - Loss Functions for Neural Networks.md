@@ -6,7 +6,7 @@ summary: "The objective a network minimizes and how it shapes gradients: CE vs M
 
 # Concept - Loss Functions for Neural Networks
 
-> **One-paragraph hook:** The loss function is the only channel through which the task talks to the weights — every gradient the network ever sees is the derivative of this one scalar. That makes the loss's *gradient shape*, not its value, the thing that matters: two losses that rank the same predictions identically can differ 100× in how fast they learn, because one hands the optimizer a clean error signal and the other multiplies it by a saturating factor that vanishes exactly when the model is most wrong.
+> **One-paragraph hook:** Every gradient the network ever sees is the derivative of one scalar, the loss. It's the only channel from the task to the weights, and its *gradient shape* matters more than its value. Two losses that rank the same predictions identically can differ 100× in learning speed: one hands the optimizer a clean error signal, the other multiplies it by a saturating factor that vanishes when the model is most wrong.
 
 ## The mechanism
 
@@ -14,21 +14,27 @@ summary: "The objective a network minimizes and how it shapes gradients: CE vs M
 
 $$\mathcal{L}_{CE} = -\sum_i y_i \log \hat{y}_i$$
 
-Minimizing it is maximizing the log-likelihood of the correct class; its information-theoretic reading (code length under the wrong distribution) lives in [[Concept - Entropy and Cross-Entropy]]. The load-bearing fact is what happens when you differentiate through the softmax: the gradient with respect to the logits $z$ collapses to
+Minimizing it maximizes the log-likelihood of the correct class; the information-theoretic reading (code length under the wrong distribution) is in [[Concept - Entropy and Cross-Entropy]]. Differentiate through the softmax and the gradient with respect to the logits $z$ collapses to
 
 $$\frac{\partial \mathcal{L}_{CE}}{\partial z} = \hat{y} - y$$
 
-— the raw prediction error, no extra factors. Confidently wrong ⇒ gradient magnitude near 1; correct ⇒ near 0. This clean, well-scaled signal flowing into [[Concept - Backpropagation]] is exactly why softmax+CE dominates classification, and why frameworks fuse them (`F.cross_entropy` = log-softmax + NLL in one numerically stable op).
+the raw prediction error, no extra factors. Confidently wrong gives a gradient magnitude near 1; correct gives near 0. That clean, well-scaled signal going into [[Concept - Backpropagation]] is why softmax+CE dominates classification, and why frameworks fuse them (`F.cross_entropy` = log-softmax + NLL in one numerically stable op).
 
-**Why CE replaced MSE for classification.** Squared error through a sigmoid output $\hat{y} = \sigma(z)$ has gradient
+### Why CE replaced MSE for classification
+
+Squared error through a sigmoid output $\hat{y} = \sigma(z)$ has gradient
 
 $$\frac{\partial}{\partial z}\,\tfrac{1}{2}(\hat{y}-y)^2 = (\hat{y}-y)\,\sigma'(z)$$
 
-and $\sigma'(z) \le 0.25$, decaying to ~0 in the tails. A unit that is *saturated and wrong* — $\hat{y} \approx 0$ when $y = 1$ — gets almost no gradient precisely when it needs the most. CE cancels the $\sigma'$ factor analytically, so learning stays fast even from badly wrong starts. This is the concrete, mechanical reason the field switched; it is not an empirical preference.
+and $\sigma'(z) \le 0.25$, decaying to ~0 in the tails. A unit that is *saturated and wrong* ($\hat{y} \approx 0$ when $y = 1$) gets almost no gradient at the moment it needs the most. CE cancels the $\sigma'$ factor analytically, so learning stays fast even from badly wrong starts. The field switched for this mechanical reason, not out of empirical preference.
 
-**Regression: MSE, MAE, Huber.** MSE $(\hat{y}-y)^2$ is the maximum-likelihood loss under Gaussian noise, but its gradient grows linearly with the error, so a single mislabeled outlier at 100× the typical scale contributes 10,000× the loss and yanks the model. MAE $|\hat{y}-y|$ caps the gradient at ±1 (robust, but constant-magnitude gradients converge slowly near the optimum and it's non-smooth at 0). Huber interpolates: quadratic within $\delta$ of the target, linear beyond — the standard compromise ($\delta = 1.0$ default). This matters beyond textbook regression: value heads in RL and scalar [[Concept - Reward Models]] are regression heads, and their outlier behavior is a real training-stability lever.
+### Regression: MSE, MAE, Huber
 
-**Label smoothing.** Replace the hard target with $y_\text{smooth} = (1-\varepsilon)\,y + \varepsilon / C$, typically $\varepsilon = 0.1$ (Szegedy et al. 2016). Because plain CE is only minimized as the correct logit $\to \infty$, hard targets push logits to grow without bound; smoothing gives a finite optimum, improves calibration, and adds a small accuracy bump on ImageNet-scale classification. The catch (Müller et al. 2019): it collapses the geometry of the penultimate layer — logit gaps between *incorrect* classes get erased — which measurably hurts when the model is used as a [[Concept - Knowledge Distillation]] teacher, since inter-class structure is exactly what distillation transfers.
+MSE $(\hat{y}-y)^2$ is the maximum-likelihood loss under Gaussian noise. But its gradient grows linearly with the error, so one mislabeled outlier at 100× the typical scale contributes 10,000× the loss and yanks the model. MAE $|\hat{y}-y|$ caps the gradient at ±1. It's robust, but constant-magnitude gradients converge slowly near the optimum, and it's non-smooth at 0. Huber sits between them: quadratic within $\delta$ of the target, linear beyond. It's the standard compromise ($\delta = 1.0$ default). Value heads in RL and scalar [[Concept - Reward Models]] are regression heads, and their outlier behavior is a real training-stability lever.
+
+### Label smoothing
+
+Replace the hard target with $y_\text{smooth} = (1-\varepsilon)\,y + \varepsilon / C$, typically $\varepsilon = 0.1$ (Szegedy et al. 2016). Plain CE is only minimized as the correct logit $\to \infty$, so hard targets push logits to grow without bound. Smoothing gives a finite optimum, improves calibration, and adds a small accuracy bump on ImageNet-scale classification. The catch (Müller et al. 2019) is that it collapses the geometry of the penultimate layer: logit gaps between *incorrect* classes get erased. That measurably hurts when the model is a [[Concept - Knowledge Distillation]] teacher, because inter-class structure is what distillation transfers.
 
 ## In practice
 
@@ -40,21 +46,21 @@ and $\sigma'(z) \le 0.25$, decaying to ~0 in the tails. A unit that is *saturate
 | Regression, outliers / heavy tails | Huber (or MAE) | Value heads, reward-model heads |
 | Distribution matching (distillation, RLHF penalty) | [[Concept - KL Divergence]] | CE minus a constant when the target is fixed |
 
-**Loss-at-init is the canonical first diagnostic.** With random init and $C$ balanced classes, predictions are ~uniform, so CE $\approx \ln(C)$ at step 0: $\ln(1000) \approx 6.9$ for ImageNet, $\ln(50257) \approx 10.82$ for GPT-2's vocab. Check this *before* touching the model — it is step 1 of [[Playbook - Debugging a Neural Network That Won't Train]]. Too high ⇒ init or logit-scale bug; too low ⇒ label leakage or a degenerate batch; exactly $\ln(C)$ but never moving ⇒ disconnected graph.
+**Check loss at init first.** With random init and $C$ balanced classes, predictions are ~uniform, so CE $\approx \ln(C)$ at step 0: $\ln(1000) \approx 6.9$ for ImageNet, $\ln(50257) \approx 10.82$ for GPT-2's vocab. Do this *before* touching the model (step 1 of [[Playbook - Debugging a Neural Network That Won't Train]]). Too high means an init or logit-scale bug. Too low means label leakage or a degenerate batch. Sitting at $\ln(C)$ and never moving means a disconnected graph.
 
-**Reduction is a hidden learning-rate knob.** `mean` vs `sum` vs per-token reduction rescales the gradient by batch size or sequence length, silently changing the effective LR when either changes. The classic silent error is the masked-loss token-count bug in SFT: dividing summed loss by *all* tokens instead of *unmasked* tokens shrinks gradients in proportion to how much of each sequence is masked — mechanics in [[Concept - Loss Masking and Sequence Packing]], and it earns its slot in [[Gotchas - Training Neural Networks]].
+**Reduction is a hidden learning-rate knob.** `mean` vs `sum` vs per-token reduction rescales the gradient by batch size or sequence length, so the effective LR changes silently whenever either one does. The classic case is the SFT masked-loss token-count bug: dividing summed loss by *all* tokens instead of *unmasked* tokens shrinks gradients in proportion to how much of each sequence is masked. Mechanics in [[Concept - Loss Masking and Sequence Packing]]; it's also listed in [[Gotchas - Training Neural Networks]].
 
 ## Failure modes
 
 - **Wrong loss at init.** Symptom: step-0 CE far from $\ln(C)$. Cause: label off-by-one, logits passed through an extra softmax (double-softmax), or wrong reduction. Fix before any architecture work.
-- **Hand-rolled `log(softmax(x))`.** NaNs when a probability underflows to 0. Always use the fused CE / log-sum-exp path.
-- **Saturated sigmoid + MSE.** Loss frozen high, gradients ~0 despite gross errors. Detection: plot gradient norm vs error — flat where it should be large. Fix: switch to CE/BCE-with-logits.
-- **Reduction mismatch across code paths.** Loss magnitude jumps when batch size or sequence length changes; comparisons across runs become meaningless. Detection: vary batch size 2× and confirm per-example loss is invariant.
-- **Label smoothing where structure matters.** Calibration improves but distillation from the smoothed teacher regresses. Detection: compare student quality from smoothed vs unsmoothed teachers.
+- **Hand-rolled `log(softmax(x))`.** NaNs when a probability underflows to 0. Use the fused CE / log-sum-exp path.
+- **Saturated sigmoid + MSE.** Loss stuck high, gradients ~0 despite gross errors. To detect, plot gradient norm vs error; it's flat where it should be large. Switch to CE/BCE-with-logits.
+- **Reduction mismatch across code paths.** Loss magnitude jumps when batch size or sequence length changes, so cross-run comparisons are meaningless. Vary batch size 2× and confirm per-example loss doesn't move.
+- **Label smoothing where structure matters.** Calibration improves, but distillation from the smoothed teacher regresses. Compare student quality from smoothed vs unsmoothed teachers.
 
 ## The non-obvious
 
-The loss function and the optimizer are not separable design choices: reduction, masking, and target smoothing all multiply into the gradient exactly like a learning-rate change, but they do it *silently* and sometimes *per-example*. When a training run behaves differently after a "harmless" data or batching change, audit the loss's denominator first — in practice more "optimizer mysteries" trace to the loss reduction than to the optimizer.
+You can't pick the loss and the optimizer separately. Reduction, masking and target smoothing all multiply into the gradient the same way a learning-rate change does, except *silently* and sometimes *per-example*. If a run behaves differently after a "harmless" data or batching change, audit the loss's denominator first. In practice more "optimizer mysteries" trace to the loss reduction than to the optimizer.
 
 ## Connections
 

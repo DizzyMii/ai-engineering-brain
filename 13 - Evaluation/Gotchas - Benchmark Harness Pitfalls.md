@@ -4,56 +4,56 @@ aliases: []
 summary: "Implementation traps that make one model score differently across harnesses: chat templates, acc_norm, few-shot format, tokenizer quirks."
 ---
 
-A benchmark harness turns a dataset and a model into a number, and every step of that pipeline has an unmarked knob that silently changes the number without changing the model. None of these bugs throw an exception — the harness runs, prints a score, and the score is simply wrong, or right for the wrong reason, or incomparable to the number in someone else's paper. Ordered by how much pain each one causes in practice.
+A benchmark harness turns a dataset and a model into a number, and every step has an unmarked knob that changes the number without changing the model. None of these bugs throw an exception. The harness runs, prints a score, and the score is wrong, or right for the wrong reason, or not comparable to the number in someone else's paper. Ordered by how much pain each causes in practice.
 
-## 1. Running an instruct model without its chat template (or vice versa) swings scores 10-20 points
+## 1. Instruct model without its chat template (or the reverse): 10-20 point swings
 
-**Symptom:** Same weights, same benchmark, but the number your harness produces disagrees by ten-plus points with a number reported elsewhere for the identical checkpoint — no code bug, no data change.
-**Cause:** Instruction-tuned models are trained on a specific token sequence wrapping every turn — role tags, BOS/EOS placement, a system-prompt slot — as part of the [[Deep Dive - Designing an Eval Harness]] request pipeline. Feed a chat-tuned model raw few-shot text instead of the exact sequence it saw during SFT/RLHF and you're evaluating it off-distribution, the same way any model degrades on out-of-distribution input. Run a base (non-chat) model *through* a chat template and you get the opposite failure: spurious role tokens the model was never trained to parse.
-**Fix:** Pull the model's own chat template from its tokenizer config (e.g. `tokenizer.apply_chat_template`) rather than hand-rolling a prompt string; never assume one "Instruction:\n{q}\nAnswer:" format transfers across model families.
-**Detection:** Print the fully rendered prompt string the harness actually sends to the model — the single highest-value debugging step on this whole list — and diff it by eye against the model card's documented chat format.
+**Symptom:** Same weights, same benchmark, and your harness's number disagrees by ten-plus points with one reported elsewhere for the identical checkpoint. No code bug, no data change.
+**Cause:** Instruction-tuned models are trained on a specific token sequence around every turn: role tags, BOS/EOS placement, a system-prompt slot. That sequence is part of the [[Deep Dive - Designing an Eval Harness]] request pipeline. Feed a chat-tuned model raw few-shot text instead of what it saw in SFT/RLHF and you're evaluating it off-distribution, and it degrades like any model on out-of-distribution input. Push a base model *through* a chat template and you get the opposite failure: role tokens it was never trained to parse.
+**Fix:** Take the model's own chat template from its tokenizer config (e.g. `tokenizer.apply_chat_template`) instead of hand-rolling a prompt string. Never assume one "Instruction:\n{q}\nAnswer:" format carries across model families.
+**Detection:** Print the fully rendered prompt string the harness sends. It's the most useful debugging step on this list. Compare it by eye with the chat format in the model card.
 
 ## 2. Comparing a log-likelihood number to a generated-and-parsed number
 
-**Symptom:** Two "MMLU" numbers that should be comparable differ by several points and neither harness has an obvious bug.
-**Cause:** [[Concept - Answer Scoring and Normalization]] distinguishes two entirely different measurement regimes: scoring the log-probability the model assigns to each option (cloze/log-likelihood scoring) versus letting the model generate free text and parsing an answer out of it. These are different experiments run over the same benchmark, and they are not guaranteed to rank models identically — a paper reporting one and a leaderboard reporting the other are not comparable numbers even though both say "MMLU."
-**Fix:** State which regime you used, and only compare numbers reported under the same regime.
-**Detection:** Check the harness's task config for `output_type: loglikelihood` vs `generate_until` — most harnesses (lm-evaluation-harness included) expose this explicitly once you know to look for it.
+**Symptom:** Two "MMLU" numbers that should match differ by several points, and neither harness has an obvious bug.
+**Cause:** [[Concept - Answer Scoring and Normalization]] separates two measurement regimes. One scores the log-probability the model assigns to each option (cloze/log-likelihood scoring). The other lets the model generate free text and parses an answer out. They're different experiments on the same benchmark and aren't guaranteed to rank models the same way. A paper reporting one and a leaderboard reporting the other aren't comparable, even though both say "MMLU."
+**Fix:** State which regime you used, and compare only numbers from the same regime.
+**Detection:** Look for `output_type: loglikelihood` vs `generate_until` in the task config. Most harnesses, lm-evaluation-harness included, expose it once you know to look.
 
 ## 3. acc vs acc_norm silently reorders models by 5-10 points
 
-**Symptom:** Two runs of the same harness on the same model report different accuracy for HellaSwag or ARC depending on a flag you didn't realize you were setting.
-**Cause:** Raw option log-likelihood ("acc") is biased toward shorter completions, because a shorter string simply accumulates fewer per-token log-probability penalties. "acc_norm" divides by completion length (byte length, in lm-evaluation-harness) to correct for that bias. Which normalization the original paper used is often unstated, so "acc_norm" is not a single well-defined quantity across harnesses — the two variants can differ 5-10 points and change which model wins.
-**Fix:** Report which variant you used at every step; when comparing against a published number, match the exact variant, not just the benchmark name.
-**Detection:** Re-run the same eval with both `acc` and `acc_norm` — if the model ranking flips between them, your headline number is an artifact of the normalization choice, not the model.
+**Symptom:** Two runs of the same harness on the same model give different HellaSwag or ARC accuracy, depending on a flag you didn't realize you were setting.
+**Cause:** Raw option log-likelihood ("acc") favors shorter completions, since a shorter string accumulates fewer per-token log-probability penalties. "acc_norm" divides by completion length (byte length, in lm-evaluation-harness) to correct for it. The original paper often doesn't say which normalization it used, so "acc_norm" isn't one well-defined quantity across harnesses. The two variants can differ by 5-10 points and change which model wins.
+**Fix:** Report the variant at every step. When comparing against a published number, match the exact variant as well as the benchmark name.
+**Detection:** Run the eval with both `acc` and `acc_norm`. If the ranking flips, your headline number is an artifact of normalization.
 
-## 4. Few-shot count, exemplar leakage, and exemplar order move the score more than the model does
+## 4. Few-shot count, exemplar leakage and exemplar order move the score more than the model does
 
-**Symptom:** The same model, same benchmark, same harness reports different accuracy across two runs that were supposed to be identical.
-**Cause:** Wrong shot count relative to the paper you're comparing against; exemplars accidentally drawn from the benchmark's own test split (leakage); or — the largest and least intuitive effect — exemplar *ordering*. [[Concept - Prompt Format Sensitivity in Evaluation]] documents spreads up to ~76 points from semantically-equivalent formatting changes, and exemplar order alone can move a model from near-random to near-SOTA with zero change to exemplar content.
-**Fix:** Fix and version-pin the shot count, the exact exemplar set, and its order; draw exemplars only from a held-out split, never from the test set being scored.
-**Detection:** Re-run the eval with a different exemplar order and check the resulting variance — if it's larger than the delta you're trying to report between two models, the comparison isn't meaningful yet.
+**Symptom:** Same model, benchmark and harness, two runs that were supposed to be identical, different accuracy.
+**Cause:** A shot count that doesn't match the paper you're comparing against; exemplars accidentally drawn from the benchmark's own test split (leakage); or, the largest and least intuitive, exemplar *ordering*. [[Concept - Prompt Format Sensitivity in Evaluation]] documents spreads up to ~76 points from semantically equivalent formatting changes, and exemplar order alone can take a model from near-random to near-SOTA without changing exemplar content.
+**Fix:** Version-pin the shot count, the exemplar set and its order. Draw exemplars only from a held-out split, never from the test set being scored.
+**Detection:** Re-run with a different exemplar order and look at the variance. If it's bigger than the delta you want to report between two models, the comparison isn't meaningful yet.
 
-## 5. Answer-extraction regex misses valid formats and silently undercounts
+## 5. Answer-extraction regex misses valid formats and undercounts
 
-**Symptom:** A generation-based eval reports a lower score than manual spot-checking of the same transcripts suggests it should.
-**Cause:** The parser looks for one answer shape ("The answer is (C)") and the model just as validly writes "C.", "c)", or restates the option text instead of the letter. [[Concept - Multiple-Choice Symbol Binding and Position Bias]] covers the deeper issue that letter-emission and answer-knowledge aren't the same capability — but at the harness level this is simpler: a narrow regex fails to match a correct answer and scores it as wrong.
-**Fix:** Use a multi-pattern parser that accepts the common valid variants, and manually audit a random sample of "wrong" answers before trusting the aggregate.
-**Detection:** Manually read 20-30 items the harness marked incorrect; if several are visibly correct in substance, the extraction logic — not the model — is the bug.
+**Symptom:** A generation-based eval scores lower than manual spot checks of the same transcripts suggest.
+**Cause:** The parser looks for one answer shape ("The answer is (C)"), and the model writes "C.", "c)", or restates the option text instead of the letter, all equally valid. [[Concept - Multiple-Choice Symbol Binding and Position Bias]] covers the deeper issue that emitting a letter and knowing the answer are different capabilities. At the harness level it's simpler: a narrow regex fails to match a correct answer and scores it wrong.
+**Fix:** Use a multi-pattern parser that accepts the common valid variants, and hand-audit a random sample of "wrong" answers before trusting the aggregate.
+**Detection:** Read 20-30 items the harness marked incorrect. If several are visibly correct in substance, the bug is in extraction.
 
 ## 6. Generation truncated before the chain-of-thought reaches its answer
 
-**Symptom:** A model that should benefit from chain-of-thought scores worse on a CoT-prompted eval than on a direct-answer version of the same benchmark.
-**Cause:** A stop sequence or `max_new_tokens` budget tuned for short direct answers cuts a longer reasoning trace off before it reaches the final-answer span the parser looks for, especially on math/reasoning tasks where CoT length varies widely per item.
-**Fix:** Set generation length budgets generously for CoT-style prompts, sized against the longest legitimate trace you expect, not the median one.
-**Detection:** Check the fraction of generations that hit the max-token cutoff rather than a natural stop token — a high hit-rate on that counter is a silent scoring problem, not a model problem.
+**Symptom:** A model that should gain from chain-of-thought scores worse on a CoT-prompted eval than on a direct-answer version of the same benchmark.
+**Cause:** A stop sequence or `max_new_tokens` budget tuned for short direct answers cuts a longer reasoning trace off before the final-answer span the parser wants. Math and reasoning tasks are worst, since CoT length varies widely per item.
+**Fix:** Size generation budgets for CoT prompts against the longest legitimate trace you expect, not the median.
+**Detection:** Track the fraction of generations that hit the max-token cutoff instead of a natural stop token. A high rate there is a scoring problem, not a model problem.
 
 ## 7. Batch nondeterminism and leading-space tokenization flip individual scores
 
-**Symptom:** Re-running the identical eval config on the identical checkpoint produces a slightly different score run to run, or a model's MCQ accuracy looks implausibly close to the random baseline on a task it should handle easily.
-**Cause:** Batch composition and padding interact with floating-point reduction order inside matmul kernels to produce small logit differences across runs — rarely enough to flip a real answer, but a genuine source of nondeterminism at the margin. Separately, [[Concept - Byte-Pair Encoding]] tokenizers frequently encode " A" (leading space) and "A" as different token IDs, so scoring the wrong one of the two silently compares the log-probability of a token the option template never actually produces — a scoring bug that looks exactly like a capability gap. Related tokenizer pathologies, including the barely-trained tokens documented in [[Lore - Glitch Tokens]], produce near-arbitrary logits and are a similar silent-corruption vector when one lands inside a prompt template.
-**Fix:** Pin batch size and disable nondeterministic kernel paths for eval runs where reproducibility matters; verify which exact token ID the harness scores against by decoding it back to text.
-**Detection:** Sanity-check the random baseline on a 4-way MCQ task — if the harness reports meaningfully below 25% on a model that isn't badly broken, suspect a scoring or tokenization bug before suspecting the model.
+**Symptom:** The identical config on the identical checkpoint gives a slightly different score each run, or a model's MCQ accuracy sits implausibly close to random on a task it should find easy.
+**Cause:** Batch composition and padding interact with floating-point reduction order in matmul kernels and produce small logit differences across runs. That rarely flips a real answer, but it's a real source of nondeterminism at the margin. Separately, [[Concept - Byte-Pair Encoding]] tokenizers frequently encode " A" (leading space) and "A" as different token IDs. Score the wrong one and you're comparing the probability of a token the option template never produces, a scoring bug that looks like a capability gap. Related tokenizer pathologies, such as the barely trained tokens in [[Lore - Glitch Tokens]], give near-arbitrary logits and corrupt results the same silent way when one lands in a prompt template.
+**Fix:** Pin batch size and turn off nondeterministic kernel paths for evals where reproducibility matters. Decode the token ID the harness scores back to text to check it.
+**Detection:** Sanity-check the random baseline on a 4-way MCQ task. If the harness reports meaningfully below 25% on a model that isn't badly broken, suspect scoring or tokenization before the model.
 
 ## Connections
 

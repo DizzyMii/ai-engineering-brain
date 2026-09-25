@@ -8,7 +8,7 @@ summary: "Lookup matrix: PEFT methods by param count, family, mergeability, infe
 
 ## Method matrix
 
-Quality vs full FT is date-stamped to **2024–2026 open-model practice** (Llama/Qwen/Mistral families); it is task-dependent and the row notes say for which tasks. "Mergeable" and latency columns are defined in the footnotes.
+Quality vs full FT is date-stamped to **2024–2026 open-model practice** (Llama/Qwen/Mistral families). It depends on the task, and each row says which tasks. The "Mergeable" and latency columns are defined in the footnotes.
 
 | Method | Family¹ | Trainable %² | Mergeable?³ | Extra inference latency⁴ | Quality vs full FT⁵ | Best-fit use case | Key paper |
 |---|---|---|---|---|---|---|---|
@@ -16,8 +16,8 @@ Quality vs full FT is date-stamped to **2024–2026 open-model practice** (Llama
 | QLoRA ([[Concept - QLoRA]]) | reparam + 4-bit NF4 base | 0.1–1% (adapter) | Only after dequantizing base⁶ | +0 after merge; dequant overhead at *train* time | ≈ LoRA | Consumer-GPU FT of large models | Dettmers 2023 |
 | DoRA ([[Concept - DoRA]]) | reparam (magnitude + direction) | ~LoRA + <0.01% | Yes | +0 after merge | **>** LoRA, most at low rank (+1–4 pts commonsense) | When the small quality bump is worth extra train cost | Liu 2024 |
 | rsLoRA⁷ | reparam (scaling fix) | = LoRA | Yes | +0 | Unlocks high-rank LoRA (r=64–256) | Hard domains at r ≥ 32 | Kalajdzievski 2023 |
-| Adapters — Houlsby | additive bottleneck | 0.5–8% | **No** | **+latency (sequential layer)** | Strong NLU, near full FT | Multi-task, latency-tolerant | Houlsby 2019 |
-| Adapters — Pfeiffer | additive bottleneck | ~½ Houlsby | **No** | **+latency** | ≈ Houlsby | AdapterHub default | Pfeiffer 2021 |
+| Adapters (Houlsby) | additive bottleneck | 0.5–8% | **No** | **+latency (sequential layer)** | Strong NLU, near full FT | Multi-task, latency-tolerant | Houlsby 2019 |
+| Adapters (Pfeiffer) | additive bottleneck | ~½ Houlsby | **No** | **+latency** | ≈ Houlsby | AdapterHub default | Pfeiffer 2021 |
 | IA3 ([[Concept - Adapter Layers]]) | additive rescale | 0.01–0.05% | Foldable into weights⁸ | ~+0 | Strong few-shot (T-Few) | Few-shot, tiny budget | Liu 2022 |
 | BitFit | selective (biases only) | ~0.08% | N/A (updates real params) | +0 | Small-model only; weakens at scale | Minimal-budget, small models | Ben-Zaken 2021 |
 | Prompt tuning ([[Concept - Prompt Tuning and Prefix Tuning]]) | additive (soft prompt) | <0.1% | **No** | Consumes context window | Matches full FT only >10B | Multi-task serving (swap prompts) | Lester 2021 |
@@ -36,20 +36,20 @@ Quality vs full FT is date-stamped to **2024–2026 open-model practice** (Llama
 
 ## Memory rule of thumb
 
-- Trainable-parameter memory ≈ **16 bytes/param** under [[Concept - Adam and AdamW|AdamW]] mixed precision (bf16 weight+grad + fp32 master + 2× fp32 moments); this is the term PEFT shrinks. Frozen base weights are unchanged. Full formulas: [[Reference - Memory Math for Transformers]].
+- Trainable-parameter memory ≈ **16 bytes/param** under [[Concept - Adam and AdamW|AdamW]] mixed precision (bf16 weight+grad + fp32 master + 2× fp32 moments). This is the term PEFT shrinks; frozen base weights are unchanged. Full formulas: [[Reference - Memory Math for Transformers]].
 - Example: rank-16 LoRA on all linear layers of a 7B model ≈ **40M trainable params (~0.6%)** → a few hundred MB of optimizer state, versus ~84 GB for full FT of the same model.
-- QLoRA's saving is on the **frozen base** (4-bit NF4 ≈ 0.5 GB/B-param) not the adapter; the adapter memory equals plain LoRA's.
+- QLoRA saves on the **frozen base** (4-bit NF4 ≈ 0.5 GB/B-param), not the adapter. Adapter memory is the same as plain LoRA's.
 
 ## Footnotes
 
-1. **Family** — additive / selective / reparameterization taxonomy (Ding et al. 2022), the organizing frame of [[Concept - Parameter-Efficient Fine-Tuning (PEFT)]]; "intervention" added for ReFT, which edits activations rather than weights.
-2. **Trainable %** — fraction of base parameters that receive gradients; drives optimizer/gradient memory, not forward-pass FLOPs. Ranges are for 7B-class models with all-linear targeting where applicable.
-3. **Mergeable** — whether the learned update can be algebraically folded back into the base weights so that inference runs the *original* graph with *zero* added cost. Mergeability, more than quality, is why the reparameterization family won large-scale LLM serving; the serving-side payoff is owned by [[Concept - Continuous Batching]] and multi-adapter serving in domain 07.
-4. **Extra inference latency** — cost paid *per token at serving time* relative to the base model. "Sequential layer" means the module sits in the forward path and cannot be removed; "consumes context window" means soft-prompt/prefix tokens occupy positions that would otherwise hold input.
-5. **Quality vs full FT** — relative task quality *(as of 2024–2026 open-model practice)*; highly task-dependent. All reparameterization methods track full FT closely on instruction/style and lag on large-distribution-shift domains (code, math) — mechanism in [[Concept - Why LoRA Underperforms Full Fine-Tuning]].
-6. **QLoRA merge** — merging an adapter into a still-4-bit base loses accuracy; dequantize the base to fp16 first, then merge (see [[Concept - QLoRA]]).
-7. **rsLoRA** — not a separate parameterization but a scaling correction to LoRA ($\alpha/\sqrt r$ instead of $\alpha/r$); see [[Reference - Fine-Tuning Hyperparameters]] and the [[Concept - rsLoRA and the Rank-Alpha Scaling Trap|scaling trap]].
-8. **IA3 foldable** — the learned element-wise rescaling vectors multiply keys/values/FFN activations and can be absorbed into adjacent weight matrices, so IA3 adds no residual inference cost despite being in the additive family.
+1. **Family:** the additive / selective / reparameterization taxonomy (Ding et al. 2022) that organizes [[Concept - Parameter-Efficient Fine-Tuning (PEFT)]], plus "intervention" for ReFT, which edits activations instead of weights.
+2. **Trainable %:** fraction of base parameters that get gradients. It drives optimizer/gradient memory, not forward-pass FLOPs. Ranges are for 7B-class models with all-linear targeting where that applies.
+3. **Mergeable:** whether the learned update can be algebraically folded into the base weights so inference runs the *original* graph at *zero* added cost. Mergeability, more than quality, is why the reparameterization family won large-scale LLM serving. The serving-side payoff belongs to [[Concept - Continuous Batching]] and multi-adapter serving in domain 07.
+4. **Extra inference latency:** cost paid *per token at serving time* relative to the base model. "Sequential layer" means the module sits in the forward path and can't be removed. "Consumes context window" means soft-prompt/prefix tokens take positions that would otherwise hold input.
+5. **Quality vs full FT:** relative task quality *(as of 2024–2026 open-model practice)*, highly task-dependent. All reparameterization methods track full FT closely on instruction/style and lag on large-distribution-shift domains (code, math); mechanism in [[Concept - Why LoRA Underperforms Full Fine-Tuning]].
+6. **QLoRA merge:** merging an adapter into a still-4-bit base loses accuracy. Dequantize the base to fp16 first, then merge (see [[Concept - QLoRA]]).
+7. **rsLoRA:** a scaling correction to LoRA ($\alpha/\sqrt r$ instead of $\alpha/r$), not a separate parameterization. See [[Reference - Fine-Tuning Hyperparameters]] and the [[Concept - rsLoRA and the Rank-Alpha Scaling Trap|scaling trap]].
+8. **IA3 foldable:** the learned element-wise rescaling vectors multiply keys/values/FFN activations and can be absorbed into adjacent weight matrices, so IA3 adds no residual inference cost even though it's in the additive family.
 
 ## Connections
 - [[Concept - Parameter-Efficient Fine-Tuning (PEFT)]] — the parent concept whose three-family taxonomy this matrix instantiates row by row.

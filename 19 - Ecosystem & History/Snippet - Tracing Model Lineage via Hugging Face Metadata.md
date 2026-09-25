@@ -6,7 +6,7 @@ summary: "Runnable Python that reconstructs a model's derivation (base, finetune
 
 # Snippet - Tracing Model Lineage via Hugging Face Metadata
 
-Given a Hub repo id, reconstruct its derivation: the declared base model, whether it is a fine-tune / merge / LoRA adapter / quantization, its **tokenizer ancestry** (which survives fine-tuning and betrays undeclared descent), and a *low-confidence* flag for distillation-from-a-closed-model. The discipline is **verify, don't trust**: `base_model` in a model card is self-reported and frequently wrong or absent, so every declared edge is corroborated against `config.json` and a tokenizer hash. This is the raw material for the family trees in [[Reference - Model Genealogy]] and one of the load-bearing checks in the [[Checklist - Vetting an Open-Weights Model for Production]]. The `base_model` / `base_model_relation` convention it reads is the metadata standard popularized by the Hub itself (see [[Breakdown - Hugging Face]]).
+Given a Hub repo id, this reconstructs the model's derivation: the declared base model; whether it's a fine-tune, merge, LoRA adapter or quantization; its **tokenizer ancestry**, which survives fine-tuning and gives away undeclared descent; and a *low-confidence* flag for distillation from a closed model. Verify, don't trust. `base_model` in a model card is self-reported and frequently wrong or absent, so each declared edge gets checked against `config.json` and a tokenizer hash. The output feeds the family trees in [[Reference - Model Genealogy]] and is one of the required checks in the [[Checklist - Vetting an Open-Weights Model for Production]]. The `base_model` / `base_model_relation` convention it reads is a metadata standard the Hub itself popularized (see [[Breakdown - Hugging Face]]).
 
 ```
 What it does:  Emits a structured lineage record for one HF repo id.
@@ -167,10 +167,13 @@ Expected output:
 
 ## Why it's written this way
 
-- **Metadata-first, artifact-fallback.** `base_model` is the fast path, but it is a text field an uploader can leave blank, copy-paste wrong, or omit to obscure a leaked base. `config.json` geometry and the tokenizer hash are what the *loader* consumes, so they are ground truth — the fallbacks exist because self-reported lineage is unreliable exactly when it matters (a rebranded fine-tune of a restrictively-licensed base).
-- **The tokenizer hash is the real fingerprint.** A model's [[Concept - Byte-Pair Encoding]] tokenizer is almost never retrained during fine-tuning or merging, so a `sha256` of its vocab is a near-immutable ancestry marker that survives every downstream edit. Vocab *size* alone collides (Llama and Mistral both sit at 32k), which is why size is only a hint and the hash is the identity — the pitfalls of leaning on vocab size are catalogued in [[Gotchas - Tokenizers]].
-- **Structural files override prose.** `adapter_config.json`, `quantization_config`, and multiple `base_model` entries are mechanically load-bearing — they change what code path `from_pretrained` takes — so they outrank the human-written card whenever they disagree. Prose is aspiration; these files are what actually runs.
-- **The distillation flag is emitted as low-confidence, never fact.** You cannot *prove* [[Concept - Knowledge Distillation]] from a closed model via metadata; a "distill" in the name or a ShareGPT mention is a hypothesis with legal weight if wrong. Surfacing it as `low-confidence` with its evidence — rather than a boolean — is the difference between a useful signal and a defamatory assertion.
+`base_model` is the fast path, but it's a text field. An uploader can leave it blank, paste it wrong, or omit it to hide a leaked base. `config.json` geometry and the tokenizer hash are what the *loader* consumes, so they count as ground truth. The fallbacks are there because self-reported lineage is least reliable when it matters most, as with a rebranded fine-tune of a restrictively licensed base.
+
+The tokenizer hash is the fingerprint that matters. A model's [[Concept - Byte-Pair Encoding]] tokenizer is almost never retrained during fine-tuning or merging, so a `sha256` of its vocab is a near-immutable ancestry marker that survives every downstream edit. Vocab *size* alone collides: Llama and Mistral both sit at 32k. So size is a hint and the hash is the identity. [[Gotchas - Tokenizers]] catalogs the ways vocab-size heuristics mislead.
+
+When the card and the files disagree, the files win. `adapter_config.json`, `quantization_config` and multiple `base_model` entries change which code path `from_pretrained` takes. The human-written card is aspiration; those files are what runs.
+
+The distillation flag stays low-confidence. Metadata can't *prove* [[Concept - Knowledge Distillation]] from a closed model. A "distill" in the name or a ShareGPT mention is a hypothesis, and one with legal weight if it's wrong. Emitting `low-confidence` plus the evidence, instead of a boolean, keeps it a useful signal and keeps it from being a defamatory assertion.
 
 ## Connections
 

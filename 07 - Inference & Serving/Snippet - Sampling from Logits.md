@@ -4,9 +4,9 @@ aliases: []
 summary: "Reference implementation of the logits-to-token pipeline: repetition penalty, temperature, top-k/top-p/min-p, softmax, multinomial draw."
 ---
 
-**What it does:** takes a raw logit vector plus a short token-history list and returns a sampled token id, applying the exact pipeline production servers use: repetition penalty → temperature → top-k → top-p/min-p truncation → softmax → multinomial draw. **Dependencies:** `torch>=2.0` (works identically with plain numpy if you swap `torch.multinomial` for `np.random.choice`). **Expected output:** printed token distributions for greedy, `T=0.8 + top_p=0.95`, and `min_p=0.05` over a toy 10-token vocab, showing the tail get truncated to zero probability mass.
+**What it does:** takes a raw logit vector and a short token-history list and returns a sampled token id, using the same pipeline production servers use: repetition penalty → temperature → top-k → top-p/min-p truncation → softmax → multinomial draw. **Dependencies:** `torch>=2.0` (works identically with plain numpy if you swap `torch.multinomial` for `np.random.choice`). **Expected output:** printed token distributions for greedy, `T=0.8 + top_p=0.95`, and `min_p=0.05` over a toy 10-token vocab, showing the tail get truncated to zero probability mass.
 
-This is the concrete counterpart to [[Concept - Sampling and Decoding Parameters]] — that note explains *why* each transform exists; this snippet nails down the *order* they run in and the numerical-stability details that silently change output if you get them wrong. Every serving stack — vLLM, TGI, llama.cpp, the OpenAI API — implements some variant of this function, and the fact that they don't all implement it identically is the single biggest reason "the same sampling params" produce different-feeling outputs across providers.
+[[Concept - Sampling and Decoding Parameters]] explains *why* each transform exists. This snippet pins down the *order* they run in and the numerical-stability details that silently change output when you get them wrong. Every serving stack (vLLM, TGI, llama.cpp, the OpenAI API) implements some variant of this function. They don't all implement it identically, and that's the single biggest reason "the same sampling params" feel different across providers.
 
 ```python
 import torch
@@ -115,10 +115,10 @@ if __name__ == "__main__":
 
 ## Why it's written this way
 
-- **`-inf` masking instead of zeroing probabilities.** Zeroing a probability after softmax requires a second renormalization pass and is easy to forget; masking the logit to `-inf` before softmax makes exclusion and renormalization the *same* operation, so there's no window where the distribution is inconsistent.
-- **min-p computed after temperature, not before.** min-p's whole point is "stay proportional to how confident the model currently is." If you compute it on raw logits, a high temperature can let obviously-bad tokens back in because the raw distribution was already flat before you flattened it further.
-- **Repetition penalty's sign split.** `logits[tok] /= penalty` looks right until `logits[tok]` is negative, at which point division *increases* it. The multiply-for-negative branch is a one-line fix that a large fraction of hand-rolled samplers skip, silently rewarding tokens they meant to suppress.
-- **top-p's shift-then-mask, not filter-then-check.** Implementing nucleus sampling with a plain `cumsum > p` boolean and no shift drops the boundary-crossing token — a one-index bug that changes which tokens are reachable, and it's easy to ship without noticing because the model still produces plausible-looking text.
+- **`-inf` masking instead of zeroing probabilities.** Zeroing a probability after softmax needs a second renormalization pass, which is easy to forget. Masking the logit to `-inf` before softmax makes exclusion and renormalization one operation, so the distribution is never inconsistent in between.
+- **min-p after temperature.** The point of min-p is to stay proportional to how confident the model is right now. Compute it on raw logits and a high temperature can let obviously bad tokens back in, since the raw distribution was already flat before you flattened it further.
+- **Repetition penalty's sign split.** `logits[tok] /= penalty` looks right until `logits[tok]` is negative, and then division *increases* it. The multiply-for-negative branch is a one-line fix that a large fraction of hand-rolled samplers skip, so they reward the tokens they meant to suppress.
+- **top-p shifts, then masks.** Nucleus sampling with a plain `cumsum > p` boolean and no shift drops the token that crosses the boundary. It's a one-index bug that changes which tokens are reachable, and it's easy to ship unnoticed because the model still produces plausible text.
 
 ## Connections
 - [[Concept - Sampling and Decoding Parameters]] — the conceptual treatment of temperature/top-k/top-p/penalties this snippet implements verbatim.

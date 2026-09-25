@@ -4,9 +4,9 @@ aliases: [GRPO advantage, group-relative advantage, group-normalized advantage]
 summary: "Group-relative advantage computation for GRPO from grouped rewards, plus the token-level clipped loss with a k3 KL term."
 ---
 
-**What it does:** turns a `[num_prompts, G]` grid of sampled rewards into per-token advantages for [[Concept - GRPO and RL with Verifiable Rewards]], then applies a PPO-style clipped loss with a k3 KL-to-reference penalty — the update rule behind DeepSeek-R1's RL stage.
+**What it does:** turns a `[num_prompts, G]` grid of sampled rewards into per-token advantages for [[Concept - GRPO and RL with Verifiable Rewards]], then applies a PPO-style clipped loss with a k3 KL-to-reference penalty. This is the update rule behind DeepSeek-R1's RL stage.
 **Dependencies:** `torch>=2.1` only.
-**Expected output:** for a group with mixed correct/incorrect completions, correct completions get positive advantage and incorrect ones negative, all completions of the *same* prompt sharing the group's mean/std; groups that are all-correct or all-wrong produce advantage ≈ 0 for every token in that group.
+**Expected output:** in a group with a mix of correct and incorrect completions, correct ones get positive advantage and incorrect ones negative, and every completion of the *same* prompt shares the group's mean/std. All-correct or all-wrong groups give advantage ≈ 0 on every token.
 
 ```python
 import torch
@@ -67,10 +67,10 @@ def grpo_token_loss(
 
 ## Why it's written this way
 
-- **The group mean replaces a value network entirely.** `group_relative_advantage` never touches a critic — normalizing each reward against the mean (and optionally std) of its own group of `G` samples for the *same prompt* is what removes PPO's value model and its ~2x memory/compute overhead. This is GRPO's central trick (Shao et al. 2024): a low-variance baseline for free, at the cost of needing `G` rollouts per prompt instead of one.
-- **Advantage is broadcast, not computed per-token.** `broadcast_advantage_to_tokens` copies one scalar to every completion token because GRPO — unlike [[Concept - PPO for Language Models]]'s GAE — has no per-token value estimate to differentiate credit within a sequence; every token of a good completion is reinforced equally.
-- **The `eps` and `normalize_std` guards exist because of a real degenerate case.** When every sample in a group gets the same reward (all-correct on an easy prompt, or all-wrong on an unsolvable one), `group_std` is 0 and the advantage would be `0/0` without `eps`; the `normalize_std=False` path documents the Dr.GRPO finding that std-normalization itself introduces a length/difficulty bias by over-weighting low-variance groups — motivating dynamic sampling (drop degenerate groups) as the more principled fix, per [[Concept - Spurious Rewards and RLVR Failure Modes]] and the entropy-collapse literature.
-- **The k3 KL estimator, not k1.** `kl_tok` uses `exp(log_ratio) - log_ratio - 1` rather than the naive `-log_ratio`, because k1 can be negative and high-variance while k3 is always ≥ 0 and unbiased — the same estimator choice documented in [[Concept - KL Divergence]] and used throughout RLHF. A negative KL penalty silently rewards drifting from the reference, which is exactly the failure mode a KL term exists to prevent.
+- **The group mean replaces the value network.** `group_relative_advantage` never touches a critic. Normalizing each reward against the mean (and optionally std) of its own group of `G` samples for the *same prompt* removes PPO's value model and its ~2x memory/compute overhead. That's GRPO's main trick (Shao et al. 2024): a low-variance baseline for free, paid for with `G` rollouts per prompt instead of one.
+- **Advantage is broadcast to tokens.** `broadcast_advantage_to_tokens` copies one scalar to every completion token. Unlike GAE in [[Concept - PPO for Language Models]], GRPO has no per-token value estimate to split credit within a sequence, so every token of a good completion gets reinforced equally.
+- **The `eps` and `normalize_std` guards handle a real degenerate case.** If every sample in a group gets the same reward (all-correct on an easy prompt, all-wrong on an unsolvable one), `group_std` is 0 and the advantage is `0/0` without `eps`. The `normalize_std=False` path records the Dr.GRPO finding that std-normalization itself adds a length/difficulty bias by over-weighting low-variance groups. That finding points to dynamic sampling (drop degenerate groups) as the more principled fix, per [[Concept - Spurious Rewards and RLVR Failure Modes]] and the entropy-collapse literature.
+- **k3 KL estimator, not k1.** `kl_tok` computes `exp(log_ratio) - log_ratio - 1` instead of the naive `-log_ratio`. k1 can go negative and has high variance; k3 is always ≥ 0 and unbiased. It's the same estimator choice covered in [[Concept - KL Divergence]] and used throughout RLHF. A negative KL penalty silently rewards drifting from the reference, the very thing the KL term is there to stop.
 
 ## Connections
 

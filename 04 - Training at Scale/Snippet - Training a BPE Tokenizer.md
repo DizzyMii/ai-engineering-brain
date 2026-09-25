@@ -6,7 +6,7 @@ summary: "Runnable HuggingFace tokenizers code that trains a byte-level BPE toke
 
 # Snippet - Training a BPE Tokenizer
 
-**What it does:** trains a byte-level [[Concept - Byte-Pair Encoding]] tokenizer with a `ByteLevel` pre-tokenizer, individual-digit splitting, and reserved special + fill-in-the-middle sentinel tokens (the reservation matters — see [[Concept - Chat Templates and Special Tokens]]); then verifies the encode/decode round-trip and measures fertility on a held-out sample.
+**What it does:** trains a byte-level [[Concept - Byte-Pair Encoding]] tokenizer with a `ByteLevel` pre-tokenizer, single-digit splitting, and reserved special and fill-in-the-middle sentinel tokens (the reservation matters; see [[Concept - Chat Templates and Special Tokens]]). It then checks the encode/decode round-trip and measures fertility on a held-out sample.
 
 **Dependencies:** `tokenizers>=0.15` (`pip install tokenizers`), Python 3.9+.
 
@@ -17,7 +17,7 @@ The 2024 model uses 128 experts. -> ['The', 'Ġ2', '0', '2', '4', 'Ġmodel', 'Ġ
 Round-trip OK: True
 Fertility (tokens/word): 1.8
 ```
-The `Ġ` glyph marks a token that begins with a space (GPT-2/byte-level convention). Exact merges depend on corpus statistics — on a real multi-GB corpus at 32k+ vocab, English fertility settles closer to 1.2-1.4 tokens/word (see [[Concept - Tokenizer Training]]); this toy corpus is far too small and repetitive to hit that number, which is the point — never trust a tokenizer's fertility number measured on its own training sample.
+`Ġ` marks a token that starts with a space (the GPT-2/byte-level convention). Exact merges depend on corpus statistics. On a real multi-GB corpus at 32k+ vocab, English fertility settles closer to 1.2-1.4 tokens/word (see [[Concept - Tokenizer Training]]). This toy corpus is far too small and repetitive to reach that, and that's the lesson: never trust a fertility number measured on the tokenizer's own training sample.
 
 ```python
 """
@@ -100,11 +100,11 @@ assert reloaded.encode(sample).ids == encoding.ids
 ```
 
 ## Why it's written this way
-- **`unk_token=None` plus a `ByteLevel` pre-tokenizer**: guarantees every possible input string is encodable with zero UNK tokens — the byte-level guarantee is the whole reason byte-level BPE displaced word-level and character-level BPE for LLM pretraining.
-- **Special and FIM sentinel tokens are declared in `SPECIAL_TOKENS` before `train_from_iterator` runs, not added afterward**: appending vocabulary after pretraining forces resizing the embedding and unembedding matrices, and the new rows start randomly initialized and untrained — a common source of degenerate generation when teams bolt on chat-template tokens post hoc.
-- **`add_prefix_space=True` must match between this training config and every downstream `encode()` call at inference**: a mismatch silently shifts which byte sequences map to which merges, producing systematically different tokenization at serving time than what the model was trained on.
-- **The digit-`Split` rule runs before `ByteLevel` in the `Sequence`**: pre-tokenizer order determines whether digits get merged into multi-digit tokens or stay isolated; this one choice measurably affects a model's arithmetic reliability, which is why it is called out explicitly rather than left to BPE's frequency-driven merges to decide.
-- **Training on a small repeated corpus, not the full pretraining set**: merge-frequency statistics converge from a representative sample; the comment marks this because it is the single most common tokenizer-training mistake newcomers make (burning days tokenizing terabytes to train a vocabulary that would have converged on gigabytes).
+- `unk_token=None` with a `ByteLevel` pre-tokenizer means any input string encodes with zero UNK tokens. That guarantee is why byte-level BPE displaced word-level and character-level BPE for LLM pretraining.
+- Special and FIM sentinel tokens go into `SPECIAL_TOKENS` before `train_from_iterator` runs. Appending vocabulary after pretraining forces a resize of the embedding and unembedding matrices, and the new rows start random and untrained. Teams that bolt on chat-template tokens post hoc commonly get degenerate generation from this.
+- `add_prefix_space=True` has to match between this training config and every `encode()` call at inference. A mismatch silently shifts which byte sequences map to which merges, so serving-time tokenization differs systematically from what the model saw in training.
+- The digit `Split` runs before `ByteLevel` in the `Sequence`. Pre-tokenizer order decides whether digits merge into multi-digit tokens or stay isolated, and that choice measurably affects arithmetic reliability. So it's set explicitly instead of being left to BPE's frequency-driven merges.
+- The corpus is a small repeated sample, not the full pretraining set. Merge-frequency statistics converge on a representative sample. The code comment flags this because it's the most common mistake newcomers make with tokenizer training: burning days tokenizing terabytes for a vocabulary that would have converged on gigabytes.
 
 ## Connections
 - [[Concept - Byte-Pair Encoding]] — the merge algorithm this snippet trains; read it first to understand what `BpeTrainer` is actually computing.

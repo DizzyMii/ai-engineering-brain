@@ -6,23 +6,23 @@ summary: "How raw audio becomes a log-mel spectrogram via STFT and mel filterban
 
 # Concept - Audio Spectrograms and Mel Features
 
-> **One-paragraph hook:** A raw waveform is a wall of numbers — one second of 16kHz speech is 16,000 floats with almost no structure a convolution or attention layer can exploit directly. The log-mel spectrogram is the decades-old fix: turn the 1D waveform into a 2D time-by-frequency "image" using a perceptually-motivated frequency warp, and suddenly you have something that looks like a picture a CNN or transformer already knows how to eat. Every classic ASR/TTS model — and [[Breakdown - Whisper]] specifically — runs on this representation; understanding it is the price of admission before anything else in audio modeling makes sense.
+> **One-paragraph hook:** A raw waveform is a wall of numbers. One second of 16kHz speech is 16,000 floats with almost no structure a convolution or attention layer can use directly. The log-mel spectrogram is the decades-old fix: warp frequency the way hearing does, turn the 1D waveform into a 2D time-by-frequency "image", and you have something a CNN or transformer already knows how to eat. Every classic ASR/TTS model runs on this representation, [[Breakdown - Whisper]] included. You need it before anything else in audio modeling makes sense.
 
 ## The mechanism
 
-Four steps turn a waveform into a spectrogram, each with a real formula and a real failure mode.
+Four steps turn a waveform into a spectrogram. Each has a real formula and a real failure mode.
 
-**1. Framing.** Slide a short window over the waveform — typically 25ms — with a hop of 10ms between windows (i.e., consecutive frames overlap by 15ms). A 10ms hop means the frame rate is fixed at 100 frames/second regardless of sample rate. The window (usually Hann) tapers the frame edges to zero to control spectral leakage before the FFT.
+**1. Framing.** Slide a short window over the waveform, typically 25ms, with a 10ms hop between windows (so consecutive frames overlap by 15ms). A 10ms hop fixes the frame rate at 100 frames/second whatever the sample rate. The window (usually Hann) tapers frame edges to zero to limit spectral leakage before the FFT.
 
-**2. STFT.** Take the FFT of each windowed frame — the Short-Time Fourier Transform. This produces a complex-valued spectrum per frame: magnitude (energy per frequency bin) and phase. Stacking magnitude spectra across frames gives a spectrogram: a time × frequency matrix.
+**2. STFT.** FFT each windowed frame; that's the Short-Time Fourier Transform. You get a complex spectrum per frame: magnitude (energy per frequency bin) and phase. Stack the magnitude spectra across frames and you have a spectrogram, a time × frequency matrix.
 
-**3. Mel warping.** Human pitch perception is roughly linear below 1kHz and logarithmic above it. The mel scale approximates this:
+**3. Mel warping.** People hear pitch roughly linearly below 1kHz and logarithmically above it. The mel scale approximates that:
 
 $$m = 2595 \log_{10}\left(1 + \frac{f}{700}\right)$$
 
-A bank of triangular filters spaced evenly on the mel scale (not the linear Hz scale) is applied to the magnitude spectrum — literally a matrix multiply that collapses hundreds of linear FFT bins down to 80 (or 128) mel bins, each filter summing up energy in its band. This is the "mel filterbank."
+A bank of triangular filters, spaced evenly on the mel scale instead of linear Hz, is applied to the magnitude spectrum. It's a matrix multiply that collapses hundreds of linear FFT bins into 80 (or 128) mel bins, each filter summing the energy in its band. That's the "mel filterbank."
 
-**4. Log compression.** Loudness is perceived logarithmically too, so take $\log(\text{mel} + \epsilon)$. This compresses dynamic range (a factor-of-10 change in energy becomes an additive shift, not a multiplicative blowout) and stabilizes gradients during training — training directly on linear-magnitude mel energies is noticeably harder to optimize.
+**4. Log compression.** Loudness is perceived logarithmically too, so take $\log(\text{mel} + \epsilon)$. This compresses dynamic range (a factor-of-10 energy change becomes an additive shift instead of a multiplicative blowout) and stabilizes gradients. Linear-magnitude mel energies are noticeably harder to optimize on.
 
 ```
 waveform (16kHz, 1D) 
@@ -33,28 +33,30 @@ waveform (16kHz, 1D)
   -> log-mel spectrogram (time x mel_bins)
 ```
 
-Note what's discarded at step 2: phase. The spectrogram keeps only magnitude, which is why it isn't losslessly invertible — more on this below.
+Step 2 throws away phase. The spectrogram keeps magnitude only, so it can't be inverted losslessly. More on that below.
 
 ## In practice
 
-Whisper's front end is the canonical modern instance: 80 log-mel bins for tiny through large-v2, bumped to 128 for large-v3; 25ms window, 10ms hop; audio is processed in fixed 30-second chunks, giving 3,000 mel frames per chunk, which a convolutional stem then downsamples by 2× to 1,500 encoder positions. The mel-bin count is itself a capacity knob — more bins resolve finer harmonic structure, at linearly higher input dimensionality.
+Whisper's front end is the standard modern example: 80 log-mel bins for tiny through large-v2, 128 for large-v3; 25ms window, 10ms hop. Audio goes in as fixed 30-second chunks, 3,000 mel frames each, and a convolutional stem downsamples that 2× to 1,500 encoder positions. The mel-bin count is a capacity knob: more bins resolve finer harmonic structure at linearly higher input dimensionality.
 
-Standard practice is to mean/variance-normalize log-mel features (per-utterance or with dataset statistics) before feeding them to the model — skipping this, or normalizing with statistics computed differently between training and inference, is a classic silent-degradation bug.
+Mean/variance-normalize log-mel features (per utterance or with dataset statistics) before they reach the model. Skipping it, or computing the statistics differently in training and inference, is a classic silent-degradation bug.
 
-Sample rate matters and doesn't get renegotiated automatically: speech models overwhelmingly standardize on 16kHz (the Nyquist limit of 8kHz covers essentially all speech-relevant frequency content), while music models commonly use 44.1kHz or 48kHz to capture content up past 15-20kHz. Feeding 44.1kHz audio into a 16kHz-trained model without resampling doesn't error — it just silently produces garbage features, because every mel bin now maps to the wrong physical frequency.
+Sample rate matters, and nothing renegotiates it for you. Speech models overwhelmingly standardize on 16kHz (the 8kHz Nyquist limit covers essentially all speech-relevant frequencies). Music models commonly use 44.1kHz or 48kHz to capture content up past 15-20kHz. Feed 44.1kHz audio to a 16kHz-trained model without resampling and nothing errors. You get garbage features, because every mel bin now maps to the wrong physical frequency.
 
-**SpecAugment** (Park et al. 2019) is the standard augmentation on top of log-mel features: randomly mask contiguous blocks of time frames and frequency bins (setting them to zero or the mean) during training. It's cheap, architecture-agnostic, and one of the few augmentations that reliably improves ASR word error rate across model families — the audio equivalent of Cutout/random erasing for vision.
+**SpecAugment** (Park et al. 2019) is the standard augmentation on log-mel features. During training it masks random contiguous blocks of time frames and frequency bins (to zero or the mean). It's cheap, works with any architecture, and is one of the few augmentations that reliably improves ASR word error rate across model families. It is the audio counterpart of Cutout/random erasing in vision.
 
 ## Failure modes
 
-- **Phase is gone, and reconstruction is lossy.** Because the spectrogram keeps magnitude only, turning a log-mel spectrogram back into audio requires either phase estimation (Griffin-Lim iterative reconstruction — cheap but produces audible artifacts) or a learned neural vocoder (HiFi-GAN and similar) trained specifically to hallucinate plausible phase. This is a real architectural tax on any mel-based generation pipeline (see [[Concept - Neural Text-to-Speech and Audio Language Models]]).
-- **Window/hop is a time-frequency resolution tradeoff, not a free parameter.** A longer window gives finer frequency resolution but coarser time resolution (and vice versa) — this is a hard uncertainty-principle-style tradeoff, not a bug to tune away. 25ms/10ms is a speech-tuned compromise; music and other domains sometimes use different values.
-- **Silent sample-rate mismatch.** Resampling errors or a wrong assumed sample rate don't crash — they just misalign every mel bin's physical meaning, producing features that look normal but carry no useful signal. This is a common first debugging step when a pretrained model performs mysteriously badly on new audio.
-- **Feature-normalization mismatch between train and inference** silently degrades quality the same way BatchNorm statistics mismatches do in vision models.
+- **Phase is gone, so reconstruction is lossy.** With magnitude only, getting audio back from a log-mel spectrogram takes either phase estimation (Griffin-Lim iterative reconstruction, cheap but with audible artifacts) or a learned neural vocoder (HiFi-GAN and similar) trained to hallucinate plausible phase. Every mel-based generation pipeline pays this architectural tax (see [[Concept - Neural Text-to-Speech and Audio Language Models]]).
+- **Window/hop trades time resolution for frequency resolution.** A longer window gives finer frequency resolution and coarser time resolution, and vice versa. It's a hard uncertainty-principle-style tradeoff you can't tune away. 25ms/10ms is a compromise tuned for speech; music and other domains sometimes use different values.
+- **Silent sample-rate mismatch.** A resampling error or wrong assumed sample rate doesn't crash anything. It misaligns what every mel bin means physically, and the features look normal while carrying no useful signal. Check this first when a pretrained model does mysteriously badly on new audio.
+- **Train/inference feature-normalization mismatch** degrades quality silently, the same way mismatched BatchNorm statistics do in vision models.
 
 ## The non-obvious
 
-The STFT-then-filterbank pipeline is, mechanically, a fixed (non-learned) two-stage convolution: framing-and-FFT is a strided linear transform, and the mel filterbank is a fixed matrix multiply — [[Concept - Matrix Multiplication as the Atom of Deep Learning|literally a matmul]] applied to every frame. It's hand-engineered feature extraction of exactly the kind [[Concept - Convolutional Neural Networks|CNNs]] were supposed to make obsolete by learning filters end-to-end — and indeed, that's exactly what happened to audio too: wav2vec 2.0 and neural-codec front ends (see [[Concept - Neural Audio Codecs and Residual Vector Quantization]]) learn their own frontend directly from waveform, discarding the hand-designed mel filterbank entirely. Log-mel survives anyway, decades after CNNs made hand-crafted vision features obsolete, mostly because it's cheap, deterministic, and "good enough" — Whisper, released in 2022 with a from-scratch weakly-supervised training bet on data scale rather than architecture, still chose the boring 80-bin log-mel front end over a learned one. The lesson: hand-engineered features aren't dead where the engineering (mel-scale perceptual warping) already encodes something learning a frontend from scratch would have to rediscover from data anyway.
+Mechanically, STFT-then-filterbank is a fixed, non-learned two-stage convolution. Framing plus FFT is a strided linear transform, and the mel filterbank is a fixed matrix, [[Concept - Matrix Multiplication as the Atom of Deep Learning|literally a matmul]] on every frame. It's the kind of hand-engineered feature extraction [[Concept - Convolutional Neural Networks|CNNs]] were supposed to retire by learning filters end to end. In audio that did happen: wav2vec 2.0 and neural-codec front ends (see [[Concept - Neural Audio Codecs and Residual Vector Quantization]]) learn their frontend straight from the waveform and drop the mel filterbank entirely.
+
+Log-mel survives anyway, decades after CNNs killed hand-crafted vision features, mostly because it's cheap, deterministic and "good enough". Whisper, released in 2022 as a from-scratch bet on data scale over architecture, still picked the boring 80-bin log-mel front end over a learned one. Hand-engineered features hold on where the engineering (mel-scale perceptual warping) already encodes something a learned frontend would have to rediscover from data anyway.
 
 ## Connections
 - [[Breakdown - Whisper]] — Whisper's entire input pipeline is exactly this: 80/128-bin log-mel over 30-second chunks feeding a conv stem into a transformer encoder.

@@ -6,7 +6,7 @@ summary: "The 2025 METR RCT where AI made experienced devs 19% slower while they
 
 # Breakdown - The METR Developer Slowdown RCT
 
-> A randomized controlled trial by METR (Model Evaluation & Threat Research), published July 2025, that measured what early-2025 AI coding tools actually did to the productivity of experienced open-source developers on their own mature repositories. It matters because it is the only sizeable *independent, randomized, real-work* study in a field otherwise dominated by vendor-run experiments on synthetic tasks — and it found a **slowdown**, not a speedup, in exactly the population everyone assumed AI helped. (Study: "Measuring the Impact of Early-2025 AI on Experienced Open-Source Developer Productivity", arXiv 2507.09089, July 2025.)
+> A randomized controlled trial by METR (Model Evaluation & Threat Research), published July 2025, measuring what early-2025 AI coding tools did to the productivity of experienced open-source developers on their own mature repositories. It's the only sizeable *independent, randomized, real-work* study in a field otherwise dominated by vendor-run experiments on synthetic tasks. It found a **slowdown**, in the population everyone assumed AI helped. (Study: "Measuring the Impact of Early-2025 AI on Experienced Open-Source Developer Productivity", arXiv 2507.09089, July 2025.)
 
 ## The headline numbers
 
@@ -20,11 +20,11 @@ summary: "The 2025 METR RCT where AI made experienced devs 19% slower while they
 | Developer estimate *after* finishing | still believed ~20% *speedup* | E3 |
 | Toolchain | mainly Cursor Pro + Claude 3.5/3.7 Sonnet | E3 |
 
-The perception-vs-reality gap is the single most important number in the whole applied-software domain: participants were wrong about the *direction* of the effect by roughly 40 percentage points, having lived through it. (All figures: METR 2025, arXiv 2507.09089, E3 — but note small N=16 and a specific population; see caveats.)
+The perception-vs-reality gap is the most important number in the applied-software domain. Participants had just lived through the tasks and still got the *direction* of the effect wrong, by roughly 40 percentage points. (All figures: METR 2025, arXiv 2507.09089, E3. Small N=16 and a specific population; see caveats.)
 
-## How it actually works
+## How it works
 
-The design is a within-developer randomized trial, which is what makes it credible despite the small headcount.
+It's a within-developer randomized trial. That design is what makes it credible despite the small headcount.
 
 ```
 For each of 246 real tasks on the developer's own repo:
@@ -35,35 +35,37 @@ For each of 246 real tasks on the developer's own repo:
 Compare AI-allowed vs AI-forbidden completion times WITHIN each developer.
 ```
 
-Randomizing *per task within the same developer* cancels the biggest confounds — individual skill, repo difficulty, tooling familiarity — that wreck cross-sectional "teams with Copilot ship more" studies. Screen recordings let METR audit where the time actually went rather than trusting self-report (which, as it turned out, was catastrophically wrong). This is the methodological gulf between METR and the vendor studies in the [[Breakdown - GitHub Copilot's Measured Productivity Impact]] body of evidence, and it is why this note sits at `advanced` alongside the [[Reference - Developer Productivity Studies]] catalog.
+Randomizing *per task within the same developer* cancels the biggest confounds (individual skill, repo difficulty, tooling familiarity) that wreck cross-sectional "teams with Copilot ship more" studies. Screen recordings let METR audit where the time went instead of trusting self-report, which turned out to be catastrophically wrong. That methodological gap separates METR from the vendor studies in the [[Breakdown - GitHub Copilot's Measured Productivity Impact]] body of evidence, and it's why this note sits at `advanced` next to the [[Reference - Developer Productivity Studies]] catalog.
 
 ## The clever parts
 
-- **Within-subject randomization over real merged tasks.** Most coding-productivity studies use a synthetic greenfield task (Peng's HTTP server) or an observational adoption metric (PRs/week after rollout). METR randomized the *treatment* on genuine tasks that had to meet the repo's real review bar. That kills the task-selection and population confounds in one move, which is exactly the kind of design [[Concept - Statistical Rigor in Model Evaluation]] demands.
-- **It captured belief and reality separately.** Forecast, post-hoc estimate, and stopwatch were three distinct measurements. Almost no other study measures the self-report error, and the self-report error turned out to be the finding.
-- **Screen-recording forensics.** METR could attribute the lost time to concrete activities — prompting, waiting on generations, reading and reviewing AI output, and cleaning up AI suggestions that didn't meet the quality bar — rather than inferring it. This is the [[Concept - The Capability-Reliability Gap]] made visible as wall-clock minutes: the model was capable of drafting a plausible patch, but on a codebase the developer knew cold, verifying and repairing that draft cost more than writing it.
+**Within-subject randomization over real merged tasks.** Most coding-productivity studies use a synthetic greenfield task (Peng's HTTP server) or an observational adoption metric (PRs/week after rollout). METR randomized the *treatment* on genuine tasks that had to clear the repo's real review bar. That removes the task-selection and population confounds in one move, the kind of design [[Concept - Statistical Rigor in Model Evaluation]] asks for.
 
-Why these developers slowed (METR's stated factors):
-1. **Very high prior repo familiarity** — the developers averaged ~5 years on these codebases; there was little the model could tell them they didn't already know faster.
-2. **A high quality bar** that rejected a large share of AI output, so review-and-discard was pure overhead.
-3. **Large, complex codebases** where the model's context window and retrieval couldn't hold the relevant state — a direct instance of [[Concept - Context Rot]].
-4. **Time lost to reviewing and fixing** AI suggestions, the tax that the [[Deep Dive - Agentic Coding in Production]] oversight economics predict.
+**Belief and reality were measured separately.** Forecast, post-hoc estimate and stopwatch were three distinct measurements. Almost no other study measures self-report error, and here the self-report error was the finding.
+
+**Screen-recording forensics.** METR could attribute the lost time to specific activities without inferring it: prompting, waiting on generations, reading and reviewing AI output, and cleaning up suggestions that missed the quality bar. That's [[Concept - The Capability-Reliability Gap]] showing up as wall-clock minutes. The model could draft a plausible patch, but on a codebase the developer knew cold, verifying and repairing the draft cost more than writing it.
+
+METR's stated reasons these developers slowed down:
+1. **Very high prior repo familiarity.** They averaged ~5 years on these codebases, so the model had little to tell them that they didn't already know faster.
+2. **A high quality bar** rejected a large share of AI output, making review-and-discard pure overhead.
+3. **Large, complex codebases** where the model's context window and retrieval couldn't hold the relevant state, a direct case of [[Concept - Context Rot]].
+4. **Time spent reviewing and fixing** AI suggestions, the tax the oversight economics in [[Deep Dive - Agentic Coding in Production]] predict.
 
 ## What it got wrong / what's dated
 
-Read the scope honestly — this note is a defect if quoted as "AI makes developers slower," full stop.
+Read the scope honestly. Quoting this note as "AI makes developers slower," full stop, is a defect.
 
-- **N=16, one population.** These are elite open-source maintainers on repos they've owned for years. That is precisely the population where *every* prior study (Peng 2023, Cui et al. 2024) found the *smallest* benefit, because juniors and newcomers gain the most. The result does **not** generalize to greenfield work, junior developers, or unfamiliar code — see [[Breakdown - GitHub Copilot's Measured Productivity Impact]] for where gains are real.
-- **Early-2025 tooling.** The stack was Cursor Pro + Claude 3.5/3.7 Sonnet — strong for its moment, but agentic coding moved fast afterward. The point estimate is a snapshot, not a law of nature.
-- **Self-reported task time**, though screen-recording corroboration mitigates this.
-- **Not a retraction, a rethink.** METR announced (Feb 2026) it is revising the experiment design to measure uplift more robustly. The finding stimulated a methodological correction across the field, not a walk-back — which is the opposite of the vendor pattern of quietly softening claims.
+- **N=16, one population.** Elite open-source maintainers on repos they've owned for years. *Every* prior study (Peng 2023, Cui et al. 2024) found the *smallest* benefit in this population, because juniors and newcomers gain the most. The result does **not** generalize to greenfield work, junior developers or unfamiliar code. [[Breakdown - GitHub Copilot's Measured Productivity Impact]] covers where the gains are real.
+- **Early-2025 tooling.** Cursor Pro + Claude 3.5/3.7 Sonnet was strong for its moment, and agentic coding moved fast afterward. The point estimate is a snapshot, not a law of nature.
+- **Self-reported task time**, partly offset by screen-recording corroboration.
+- **A rethink, not a retraction.** In Feb 2026 METR announced it is revising the experiment design to measure uplift more robustly. The finding pushed a methodological correction across the field without being walked back, the opposite of the vendor habit of quietly softening claims.
 
 ## What to steal
 
-- **Measure output, never feeling.** The durable transferable lesson: developers cannot introspect their own speedup. Any AI-ROI program built on "our engineers report saving 30% of their time" — which is most vendor ROI surveys and the modeled savings in [[Breakdown - AI-Driven Code Migrations]] — is measuring perception, and this RCT shows perception can invert the true sign. Instrument merged output, lead time, and rework; this is the core argument of [[Concept - The Evaluation Gap]] and the metrics section of [[Concept - Team Workflow Restructuring with AI]].
+- **Measure output, never feeling.** Developers can't introspect their own speedup. Any AI-ROI program built on "our engineers report saving 30% of their time" is measuring perception, and this RCT shows perception can get the sign wrong. That covers most vendor ROI surveys and the modeled savings in [[Breakdown - AI-Driven Code Migrations]]. Instrument merged output, lead time and rework; that's the core argument of [[Concept - The Evaluation Gap]] and the metrics section of [[Concept - Team Workflow Restructuring with AI]].
 - **Task structure decides the outcome.** The same tools that slowed these developers 19% saved thousands of developer-years on mechanical migrations. Route autonomy by task class.
-- **Randomize within-subject** if you run your own internal study — it is the only cheap way to beat the confounds.
-- **AI's value falls as your familiarity rises.** The tool helps most where you know least, which inverts the naive assumption that senior engineers extract the most from it. This connects to why capability curves and reliability curves diverge in [[Concept - METR Time Horizons]] and [[Concept - AI Coding Assistants]], and why revenue for tools like [[Breakdown - Cursor]] proves demand, not measured output gains — Cursor Pro was the exact stack that slowed these developers.
+- **Randomize within-subject** if you run your own internal study. It's the only cheap way to beat the confounds.
+- **AI's value falls as your familiarity rises.** The tool helps most where you know least, which inverts the naive assumption that senior engineers get the most out of it. It ties into why capability and reliability curves diverge in [[Concept - METR Time Horizons]] and [[Concept - AI Coding Assistants]]. It's also why revenue for tools like [[Breakdown - Cursor]] proves demand, not measured output gains: Cursor Pro was the stack that slowed these developers.
 
 ## Connections
 

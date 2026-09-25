@@ -6,7 +6,7 @@ summary: "When a sparse Mixture-of-Experts model beats a dense one at a fixed tr
 
 # Decision - Dense vs Mixture-of-Experts
 
-> Default for the 80% case: stay dense. Only reach for [[Concept - Mixture of Experts Architecture|Mixture-of-Experts]] once training compute — not serving memory or latency — is your binding constraint, and you can guarantee large, consistent inference batches.
+> Default for the 80% case: stay dense. Reach for [[Concept - Mixture of Experts Architecture|Mixture-of-Experts]] only when training compute is your limit (serving memory and latency aren't), and you can guarantee large, consistent inference batches.
 
 ## Decision flow
 
@@ -24,23 +24,27 @@ flowchart TD
 
 | Criterion | Dense | Sparse MoE |
 |---|---|---|
-| Quality per training FLOP | Baseline | Higher — more total parameters at ~constant active FLOPs (capacity win) |
-| Quality per active parameter at inference | Baseline | Comparable or better — e.g. DeepSeek-V3's 37B active competes with much larger dense models |
-| Total memory footprint (must stay resident) | = active params | All experts resident even though only a few fire per token — Mixtral 8x7B holds 47B in memory for 13B active compute |
-| Throughput at large, consistent batch | Good | Excellent — experts stay busy, compute-light per token |
-| Latency/cost at batch=1 (single user) | Predictable, matches active size | Often a wash or worse — full memory-bandwidth cost of the whole resident model for small-model compute |
-| Training/inference comms | Standard data/tensor parallel | Adds all-to-all expert dispatch — real overhead on top of [[Concept - Tensor and Pipeline Parallelism]] |
-| Fine-tuning stability | Standard | Brittle — small-data fine-tunes can wreck routing/load balance |
+| Quality per training FLOP | Baseline | Higher: more total parameters at ~constant active FLOPs (capacity win) |
+| Quality per active parameter at inference | Baseline | Comparable or better, e.g. DeepSeek-V3's 37B active competes with much larger dense models |
+| Total memory footprint (must stay resident) | = active params | All experts resident though only a few fire per token; Mixtral 8x7B holds 47B in memory for 13B active compute |
+| Throughput at large, consistent batch | Good | Excellent: experts stay busy, compute-light per token |
+| Latency/cost at batch=1 (single user) | Predictable, matches active size | Often a wash or worse: full memory-bandwidth cost of the whole resident model for small-model compute |
+| Training/inference comms | Standard data/tensor parallel | Adds all-to-all expert dispatch, real overhead on top of [[Concept - Tensor and Pipeline Parallelism]] |
+| Fine-tuning stability | Standard | Brittle: small-data fine-tunes can wreck routing/load balance |
 | Post-training quantization | Standard PTQ pipelines apply cleanly | Routers and low-magnitude expert weights are quantization-sensitive |
 | Real examples | LLaMA-2/3, dense Qwen2.5 | [[Breakdown - Mixtral 8x7B]] (47B/13B), [[Breakdown - DeepSeek-V3 Architecture]] (671B/37B) |
 
-## The details that flip the decision
+## What flips the decision
 
-- **The folklore sizing heuristic.** A MoE model gives roughly the quality of a dense model with $\sqrt{N_{total}\cdot N_{active}}$ parameters — e.g. Mixtral's 47B total / 13B active predicts quality near a ~25B dense model, roughly matching reported benchmarks. Treat this as a planning heuristic, not a proof; token-choice vs. expert-choice routing shifts the constant.
-- **Batch=1 is where MoE quietly loses.** At single-user latency you pay the full HBM-bandwidth cost of streaming the whole resident model — all experts, since you don't know in advance which will route — while only getting the compute of the active subset. That's often no faster, and sometimes slower, than a same-active-size dense model. This is the single most common reason a promising MoE benchmark doesn't translate into a good latency-sensitive product.
-- **Training-compute-bound is the real green light.** If you are FLOP-constrained during pretraining (the common case at frontier scale) rather than memory- or latency-constrained at serving, MoE converts spare memory budget into quality that other dense scaling can't buy at the same FLOPs — exactly the regime [[Breakdown - DeepSeek-V3 Architecture|DeepSeek-V3]] and Mixtral were built for.
-- **Infra maturity is a hidden precondition, not a footnote.** All-to-all expert dispatch, capacity-factor tuning, and load balancing are real distributed-systems work most teams haven't built. Underestimating this is the most common reason a from-scratch MoE project stalls — teams without existing expert-parallel infra should default dense even in an otherwise MoE-favorable regime.
-- **Fine-tuning or quantizing an off-the-shelf MoE is riskier than doing the same to a dense checkpoint of similar active size.** Small-data LoRA fine-tunes can silently unbalance routing, and naive post-training quantization can flip routing decisions. Budget extra evaluation — or freeze the router — before shipping a fine-tuned MoE.
+**The folklore sizing heuristic.** An MoE model gives roughly the quality of a dense model with $\sqrt{N_{total}\cdot N_{active}}$ parameters. Mixtral's 47B total / 13B active predicts quality near a ~25B dense model, which roughly matches reported benchmarks. Use it for planning; it isn't a proof, and token-choice vs. expert-choice routing shifts the constant.
+
+**Batch=1 is where MoE loses without anyone noticing.** At single-user latency you pay full HBM bandwidth to stream the whole resident model (all experts, since you can't know in advance which will route) and get only the active subset's compute. That's often no faster, and sometimes slower, than a dense model of the same active size. It's the most common reason a promising MoE benchmark doesn't turn into a good latency-sensitive product.
+
+**Being training-compute-bound is the real green light.** If pretraining FLOPs are your limit (the common case at frontier scale), not serving memory or latency, MoE turns spare memory budget into quality that dense scaling can't buy at the same FLOPs. That's the regime [[Breakdown - DeepSeek-V3 Architecture|DeepSeek-V3]] and Mixtral were built for.
+
+**Infra maturity is a hidden precondition.** All-to-all expert dispatch, capacity-factor tuning and load balancing are distributed-systems work most teams haven't built. Underestimating it is the most common reason a from-scratch MoE project stalls. Without existing expert-parallel infra, default dense even in an otherwise MoE-favorable regime.
+
+**Fine-tuning or quantizing an off-the-shelf MoE is riskier than doing the same to a dense checkpoint of similar active size.** Small-data LoRA fine-tunes can silently unbalance routing, and naive post-training quantization can flip routing decisions. Budget extra evaluation, or freeze the router, before shipping a fine-tuned MoE.
 
 ## Connections
 - [[Concept - Mixture of Experts Architecture]] — the mechanism (router, top-k, capacity) this decision is choosing to adopt or skip.

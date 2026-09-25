@@ -6,25 +6,25 @@ summary: "Reverse-engineering Anthropic's published Claude system prompt: struct
 
 # Breakdown - Claude's Published System Prompt
 
-> Anthropic is the rare frontier lab that publishes the system prompt behind its consumer product (claude.ai) in its release notes, and documents the API and Claude Code defaults. That makes Claude's [[Concept - System Prompts|system prompt]] a real, inspectable artifact — a chance to reverse-engineer how a lab actually steers a shipped model, rather than guessing from a leak. It is the Bing/[[Lore - The Sydney Incident|Sydney]] situation inverted: instead of an extracted secret whose intent must be inferred, we have the lab's own text with its design choices on display. (as of mid-2026)
+> Anthropic is one of the few frontier labs that publishes the system prompt behind its consumer product (claude.ai), in its release notes, and documents the API and Claude Code defaults. So Claude's [[Concept - System Prompts|system prompt]] is a real artifact you can inspect to see how a lab steers a shipped model, without guessing from a leak. It's the Bing/[[Lore - The Sydney Incident|Sydney]] situation in reverse: the lab's own text with its design choices visible, instead of an extracted secret whose intent you have to infer. (as of mid-2026)
 
 ## The headline numbers
 
-- **Publication cadence:** updated alongside each model release; the text-only claude.ai prompt lives in Anthropic's public release notes. This is a deliberate transparency stance — most labs treat the prompt as proprietary.
-- **Length:** the *published* text-only prompt runs into the low thousands of tokens (roughly 2,000–2,500 for a recent Claude release). The *full deployed* claude.ai prompt — the one that also carries the artifact and tool-use scaffolding — is much larger; community extractions have reported it in the 10k–24k-token range (weakly sourced, from prompt-extraction, not from Anthropic). The gap between the two is itself a finding (see *What it got wrong*).
-- **Cost of the prefix:** a 2,500-token static system prompt at input pricing of ~$3/Mtok (Sonnet-class) to ~$15/Mtok (Opus-class) *(as of 2026)* is ~$0.0075–$0.0375 of billed input **on every single request**, before the user has typed anything. At claude.ai's request volume this prefix is one of the largest recurring line items in the product, which is exactly why its interaction with [[Concept - Prompt Caching|prompt caching]] is a first-order design constraint, not a footnote.
-- **Composition:** identity block, injected date + knowledge cutoff, a block of behavioral directives, formatting rules, refusal posture, and (in the full version) tool/artifact instructions co-located with their schemas.
+- **Publication cadence:** updated with each model release. The text-only claude.ai prompt is in Anthropic's public release notes. That's a deliberate transparency choice; most labs treat the prompt as proprietary.
+- **Length:** the *published* text-only prompt is in the low thousands of tokens (roughly 2,000–2,500 for a recent Claude release). The *full deployed* claude.ai prompt, which also carries the artifact and tool-use scaffolding, is much larger. Community extractions have put it at 10k–24k tokens (weakly sourced, from prompt extraction, not from Anthropic). The gap between the two is a finding in its own right (see *What it got wrong*).
+- **Cost of the prefix:** a 2,500-token static system prompt at ~$3/Mtok input (Sonnet-class) to ~$15/Mtok (Opus-class) *(as of 2026)* costs ~$0.0075–$0.0375 of billed input **on every request**, before the user types anything. At claude.ai's volume that prefix is one of the product's biggest recurring line items, so how it interacts with [[Concept - Prompt Caching|prompt caching]] is a primary design constraint.
+- **Composition:** identity block, injected date and knowledge cutoff, behavioral directives, formatting rules, refusal posture, and (in the full version) tool/artifact instructions placed next to their schemas.
 
-## How it actually works
+## How it works
 
-The prompt is not prose. It is a **layered, delimiter-tagged specification** whose layers are ordered by how static they are — which is simultaneously an attention-salience decision and a cache decision. Read top to bottom, the anatomy is:
+The prompt is a **layered, delimiter-tagged spec**, and the layers are ordered by how static they are. That ordering is an attention-salience decision and a cache decision at the same time. Top to bottom:
 
-1. **Identity / role.** Opens by naming the assistant ("The assistant is Claude, created by Anthropic"). This anchors the persona in the highest-authority position of the [[Concept - System Prompts|instruction hierarchy]] before any behavior is specified.
-2. **Volatile facts injected inline.** `The current date is {{date}}` plus the knowledge-cutoff statement. This is the *only* routinely-changing part of the static prompt, and its placement and granularity are load-bearing (below).
-3. **Behavioral directives.** Honesty, non-sycophancy, face-value interpretation of ambiguous requests, calibrated verbosity ("be concise for simple questions, thorough for complex ones"). These are written as *positive* behavioral specs, not prohibitions.
-4. **Refusal posture.** How to decline — notably, decline *without* a moralizing explanation, because a preachy refusal reads worse than a clean one. This is a style directive layered on top of the [[Concept - Refusal Mechanics|refusal behavior]] that RLHF already installed.
-5. **Formatting contract.** When to use markdown, when to avoid bullet-point spam in conversational replies, avoidance of purple prose and flattery openers.
-6. **Tools / artifacts (full version only).** Tool and [[Concept - Tool Use and Function Calling|function-calling]] instructions placed *next to* their schemas, so the natural-language rule and the machine-readable interface are read together.
+1. **Identity / role.** It opens by naming the assistant ("The assistant is Claude, created by Anthropic"), which puts the persona in the highest-authority slot of the [[Concept - System Prompts|instruction hierarchy]] before any behavior is specified.
+2. **Volatile facts, inline.** `The current date is {{date}}` plus the knowledge-cutoff statement. This is the *only* part of the static prompt that routinely changes, and its placement and granularity matter a lot (see below).
+3. **Behavioral directives.** Honesty, non-sycophancy, taking ambiguous requests at face value, calibrated verbosity ("be concise for simple questions, thorough for complex ones"). They're written as *positive* behavior specs, not prohibitions.
+4. **Refusal posture.** How to decline: without a moralizing explanation, since a preachy refusal reads worse than a clean one. It's a style directive on top of the [[Concept - Refusal Mechanics|refusal behavior]] RLHF already installed.
+5. **Formatting contract.** When to use markdown, avoiding bullet-point spam in conversational replies, no purple prose or flattering openers.
+6. **Tools / artifacts (full version only).** Tool and [[Concept - Tool Use and Function Calling|function-calling]] instructions sit *next to* their schemas, so the natural-language rule and the machine-readable interface get read together.
 
 ```
        CLAUDE.AI SYSTEM PROMPT — LAYERED BY VOLATILITY
@@ -48,32 +48,32 @@ The prompt is not prose. It is a **layered, delimiter-tagged specification** who
   to-the-second timestamp here would bust the cache on every request.
 ```
 
-The mechanism the whole design turns on: the model privileges these tokens **only because SFT and [[Deep Dive - RLHF End to End|RLHF]] trained it to** rank system-role content above user content. Nothing architectural enforces it. The prompt is tuning the *margin* of behavior on top of a base that training already set. That is why the same text pasted into a base checkpoint would do almost nothing.
+Everything depends on one fact: the model gives these tokens priority **only because SFT and [[Deep Dive - RLHF End to End|RLHF]] trained it to** rank system-role content above user content. No architecture enforces it. The prompt adjusts behavior at the margin of a base that training already set, and the same text pasted into a base checkpoint would do almost nothing.
 
 ## The clever parts
 
-1. **Positive directives over `do not`.** The prompt says what to *do* ("assume good faith", "be direct") rather than enumerating prohibitions. This is not a stylistic preference — negation is weakly represented in these models, so `do not be verbose` reliably underperforms `be concise` (see [[Gotchas - Prompt Formatting and Tokenization]]). The published prompt is a working example of that principle at scale.
-2. **Explicit output contracts.** Formatting is specified as a contract ("use markdown here, prose there") rather than left to the model's default. This is the cheapest reliability lever in the whole prompt: it removes a large chunk of output variance for near-zero token cost.
-3. **Date pinned to the cache-safe granularity.** Injecting the date is unavoidable, but injecting it *to the day* rather than the second keeps the entire static prefix identical across a day's requests, so [[Concept - Prompt Caching|caching]] fires. This is the single most instructive line in the artifact for a practitioner: it is the exact spot where a naive implementation ("stamp the full timestamp") would silently destroy a 90% caching discount, and the published prompt shows the lab chose granularity to protect the cache.
-4. **Persona defined by behavior, not adjectives.** There is no "you are a brilliant, helpful, friendly expert." The character is specified through concrete behaviors (honesty, directness, refusal style). Adjective-stacking ("you are an expert") is near-zero-capability folklore; behavioral specification actually moves the output distribution. The prompt is a demonstration of [[Concept - System Prompts|persona-as-behavior]] rather than persona-as-flattery.
-5. **Schemas co-located with their rules.** In the full version, tool instructions sit adjacent to tool schemas so the model reads the "why/when" and the "how" as one unit, reducing the odds it calls a tool correctly-formatted but wrongly-timed.
+1. **Positive directives over `do not`.** The prompt says what to *do* ("assume good faith", "be direct") instead of listing prohibitions. It's more than style. Negation is weakly represented in these models, so `do not be verbose` reliably does worse than `be concise` (see [[Gotchas - Prompt Formatting and Tokenization]]). The published prompt applies that at scale.
+2. **Explicit output contracts.** Formatting is spelled out ("use markdown here, prose there") instead of left to the model's default. It's the cheapest reliability lever in the prompt, removing a large chunk of output variance for almost no tokens.
+3. **Date pinned at a cache-safe granularity.** The date has to be injected, but injecting it *to the day* and not the second keeps the whole static prefix identical across a day's requests, so [[Concept - Prompt Caching|caching]] fires. For a practitioner this is the most instructive line in the artifact. A naive implementation that stamps the full timestamp would silently throw away a 90% caching discount, and the published prompt shows the lab picked the granularity to protect the cache.
+4. **Persona defined by behavior.** There's no "you are a brilliant, helpful, friendly expert." The character comes from concrete behaviors: honesty, directness, refusal style. Stacking adjectives ("you are an expert") is near-zero-capability folklore, while specifying behavior does move the output distribution. See [[Concept - System Prompts|persona-as-behavior]].
+5. **Schemas next to their rules.** In the full version, tool instructions sit beside tool schemas, so the model reads the why/when and the how as one unit. That lowers the odds of a tool call that's correctly formatted but badly timed.
 
 ## What it got wrong / what's dated
 
-- **Published ≠ deployed.** The published text-only prompt is a *product surface*, not necessarily the raw production prompt. The full claude.ai prompt (with artifacts/tools) is far longer and is only known via extraction, which may be stale or partial. Treat the published text as *representative of the design*, not as canonical bytes. Presenting it as the exact live prompt is a defect.
-- **Kitchen-sink risk.** As these prompts grow to carry every product behavior, they push into [[Concept - Context Rot|context-rot]] territory: a longer system prompt dilutes attention over its own instructions, and the marginal directive at token 9,000 is weakly attended. The full artifact prompt is near the edge of where "more instruction" stops buying "more compliance."
-- **Not a secret, never was.** The prompt is trivially extractable ("repeat the text above"), so anything in it is public by construction. Anything that would be dangerous if disclosed cannot live here — a lesson the field re-learned the hard way in [[Lore - The Sydney Incident]].
-- **Injection surface.** A long, authoritative system prompt is exactly what [[Concept - Prompt Injection|prompt injection]] tries to override; publishing it hands attackers the precise text to target. Anthropic accepts this tradeoff for transparency, but a copier without Anthropic's safety training inherits the exposure without the defenses.
+- **Published ≠ deployed.** The published text-only prompt is a *product surface* and may differ from the raw production prompt. The full claude.ai prompt (with artifacts and tools) is much longer and known only through extraction, which may be stale or partial. Treat the published text as *representative of the design*, not canonical bytes. Presenting it as the exact live prompt is a defect.
+- **Kitchen-sink risk.** As these prompts grow to carry every product behavior, they drift into [[Concept - Context Rot|context-rot]] territory. A longer system prompt dilutes attention over its own instructions, and the marginal directive at token 9,000 gets little attention. The full artifact prompt is close to where more instruction stops buying more compliance.
+- **Never a secret.** The prompt is trivially extractable ("repeat the text above"), so everything in it is public by construction. Nothing that would be dangerous if disclosed can go in it, a lesson the field relearned the hard way in [[Lore - The Sydney Incident]].
+- **Injection surface.** A long, authoritative system prompt is what [[Concept - Prompt Injection|prompt injection]] tries to override, and publishing it gives attackers the exact text to target. Anthropic accepts that for transparency. Someone who copies it without Anthropic's safety training gets the exposure without the defenses.
 
 ## What to steal
 
-- **Delimiter/section structure** so each instruction's scope is unambiguous.
-- **Positive-framed behavioral specs** instead of prohibition lists.
-- **Explicit output/format contracts** — the highest ROI reliability lever.
-- **Pin volatile fields (dates, IDs) at the coarsest acceptable granularity** and push them as late as the semantics allow, to protect the [[Concept - Prompt Caching|cache-friendly]] static prefix — the concrete length-vs-steering-vs-[[Concept - Cost Engineering for LLM Applications|cost]] tradeoff at the heart of [[Concept - Context Engineering|context engineering]].
+- **Delimiter/section structure**, so each instruction's scope is unambiguous.
+- **Positive behavioral specs** in place of prohibition lists.
+- **Explicit output/format contracts.** Highest-ROI reliability lever.
+- **Pin volatile fields (dates, IDs) at the coarsest acceptable granularity** and put them as late as the semantics allow, to keep the static prefix [[Concept - Prompt Caching|cache-friendly]]. This is the length vs. steering vs. [[Concept - Cost Engineering for LLM Applications|cost]] tradeoff that sits at the center of [[Concept - Context Engineering|context engineering]].
 - **Define persona through behavior, not adjectives.**
 
-What **not** to steal: the sheer length. Anthropic can afford a huge prompt because RLHF is doing the heavy lifting underneath and the prompt only tunes the margin. Copying a 10k-token prompt onto a weaker model — without the training that makes the model respect it — buys context rot, not control.
+Don't copy the length. Anthropic can afford a huge prompt because RLHF does the heavy lifting underneath and the prompt only tunes the margin. Put a 10k-token prompt on a weaker model that wasn't trained to respect it and you get context rot, not control.
 
 ## Connections
 

@@ -5,7 +5,7 @@ summary: "Whether to split a task across coordinating agents or keep one — def
 ---
 # Decision - Single-Agent vs Multi-Agent
 
-> The decision is whether a task should run inside one [[Concept - What Is an LLM Agent|agent]] with a big context window or be split across a team of coordinating agents ([[Concept - Multi-Agent Orchestration]]) — and the default for the 80% case is **single agent, plus aggressive context engineering, until you have concrete evidence of independent, read-heavy parallelism that a bigger context window can't absorb.**
+> Should a task run inside one [[Concept - What Is an LLM Agent|agent]] with a big context window, or be split across a team of coordinating agents ([[Concept - Multi-Agent Orchestration]])? The default for the 80% case is **a single agent plus aggressive context engineering, until you have concrete evidence of independent, read-heavy parallelism that a bigger context window can't absorb.**
 
 ## Decision flow
 
@@ -28,22 +28,22 @@ flowchart TD
 | Token cost | 1x baseline | ~15x a single chat interaction (Anthropic-measured, 2025) |
 | Context ceiling | Bound by one window; degrades via context rot on long runs | Each worker gets an isolated window, sidestepping the single-window ceiling |
 | Execution | Serial | Parallel across workers |
-| Coordination failure surface | None — no peer to desync from | Duplicated work, write-conflicts, diffusion of responsibility |
+| Coordination failure surface | None; no peer to desync from | Duplicated work, write-conflicts, diffusion of responsibility |
 | Evaluability | One trajectory, easier to reproduce and score | Non-deterministic multi-trajectory; harder to reproduce and attribute failure |
 | Best-fit task shape | Write-heavy, single coherent artifact | Read-heavy, decomposable, independent subtasks |
 | Measured outcome (2025) | — | ~90% win over single-agent on Anthropic's internal research eval; ~80% of the performance variance explained by token volume alone |
 
 ## The details that flip the decision
 
-**The pivotal evidence pair.** [[Breakdown - Anthropic's Multi-Agent Research System]] reports the multi-agent architecture — a [[Pattern - Orchestrator-Worker Agents|lead agent spawning worker subagents]] — beating a single agent by roughly 90% on an internal research eval, but that win is concentrated in exactly one task shape: many independent sub-questions, each answerable in isolation, then synthesized. Cognition's "Don't Build Multi-Agents" (2025) argues the opposite for coherent build/write tasks: shared context and fragile coordination make multi-agent systems *worse* than a single well-engineered agent. Both are correct; they're measuring different task shapes, not contradicting each other.
+**Two pieces of evidence, two task shapes.** [[Breakdown - Anthropic's Multi-Agent Research System]] reports its multi-agent architecture (a [[Pattern - Orchestrator-Worker Agents|lead agent spawning worker subagents]]) beating a single agent by roughly 90% on an internal research eval. That win sits in one task shape: many independent sub-questions, each answerable alone, then synthesized. Cognition's "Don't Build Multi-Agents" (2025) argues the opposite for coherent build/write tasks, where shared context and fragile coordination make multi-agent systems *worse* than one well-engineered agent. They don't contradict each other. They measure different task shapes.
 
-**The write-conflict problem is the real dividing line**, not task size. Two agents independently editing the same file, plan, or memory store produce a state no synthesizer can cleanly merge after the fact — the conflict happens at write time, and by the time a synthesis step runs, the damage is already committed. A task that looks "big enough to parallelize" but requires a single coherent output (one PR, one document, one plan) still belongs to a single agent.
+**Write conflicts decide it, more than task size.** Two agents independently editing the same file, plan or memory store produce a state no synthesizer can cleanly merge afterward. The conflict happens at write time, and by the time a synthesis step runs the damage is committed. A task that looks big enough to parallelize but needs one coherent output (one PR, one document, one plan) still belongs to a single agent.
 
-**Cost is a gate, not a footnote.** [[Concept - Cost Engineering for LLM Applications|Multi-agent spend]] compounds turn count by worker count; a 15x token bill has to buy a matching capability gain or it is just a more expensive way to fail the same task. Before reaching for orchestration, exhaust [[Concept - Context Engineering for Agents|context engineering]] — compaction, scratchpad offload, just-in-time retrieval — inside a single agent; it's cheaper and the failure modes are far easier to debug.
+**Cost is a gate.** [[Concept - Cost Engineering for LLM Applications|Multi-agent spend]] multiplies turn count by worker count. A 15x token bill has to buy a matching capability gain, or it's a more expensive way to fail the same task. Before reaching for orchestration, exhaust [[Concept - Context Engineering for Agents|context engineering]] inside one agent: compaction, scratchpad offload, just-in-time retrieval. It's cheaper and the failures are far easier to debug.
 
-**Evaluation gets harder, not easier, as you add agents.** Non-determinism compounds across every independently-sampling agent in the system, and when a multi-step run fails it's often ambiguous which agent's decision caused it. This is the same run-to-run [[Concept - Statistical Rigor in Model Evaluation|variance problem]] evaluation methodology already has to control for, multiplied by agent count — teams that ship multi-agent systems successfully trace and audit per-agent contribution, not just end-task success.
+**Evaluation gets harder as you add agents.** Non-determinism compounds across every independently sampling agent, and when a multi-step run fails it's often unclear whose decision caused it. It's the run-to-run [[Concept - Statistical Rigor in Model Evaluation|variance problem]] evaluation methodology already controls for, multiplied by agent count. Teams that ship multi-agent systems successfully trace and audit each agent's contribution as well as end-task success.
 
-**Framework choice follows this decision, not the other way around.** [[Decision - Choosing an Agent Framework]] assumes you already know whether you're building one agent or a coordinated set; picking a heavy multi-agent framework before proving a single agent can't do the job is the most common version of this decision being made backwards.
+**Framework choice follows this decision.** [[Decision - Choosing an Agent Framework]] assumes you already know whether you're building one agent or a coordinated set. Picking a heavy multi-agent framework before proving a single agent can't do the job is the most common way this decision gets made backwards.
 
 ## Connections
 

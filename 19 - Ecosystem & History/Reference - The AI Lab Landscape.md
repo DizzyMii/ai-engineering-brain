@@ -34,14 +34,14 @@ summary: "The organizations building frontier and open models — funding, focus
 | Baidu Ernie | |
 | MiniMax | |
 
-As a group, Chinese labs are increasingly setting the open-weights capability frontier rather than trailing it (as of 2026).
+Taken together, Chinese labs increasingly set the open-weights capability frontier instead of trailing it (as of 2026).
 
 ## Research and fully-open
 
 | Org | Notes |
 |---|---|
 | EleutherAI | Nonprofit; GPT-Neo, Pythia |
-| Allen Institute for AI (AI2) | OLMo — fully open data, code, and training logs |
+| Allen Institute for AI (AI2) | OLMo: fully open data, code, and training logs |
 | BigScience | BLOOM; the collaboration itself is defunct post-release (see [[Lore - The BLOOM Training Run]]) |
 
 ## Enterprise and niche
@@ -55,7 +55,7 @@ As a group, Chinese labs are increasingly setting the open-weights capability fr
 | Reka | |
 | Together / Fireworks | Inference-as-a-service |
 
-## The acqui-hire / reverse-acquisition pattern
+## Acqui-hires and reverse acquisitions
 
 | Target | Acquirer | Year |
 |---|---|---|
@@ -64,9 +64,11 @@ As a group, Chinese labs are increasingly setting the open-weights capability fr
 | Adept | Amazon | — |
 | Windsurf | (contested/licensing saga) | — |
 
-This structure — licensing the technology and hiring the core team rather than a straightforward acquisition — has recurred often enough as of 2026 to be read as a deliberate pattern for dodging antitrust review; the talent, not the corporate shell, is the asset being acquired.
+The deal shape is: license the technology, hire the core team, skip the straightforward acquisition. It has recurred often enough as of 2026 to read as a deliberate way to dodge antitrust review. What's being bought is the talent. The corporate shell is left behind.
 
-## Strategic postures as the organizing lens
+## Strategic postures
+
+Posture is the most useful way to sort these labs.
 
 | Posture | Exemplar | Logic |
 |---|---|---|
@@ -74,13 +76,13 @@ This structure — licensing the technology and hiring the core team rather than
 | Safety-brand | Anthropic | Differentiate on trust and alignment |
 | Commoditize-the-complement | Meta | Open weights devalue rivals' model moat while Meta monetizes the layer above (ads, apps) |
 | Sovereign/regional | Mistral, Falcon (UAE) | Soft power and strategic independence from US/Chinese models |
-| Efficiency-challenger | DeepSeek | Undercut incumbents on training/inference cost rather than compete on raw scale |
+| Efficiency-challenger | DeepSeek | Undercut incumbents on training/inference cost instead of competing on raw scale |
 
 ## Compute as the barrier to entry
 
-Frontier-lab viability increasingly tracks compute access more than research headcount — the GPU-rich/GPU-poor divide (see [[Reference - The AI Hardware Market]]) determines who can even attempt a frontier pretraining run, which is why hyperscaler-backed or hyperscaler-owned labs (OpenAI/Microsoft, Anthropic/Amazon+Google, Google DeepMind's own TPUs) dominate the closed tier while independently financed labs cluster around efficiency plays or open release strategies that trade compute for community leverage.
+Whether a frontier lab is viable increasingly tracks compute access more than research headcount. The GPU-rich/GPU-poor divide (see [[Reference - The AI Hardware Market]]) decides who can even attempt a frontier pretraining run. So hyperscaler-backed or hyperscaler-owned labs (OpenAI/Microsoft, Anthropic/Amazon+Google, Google DeepMind's own TPUs) dominate the closed tier. Independently financed labs cluster around efficiency plays, or around open releases that trade compute for community contributions.
 
-Date-stamp everything on this page: the roster, funding figures, and postures listed here churn on a roughly quarterly cadence (as of 2026).
+Date-stamp everything on this page. The roster, funding figures and postures churn on a roughly quarterly cadence (as of 2026).
 
 ## Connections
 - [[Reference - Model Genealogy]] — the model lineages each of these organizations actually produces.

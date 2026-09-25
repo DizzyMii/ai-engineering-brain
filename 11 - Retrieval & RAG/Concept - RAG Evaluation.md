@@ -3,47 +3,47 @@ tags: [concept, domain/retrieval-rag, level/core]
 aliases: [RAG Eval, retrieval evaluation, RAGAS]
 summary: "RAG must be scored as two separate measurement problems — retrieval and generation — or a bad retriever and a bad generator become indistinguishable."
 ---
-> **One-paragraph hook:** Ship a [[Concept - Retrieval-Augmented Generation]] system without an eval harness and you are debugging by vibes: when the answer is wrong you cannot tell whether the retriever missed the right passage or the generator ignored a passage it was handed. RAG evaluation is the discipline that scores retrieval and generation as two separate measurement problems and only then recombines them — the two-stage decomposition is what turns "the bot said something dumb" into an actionable bug report pointing at a specific pipeline stage.
+> **One-paragraph hook:** Ship a [[Concept - Retrieval-Augmented Generation]] system without an eval harness and you're debugging by vibes. When the answer is wrong you can't tell whether the retriever missed the right passage or the generator ignored one it was handed. RAG evaluation scores retrieval and generation as two separate measurement problems and only then recombines them. That split turns "the bot said something dumb" into a bug report pointing at a specific pipeline stage.
 
 ## The mechanism
 
-A RAG pipeline has two distinct failure surfaces — retrieval and generation — that produce the exact same visible symptom: a wrong final answer. A perfect generator fed garbage context looks identical, from the outside, to a bad generator fed perfect context. **You cannot localize a failure from the final answer alone**; you need per-stage metrics computed against a labeled golden set.
+A RAG pipeline has two failure surfaces, retrieval and generation, and both produce the same visible symptom: a wrong final answer. From outside, a perfect generator fed garbage context looks just like a bad generator fed perfect context. **You can't localize a failure from the final answer alone.** You need per-stage metrics against a labeled golden set.
 
-**Retrieval metrics** ask: did the right evidence surface, and where?
-- **recall@k**: did at least one gold-relevant chunk appear in the top-$k$ retrieved results, averaged over queries. The blunt, most-cited number.
-- **MRR (Mean Reciprocal Rank)**: $\text{MRR} = \frac{1}{|Q|}\sum_{q} \frac{1}{\text{rank}_q}$ where $\text{rank}_q$ is the position of the first relevant chunk for query $q$ — penalizes burying the answer even if it's technically in the top-$k$.
-- **nDCG@k**: a graded, position-discounted metric, $\text{DCG@k} = \sum_{i=1}^{k} \frac{2^{\text{rel}_i}-1}{\log_2(i+1)}$, normalized by the ideal ordering's DCG (IDCG) to get nDCG $\in [0,1]$. Unlike recall@k it rewards putting the *most* relevant chunk first, not just anywhere in the top-$k$ — the metric of choice once you have graded (not just binary) relevance labels.
-- **hit-rate**: the simplest binary recall variant, useful as a sanity check.
-- **Context precision/recall**: when you lack hand labels, an LLM judge scores whether each retrieved chunk is relevant and whether all relevant chunks were retrieved — a judged proxy for recall@k/precision@k, with all the caveats of [[Concept - LLM-as-Judge]].
+**Retrieval metrics** ask whether the right evidence surfaced, and where.
+- **recall@k**: did at least one gold-relevant chunk appear in the top-$k$, averaged over queries. The blunt, most-cited number.
+- **MRR (Mean Reciprocal Rank)**: $\text{MRR} = \frac{1}{|Q|}\sum_{q} \frac{1}{\text{rank}_q}$, where $\text{rank}_q$ is the position of the first relevant chunk for query $q$. It penalizes burying the answer even inside the top-$k$.
+- **nDCG@k**: a graded, position-discounted metric, $\text{DCG@k} = \sum_{i=1}^{k} \frac{2^{\text{rel}_i}-1}{\log_2(i+1)}$, normalized by the ideal ordering's DCG (IDCG) to give nDCG $\in [0,1]$. It rewards putting the *most* relevant chunk first, where recall@k only asks that it appear somewhere in the top-$k$. Use it once you have graded (not just binary) relevance labels.
+- **hit-rate**: the simplest binary recall variant, good as a sanity check.
+- **Context precision/recall**: without hand labels, an LLM judge scores whether each retrieved chunk is relevant and whether all relevant chunks came back. It's a judged proxy for recall@k/precision@k, with all the caveats of [[Concept - LLM-as-Judge]].
 
-**Generation metrics** ask: given the context that was actually retrieved, is the answer any good?
-- **Faithfulness / groundedness**: decompose the answer into atomic claims and check each is entailed by the retrieved context — the direct hallucination catch. An answer can be fluent, relevant, and completely unfaithful to what was actually retrieved.
-- **Answer relevancy**: does the answer address the question asked (measured, in RAGAS, by generating several questions *from* the answer and checking their embedding similarity back to the original query).
-- **Context utilization**: whether the generator actually used the relevant chunks it was given, as opposed to ignoring them in favor of parametric memory.
+**Generation metrics** ask whether the answer is any good given the context that was actually retrieved.
+- **Faithfulness / groundedness**: break the answer into atomic claims and check that the retrieved context entails each one. This is the direct hallucination catch. An answer can be fluent and relevant and still completely unfaithful to what was retrieved.
+- **Answer relevancy**: does the answer address the question? RAGAS measures it by generating several questions *from* the answer and checking their embedding similarity to the original query.
+- **Context utilization**: did the generator use the relevant chunks it got, or ignore them in favor of parametric memory?
 
-RAGAS (Es et al. 2023) operationalizes faithfulness, answer relevancy, and context precision/recall as LLM-judged scores on a 0–1 scale, and is the framework most teams reach for first because it needs no gold labels beyond a question set.
+RAGAS (Es et al. 2023) turns faithfulness, answer relevancy and context precision/recall into LLM-judged scores on a 0–1 scale. Most teams reach for it first because it needs no gold labels beyond a question set.
 
 ## In practice
 
-Building the golden set comes first, not last: 50–200 hand-labeled query → relevant-chunk pairs, drawn from real or realistic queries, is the common starting size — small enough to label by hand, large enough to catch systematic regressions. Synthetic QA generation (have an LLM write questions from your chunks) bootstraps coverage fast but has a well-known failure pattern: it tends to produce too-easy questions that echo the source chunk's exact vocabulary, and risks **answer leakage** where the "gold" answer is trivially copy-pasted rather than requiring real retrieval — synthetic sets systematically overestimate real-world recall unless adversarially filtered, the same leakage failure mode that [[Concept - Training Set Decontamination]] exists to catch on the pretraining side.
+Build the golden set first. 50–200 hand-labeled query → relevant-chunk pairs, drawn from real or realistic queries, is the common starting size: small enough to label by hand, big enough to catch systematic regressions. Synthetic QA generation (an LLM writes questions from your chunks) bootstraps coverage fast but fails in a well-known way. It tends to produce too-easy questions that echo the source chunk's exact wording, and it risks **answer leakage**, where the "gold" answer is copy-pasted and needs no real retrieval. Unless adversarially filtered, synthetic sets systematically overestimate real-world recall. It's the same leakage failure [[Concept - Training Set Decontamination]] exists to catch on the pretraining side.
 
-Beyond static recall numbers, RAG-specific robustness tests catch failure modes plain recall@k misses entirely:
-- **Needle-in-a-haystack**: can retrieval find one specific fact buried in a large corpus at all.
-- **Position-bias sweeps**: does answer quality change when the same gold chunk is moved from position 1 to position 5 in the context.
-- **The distractor test**: does injecting one irrelevant-but-plausible chunk flip an otherwise-correct answer — a direct probe of generation robustness, independent of retrieval quality.
+RAG-specific robustness tests catch failures that plain recall@k misses:
+- **Needle-in-a-haystack**: can retrieval find one specific fact buried in a large corpus at all?
+- **Position-bias sweeps**: does answer quality change when the same gold chunk moves from position 1 to position 5 in the context?
+- **The distractor test**: does adding one irrelevant but plausible chunk flip an otherwise correct answer? This probes generation robustness directly, independent of retrieval.
 
-Frameworks in this space — RAGAS, TruLens, ARES (Saad-Falcon et al. 2023), DeepEval — all converge on the same shape (LLM-judged faithfulness/relevancy plus retrieval metrics) and all inherit LLM-as-judge cost and bias caveats: judge models have length bias, position bias, and self-preference, and running a judge over every eval query at every iteration is itself a real line item worth putting through the same discipline as [[Concept - Cost Engineering for LLM Applications]].
+The frameworks (RAGAS, TruLens, ARES (Saad-Falcon et al. 2023), DeepEval) all converge on the same shape, LLM-judged faithfulness/relevancy plus retrieval metrics, and all inherit LLM-as-judge cost and bias. Judge models have length bias, position bias and self-preference. Running a judge over every eval query on every iteration is a real line item too, and deserves the same scrutiny as anything in [[Concept - Cost Engineering for LLM Applications]].
 
 ## Failure modes
 
-- **Component vs end-to-end divergence**: nDCG gains from adding a [[Concept - Rerankers|reranker]] do not always move final answer quality — if the generator only attends to the first 1–2 chunks regardless of what's retrieved, improving rank 3–10 is invisible downstream. Symptom: retrieval metrics improve in an ablation but the production answer-quality dashboard is flat. Fix: always measure both, and treat a retrieval-only win as provisional until end-to-end faithfulness confirms it.
-- **Golden-set rot from re-chunking**: labels are query → gold-chunk-ID pairs; if [[Concept - Chunking Strategies|chunking]] boundaries change (different chunk size, different splitter), the old chunk IDs no longer exist and the golden set silently stops validating anything. Detect by version-pinning the golden set to a chunking scheme and re-labeling on any pipeline change to indexing.
-- **Synthetic-set optimism**: an eval set built entirely from LLM-generated questions plateaus at unrealistically high scores because the questions were generated *from* the same text they're meant to retrieve, inflating apparent recall. Detect by periodically sampling real production queries and comparing their score distribution to the synthetic set's.
-- **Small-sample noise mistaken for signal**: a nDCG delta of 0.02 across a 50-query golden set is frequently not statistically distinguishable from noise; see [[Concept - Statistical Rigor in Model Evaluation]] before shipping a change on the strength of a small eval-set improvement.
+- **Component and end-to-end results diverge.** nDCG gains from adding a [[Concept - Rerankers|reranker]] don't always move final answer quality. If the generator only attends to the first 1–2 chunks whatever is retrieved, improving ranks 3–10 is invisible downstream. Symptom: retrieval metrics improve in an ablation while the production answer-quality dashboard stays flat. Fix: measure both, and treat a retrieval-only win as provisional until end-to-end faithfulness confirms it.
+- **Golden-set rot from re-chunking.** Labels are query → gold-chunk-ID pairs. Change the [[Concept - Chunking Strategies|chunking]] boundaries (chunk size, splitter) and the old chunk IDs no longer exist, so the golden set silently stops validating anything. Version-pin the golden set to a chunking scheme and re-label on any indexing change.
+- **Synthetic-set optimism.** An eval set built entirely from LLM-generated questions plateaus at unrealistically high scores, because the questions came *from* the text they're supposed to retrieve. Periodically sample real production queries and compare their score distribution with the synthetic set's.
+- **Small-sample noise mistaken for signal.** An nDCG delta of 0.02 on a 50-query golden set is frequently indistinguishable from noise. Read [[Concept - Statistical Rigor in Model Evaluation]] before shipping on a small eval-set improvement.
 
 ## The non-obvious
 
-The most common mismeasurement in RAG shops isn't a metric bug, it's an organizational one: teams tune retrieval against nDCG@10 in isolation, ship the reranker that improves it, and never verify the improvement moved the metric that actually matters — end-to-end faithfulness or human-judged answer correctness. A reranker can raise nDCG@10 by double digits and leave faithfulness completely flat, because the generator was already ignoring context past position 3. The fix isn't a better retrieval metric; it's refusing to treat retrieval-stage and generation-stage evaluation as substitutable, ever.
+The most common mismeasurement in RAG shops is organizational, not a metric bug. Teams tune retrieval against nDCG@10 in isolation, ship the reranker that improves it, and never check that the improvement moved the metric that matters: end-to-end faithfulness or human-judged answer correctness. A reranker can raise nDCG@10 by double digits and leave faithfulness flat, because the generator was already ignoring context past position 3. A better retrieval metric won't fix that. Never treat retrieval-stage and generation-stage evaluation as substitutes for each other.
 
 ## Connections
 

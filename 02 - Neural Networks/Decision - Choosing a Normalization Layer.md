@@ -6,7 +6,7 @@ summary: "Decision flow and tradeoff matrix for BatchNorm vs LayerNorm vs RMSNor
 
 # Decision - Choosing a Normalization Layer
 
-> For transformers and sequence models, default to RMSNorm in pre-norm placement; for large-batch CNNs, default to BatchNorm. That covers roughly 80% of cases (as of 2026) — the remaining 20% turns on batch size, sequence-length variability, and how much you trust an unproven norm-free setup.
+> For transformers and sequence models, default to RMSNorm in pre-norm placement. For large-batch CNNs, default to BatchNorm. That covers roughly 80% of cases (as of 2026). The other 20% turns on batch size, sequence-length variability, and how far you trust an unproven norm-free setup.
 
 ## Decision flow
 
@@ -32,20 +32,20 @@ flowchart TD
 
 | Option | Batch-dependent? | Train/eval discrepancy | Relative speed (norm op) | Cross-example leakage | Extra learnable params | Typical home |
 |---|---|---|---|---|---|---|
-| BatchNorm | Yes — mean/var over the batch | Yes — batch stats vs. running EMA | Baseline | Yes | $\gamma, \beta$ | Large-batch CNNs (ResNet, EfficientNet) |
-| LayerNorm | No — per-token, over features | No | Baseline | No | $\gamma, \beta$ | BERT-era transformers, RNNs |
-| RMSNorm | No — per-token, over features | No | ~7–64% faster than LayerNorm (no mean subtraction, no $\beta$) | No | $\gamma$ only | LLaMA/T5-family and most modern LLMs |
-| GroupNorm | No — per-example, per channel-group | No | Slightly slower than BatchNorm at large batch | No | $\gamma, \beta$ | Detection/segmentation at batch size 1–2 |
-| No norm (NF-Net / Fixup / ReZero) | No | No | Fastest — the op is removed entirely | No | none, or one learnable scalar | Norm-free ResNets; unproven at frontier LLM scale |
+| BatchNorm | Yes: mean/var over the batch | Yes: batch stats vs. running EMA | Baseline | Yes | $\gamma, \beta$ | Large-batch CNNs (ResNet, EfficientNet) |
+| LayerNorm | No: per-token, over features | No | Baseline | No | $\gamma, \beta$ | BERT-era transformers, RNNs |
+| RMSNorm | No: per-token, over features | No | ~7–64% faster than LayerNorm (no mean subtraction, no $\beta$) | No | $\gamma$ only | LLaMA/T5-family and most modern LLMs |
+| GroupNorm | No: per-example, per channel-group | No | Slightly slower than BatchNorm at large batch | No | $\gamma, \beta$ | Detection/segmentation at batch size 1–2 |
+| No norm (NF-Net / Fixup / ReZero) | No | No | Fastest, since the op is gone | No | none, or one learnable scalar | Norm-free ResNets; unproven at frontier LLM scale |
 
-## The details that flip the decision
+## What flips the decision
 
-- **Batch size 1–2 rules out BatchNorm outright.** Variance estimated from one or two samples is not a meaningful statistic — this is exactly why Mask R-CNN-style detection and segmentation pipelines, which are often memory-constrained to batch size 1–2 per GPU, switched to GroupNorm.
-- **Variable sequence length rules out BatchNorm.** Padded batches pollute batch statistics with masked positions, and there's no coherent "batch dimension" to normalize over during single-token autoregressive decoding — a first-order reason sequence models use [[Concept - RMSNorm and LayerNorm]] instead of BatchNorm (see the full mechanism and failure catalog in [[Breakdown - Batch Normalization]]).
-- **RL or distillation fine-tuning where train/eval statistics mismatch bites hardest favors batch-independent norms.** Fine-tuning a BatchNorm model with small RL-rollout batches lets running statistics drift out of sync with the fine-tuning batch distribution, silently degrading eval quality with no error thrown — per-example norms sidestep this entirely.
-- **Kernel-fusion availability on your hardware can decide LayerNorm vs. RMSNorm.** RMSNorm's op-count edge only materializes with a fused kernel (Triton, Apex, or framework-native); a naive unfused implementation can erase the advantage — profile before trusting the "faster" claim on new hardware.
-- **Default for LLMs (as of 2026): RMSNorm, pre-norm placement** — placement itself (pre-norm vs. post-norm vs. DeepNorm) is owned by [[Deep Dive - The Transformer]], one layer downstream of this decision. **Default for classical CNNs: BatchNorm still**, though vision increasingly borrows [[Concept - Vision Transformers]]'s LayerNorm choice as ViT-style backbones spread.
-- **"No norm" is viable but shifts the burden elsewhere.** NF-Nets match or beat BatchNorm ResNets on ImageNet at higher training throughput by replacing normalization with scaled residuals and adaptive gradient clipping — but per [[Concept - Normalization-Free Networks]], this has not been shown to scale to frontier LLMs as of 2026. Treat it as a throughput/research play, not a default.
+- **Batch size 1–2 rules out BatchNorm.** Variance estimated from one or two samples isn't a meaningful statistic. Mask R-CNN-style detection and segmentation pipelines, often memory-constrained to batch size 1–2 per GPU, switched to GroupNorm for this reason.
+- **Variable sequence length rules out BatchNorm.** Padded batches pollute batch statistics with masked positions, and single-token autoregressive decoding has no coherent batch dimension to normalize over. That's a first-order reason sequence models use [[Concept - RMSNorm and LayerNorm]] instead (full mechanism and failure catalog in [[Breakdown - Batch Normalization]]).
+- **RL or distillation fine-tuning, where train/eval mismatch bites hardest, favors batch-independent norms.** Fine-tune a BatchNorm model on small RL-rollout batches and the running statistics drift away from the fine-tuning batch distribution. Eval quality degrades silently, with no error thrown. Per-example norms avoid the problem entirely.
+- **Kernel fusion on your hardware can settle LayerNorm vs. RMSNorm.** RMSNorm's op-count edge only shows up with a fused kernel (Triton, Apex, or framework-native). A naive unfused implementation can erase it, so profile before trusting "faster" on new hardware.
+- **LLM default (as of 2026): RMSNorm, pre-norm placement.** Placement itself (pre-norm vs. post-norm vs. DeepNorm) belongs to [[Deep Dive - The Transformer]], one layer downstream of this decision. **Classical CNN default: still BatchNorm**, though vision increasingly borrows the LayerNorm choice from [[Concept - Vision Transformers]] as ViT-style backbones spread.
+- **"No norm" works but moves the burden elsewhere.** NF-Nets match or beat BatchNorm ResNets on ImageNet at higher training throughput, replacing normalization with scaled residuals and adaptive gradient clipping. Per [[Concept - Normalization-Free Networks]], this hasn't been shown to scale to frontier LLMs as of 2026. Treat it as a throughput or research play. I wouldn't default to it.
 
 ## Connections
 

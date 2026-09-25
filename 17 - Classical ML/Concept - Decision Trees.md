@@ -6,23 +6,23 @@ summary: "Recursive axis-aligned partitioning that greedily maximizes impurity d
 
 # Concept - Decision Trees
 
-> A decision tree is a piecewise-constant function built by greedily and recursively partitioning feature space along single-feature thresholds to maximize a purity gain at each step. It is the atomic learner beneath random forests, gradient boosting, and every serious tabular ML system — understanding one tree's mechanics and failure modes is the prerequisite for understanding why *ensembles* of them dominate structured data.
+> A decision tree is a piecewise-constant function, built by greedily and recursively partitioning feature space on single-feature thresholds so each step maximizes a purity gain. It's the base learner under random forests, gradient boosting and every serious tabular ML system. You need one tree's mechanics and failure modes before you can see why *ensembles* of them dominate structured data.
 
 ## The mechanism
 
-At each node, given a subset of rows, the algorithm searches over every feature $j$ and every candidate threshold $t$ for the split maximizing the decrease in impurity:
+At each node, given a subset of rows, the algorithm searches every feature $j$ and every candidate threshold $t$ for the split with the largest impurity decrease:
 
 $$\Delta I = I(\text{parent}) - \left(\frac{n_L}{n} I(\text{left}) + \frac{n_R}{n} I(\text{right})\right)$$
 
-For classification, impurity is Gini impurity $I_{gini} = 1 - \sum_k p_k^2$ or entropy $I_{ent} = -\sum_k p_k \log p_k$ (see [[Concept - Entropy and Cross-Entropy]]). Gini is cheaper to compute — no logarithm — and empirically produces near-identical splits to entropy, which is why most production libraries default to it. Regression trees split on variance / SSE reduction instead: find the threshold that best separates rows into two groups, each with low internal variance around its own mean.
+For classification, impurity is Gini $I_{gini} = 1 - \sum_k p_k^2$ or entropy $I_{ent} = -\sum_k p_k \log p_k$ (see [[Concept - Entropy and Cross-Entropy]]). Gini skips the logarithm, so it's cheaper, and empirically it picks nearly the same splits as entropy; most production libraries default to it. Regression trees split on variance/SSE reduction: find the threshold that best separates rows into two groups, each with low variance around its own mean.
 
-This is a greedy, one-split-at-a-time search, and it is provably suboptimal: constructing the *globally* optimal decision tree is NP-hard (Hyafil & Rivest, 1976), so every practical tree learner is a heuristic that can get locked into a bad early split it never revisits.
+The search is greedy, one split at a time, and provably suboptimal. Building the *globally* optimal tree is NP-hard (Hyafil & Rivest, 1976), so every practical tree learner is a heuristic that can lock in a bad early split and never revisit it.
 
-CART (Breiman et al., 1984) is the canonical formalization: strictly binary splits, plus cost-complexity pruning. Pruning fixes overfitting by growing a large tree and trimming it back against a penalized objective
+CART (Breiman et al., 1984) is the canonical formalization: strictly binary splits plus cost-complexity pruning. Pruning handles overfitting by growing a large tree and trimming it back against a penalized objective
 
 $$R_\alpha(T) = R(T) + \alpha |T|$$
 
-where $R(T)$ is training error and $|T|$ the leaf count; sweeping $\alpha$ produces a nested sequence of subtrees, and the best is chosen by cross-validation. CART also introduced *surrogate splits*: when the primary split feature is missing for a row, fall back to the next-most-correlated feature's split — the classical answer to missing data that [[Breakdown - XGBoost]]'s learned default-direction later replaced with something faster. Contrast this with ID3/C4.5 (Quinlan), which historically used multiway categorical splits and information-gain *ratio* specifically to counteract information gain's bias toward high-cardinality features.
+where $R(T)$ is training error and $|T|$ the leaf count. Sweeping $\alpha$ gives a nested sequence of subtrees, and cross-validation picks the best. CART also introduced *surrogate splits*: if a row is missing the primary split feature, fall back to the split on the next most correlated feature. That was the classical answer to missing data, until [[Breakdown - XGBoost]]'s learned default direction replaced it with something faster. ID3/C4.5 (Quinlan) went a different way, with multiway categorical splits and information-gain *ratio* to counter information gain's bias toward high-cardinality features.
 
 ```
 Split(rows):
@@ -36,11 +36,11 @@ Split(rows):
     return Node(best_j, best_t, Split(left), Split(right))
 ```
 
-Because splits only compare values on either side of a threshold, trees are invariant to any monotone transform of a feature (log, rank, min-max) and need no feature scaling — a real practical edge over linear models. But that same rank-based mechanism biases split selection toward high-cardinality and continuous features, which offer more candidate thresholds and are more likely to find a spuriously good one by chance.
+Splits only compare values on either side of a threshold, so trees are invariant to any monotone transform of a feature (log, rank, min-max) and need no feature scaling. That's a real practical edge over linear models. The same rank-based mechanism biases split selection toward high-cardinality and continuous features, though: they offer more candidate thresholds and are more likely to find a spuriously good one by chance.
 
 ## In practice
 
-A trained tree partitions $\mathbb{R}^p$ into axis-aligned rectangular regions, one per leaf, predicting a constant — majority class or mean target — within each:
+A trained tree partitions $\mathbb{R}^p$ into axis-aligned rectangles, one per leaf, and predicts a constant (majority class or mean target) inside each:
 
 ```
         [age < 30?]
@@ -52,18 +52,18 @@ A trained tree partitions $\mathbb{R}^p$ into axis-aligned rectangular regions, 
  deny   approve    approve   deny
 ```
 
-This piecewise-constant structure is the whole story of where trees win and lose. Real production trees are shallow leaves inside an ensemble ([[Concept - Gradient Boosting]], [[Concept - Bagging and Random Forests]]) — a single unconstrained tree is essentially never shipped alone, because it overfits catastrophically and its structure is unstable to the exact training sample it saw.
+That piecewise-constant structure explains where trees win and where they lose. In production, trees are shallow members of an ensemble ([[Concept - Gradient Boosting]], [[Concept - Bagging and Random Forests]]). A single unconstrained tree is essentially never shipped alone: it overfits catastrophically, and its structure depends heavily on the exact sample it saw.
 
 ## Failure modes
 
-- **Unbounded depth memorizes noise.** A tree grown to purity on every leaf hits 100% training accuracy by definition — a lookup table, not a model. Detect via a large train/validation gap; fix with `max_depth`, `min_samples_leaf`, or cost-complexity pruning.
-- **Class imbalance skews splits.** Impurity-decrease splitting is dominated by the majority class; a rare class can vanish from every split decision entirely. Detect by checking per-class recall, never aggregate accuracy (see [[Concept - Learning from Imbalanced Data]]).
-- **Instability.** Because the split search is greedy, perturbing a handful of training rows can flip which feature wins the very first split — and a different root reshapes the entire downstream tree. This is not numerical wobble; a single tree's structure is nearly non-reproducible across bootstrap resamples of the same data. Detect by refitting on resampled data and diffing tree structure or predictions; the fix is not to stabilize the tree but to average many unstable ones.
-- **Cannot extrapolate.** A leaf's prediction is a constant fit to whichever training rows landed there; outside the observed range of a feature the prediction stays flat instead of continuing a trend. This silently breaks any numeric feature — price, timestamp, sensor reading — that drifts past its training range in production.
+- **Unbounded depth memorizes noise.** Grow a tree to purity on every leaf and it hits 100% training accuracy by definition. That's a lookup table, not a model. You'll see a large train/validation gap; fix it with `max_depth`, `min_samples_leaf` or cost-complexity pruning.
+- **Class imbalance skews splits.** The majority class dominates impurity-decrease splitting, and a rare class can drop out of every split decision. Check per-class recall, never aggregate accuracy (see [[Concept - Learning from Imbalanced Data]]).
+- **Instability.** Because the search is greedy, perturbing a handful of training rows can flip which feature wins the first split, and a different root reshapes the whole tree below it. It isn't numerical wobble. A single tree's structure is close to non-reproducible across bootstrap resamples of the same data. Refit on resampled data and diff structure or predictions to see it. The fix is to average many unstable trees, not to stabilize one.
+- **Cannot extrapolate.** A leaf predicts a constant fit to whichever training rows landed in it, so outside a feature's observed range the prediction goes flat instead of following the trend. Any numeric feature that drifts past its training range in production (price, timestamp, sensor reading) breaks without warning.
 
 ## The non-obvious
 
-The instability failure mode is not a bug to be engineered away — it is the entire reason ensembling works. A high-variance, low-bias tree is exactly the raw material bagging wants: average many trees whose *errors* are only loosely correlated, and the variance cancels while the low bias survives. If single decision trees were stable, random forests would have nothing to average away. This reframes "instability" from defect to designed-for property once you know the tree is destined for an ensemble — but it also means a lone tree kept for interpretability is trustworthy for *showing the logic path* and untrustworthy for *quantitative prediction*.
+Instability isn't a bug to engineer away. It's the reason ensembling works. A high-variance, low-bias tree is the raw material bagging wants: average many trees whose *errors* are only loosely correlated, and the variance cancels while the low bias stays. If single trees were stable, random forests would have nothing to average away. Once you know a tree is headed for an ensemble, instability is a property you're counting on. It also means a lone tree kept for interpretability is trustworthy for *showing the logic path* and untrustworthy for *quantitative prediction*.
 
 ## Connections
 - [[Concept - Entropy and Cross-Entropy]] — entropy is one of the two standard impurity measures a split search maximizes the decrease of.

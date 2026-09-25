@@ -5,19 +5,19 @@ summary: "Minimize the worst-case loss in a ρ-ball to bias training toward flat
 ---
 # Concept - Sharpness-Aware Minimization
 
-> **One-paragraph hook:** Standard training minimizes the loss at a point. SAM minimizes the loss over a whole neighborhood — it deliberately looks for parameter settings where *every nearby* setting is also good, i.e. flat minima. It does this with a cheap trick: take one gradient step "uphill" to find the worst point in a small ball around you, then take your real optimization step from *there*. It reliably buys a point or two of test accuracy on vision models and lets Vision Transformers train without heavy augmentation — but it doubles your per-step compute, which is exactly why it never became a default for LLM pretraining.
+> **One-paragraph hook:** Standard training minimizes the loss at a point. SAM minimizes it over a whole neighborhood, searching on purpose for parameter settings where *every nearby* setting is also good: flat minima. The trick is cheap: take one gradient step "uphill" to find the worst point in a small ball around you, then take your real optimization step from *there*. On vision it reliably buys a point or two of test accuracy and lets Vision Transformers train without heavy augmentation. It also doubles per-step compute, and that's why it never became a default for LLM pretraining.
 
 ## The mechanism
 
-SAM (Foret et al. 2020) replaces the pointwise objective with a min–max over a radius-$\rho$ ball:
+SAM (Foret et al. 2020) swaps the pointwise objective for a min–max over a radius-$\rho$ ball:
 
 $$\min_\theta \; \max_{\|\epsilon\|_2 \le \rho} \; L(\theta + \epsilon).$$
 
-You are no longer minimizing the loss; you are minimizing the *worst loss within $\rho$ of $\theta$*, which pushes the optimizer away from sharp minima (where a small $\epsilon$ spikes the loss) toward flat ones (where the whole ball is low). The inner maximization is intractable exactly, so SAM approximates it with a first-order Taylor expansion. The worst-case perturbation is (approximately) the ascent direction, normalized to the ball's surface:
+The target is now the *worst loss within $\rho$ of $\theta$*. That pushes the optimizer away from sharp minima, where a small $\epsilon$ spikes the loss, and toward flat ones where the whole ball is low. The exact inner max is intractable, so SAM uses a first-order Taylor expansion. The worst-case perturbation comes out (approximately) as the ascent direction, normalized to the ball's surface:
 
 $$\hat\epsilon(\theta) = \rho \cdot \frac{\nabla L(\theta)}{\|\nabla L(\theta)\|_2}.$$
 
-Then it computes the gradient *at the perturbed point* and updates from the original point with it, dropping the second-order term:
+It then takes the gradient *at the perturbed point* and applies it from the original point, dropping the second-order term:
 
 ```
 g       = grad(L, theta)                     # 1st forward-backward
@@ -26,28 +26,28 @@ g_sam   = grad(L, theta + eps)               # 2nd forward-backward
 theta   = base_optimizer.step(theta, g_sam)  # descend using the perturbed gradient
 ```
 
-The base optimizer (usually SGD+momentum or [[Concept - Adam and AdamW|AdamW]]) is unchanged — SAM only substitutes $g_{\text{sam}}$ for the raw gradient. Note the ascent step's gradient normalization: this makes the update behave partly like a gradient-*norm* penalty, which is one lens on why SAM flattens the landscape it lands in — it is a controlled attack on the same curvature that [[Concept - The Edge of Stability|edge-of-stability]] dynamics leave the model sitting at when you tune sharpness only indirectly through the learning rate.
+The base optimizer (usually SGD+momentum or [[Concept - Adam and AdamW|AdamW]]) doesn't change. SAM just hands it $g_{\text{sam}}$ in place of the raw gradient. The normalization in the ascent step makes the update act partly like a gradient-*norm* penalty, one way to see why SAM flattens where it lands. It targets the same curvature that [[Concept - The Edge of Stability|edge-of-stability]] dynamics leave the model sitting at when sharpness is tuned only indirectly, through the learning rate.
 
 ## In practice
 
-- **$\rho$ is the one knob that matters.** It sets the neighborhood radius; $\rho \approx 0.05$ is the canonical default for CIFAR-scale vision, rising toward $0.1$–$0.2$ when data is scarce and overfitting is the enemy. Too large and you flatten past the useful minimum; too small and SAM collapses to ordinary training.
-- **ASAM** (Kwon et al. 2021) fixes a real weakness: a fixed-radius Euclidean ball is not scale-invariant, so layers with large weight norms get under-perturbed and small-norm layers over-perturbed. ASAM makes $\rho$ adaptive to each parameter's scale, so it transfers across layers and architectures without re-tuning.
-- **The gains are real but modest and vision-shaped.** Foret et al. reported consistent ImageNet top-1 improvements (order tenths of a percent to ~1–2%, larger on smaller datasets) across ResNets and, notably, Chen et al. (2021) showed SAM lets [[Concept - Vision Transformers|ViTs]] and MLP-Mixers match or beat ResNets *without* large-scale pretraining or strong augmentation — the flat-minima bias substitutes for the inductive bias those architectures otherwise lack. Benefits are largest exactly where a model would otherwise overfit: limited data, high capacity.
-- **Cost is the adoption barrier.** Two forward-backward passes per step ≈ 2× compute and wall-clock. The mitigations: **LookSAM** reuses the ascent direction for several steps; applying SAM **every $k$ steps** (periodic SAM) recovers most of the gain at a fraction of the cost; efficient variants amortize or subsample the ascent pass.
+- **$\rho$ is the one knob that matters.** It sets the neighborhood radius. $\rho \approx 0.05$ is the canonical default for CIFAR-scale vision, going up toward $0.1$–$0.2$ when data is scarce and overfitting is the enemy. Too large flattens past the useful minimum; too small collapses SAM to ordinary training.
+- **ASAM** (Kwon et al. 2021) fixes a real weakness. A fixed-radius Euclidean ball isn't scale-invariant, so layers with large weight norms get under-perturbed and small-norm layers over-perturbed. ASAM scales $\rho$ to each parameter, so it transfers across layers and architectures without re-tuning.
+- **Gains are real, modest, and mostly in vision.** Foret et al. reported consistent ImageNet top-1 improvements across ResNets (tenths of a percent up to ~1–2%, larger on smaller datasets). Chen et al. (2021) showed SAM lets [[Concept - Vision Transformers|ViTs]] and MLP-Mixers match or beat ResNets *without* large-scale pretraining or strong augmentation; the flat-minima bias stands in for the inductive bias those architectures otherwise lack. The benefit is biggest where a model would otherwise overfit: limited data, high capacity.
+- **Cost blocks adoption.** Two forward-backward passes per step ≈ 2× compute and wall-clock. Mitigations: **LookSAM** reuses the ascent direction for several steps; applying SAM **every $k$ steps** (periodic SAM) keeps most of the gain for a fraction of the cost; efficient variants amortize or subsample the ascent pass.
 
-SAM's conceptual payoff is that it turns the flat-minima hypothesis into an *intervention*. Plain [[Concept - Stochastic Gradient Descent and Momentum|SGD]] finds flat minima only implicitly, through gradient noise; SAM optimizes flatness on purpose, which makes it a controlled probe of whether flatness *causes* [[Concept - Generalization in Deep Learning|generalization]] or merely correlates with it — a live question in the [[Lore - The Adam vs SGD Generalization Wars|Adam-vs-SGD generalization debate]].
+SAM turns the flat-minima hypothesis into an *intervention*. Plain [[Concept - Stochastic Gradient Descent and Momentum|SGD]] finds flat minima only implicitly, through gradient noise. SAM optimizes flatness on purpose, which makes it a controlled probe of whether flatness *causes* [[Concept - Generalization in Deep Learning|generalization]] or just correlates with it, a live question in the [[Lore - The Adam vs SGD Generalization Wars|Adam-vs-SGD generalization debate]].
 
 ## Failure modes
 
-- **The 2× tax with no payoff at scale.** For [[Concept - Scaling Laws|LLM pretraining]], compute buys more tokens or parameters, and there is no clear evidence SAM's flatness gain beats simply spending that 2× on more data. It remains almost entirely a vision and fine-tuning tool; using it in a pretraining budget is usually a compute mistake.
-- **$\rho$ mis-set silently degrades.** Because SAM never errors, a badly tuned $\rho$ just quietly underperforms baseline — detection means an actual ablation against SAM-off, not a loss-curve glance.
-- **Interaction with batch normalization and mixed precision.** The two passes must use consistent statistics; naive implementations that let the ascent and descent passes see different [[Breakdown - Batch Normalization|BatchNorm]] batch stats compute an inconsistent $\hat\epsilon$. Getting the perturbation, the norm computation, and the base optimizer's weight decay to compose correctly is the practical implementation trap.
+- **Paying 2× for nothing at scale.** In [[Concept - Scaling Laws|LLM pretraining]], compute buys more tokens or parameters, and there's no clear evidence SAM's flatness gain beats spending that 2× on more data. It's still almost entirely a vision and fine-tuning tool, and in a pretraining budget it's usually a compute mistake.
+- **A mis-set $\rho$ degrades without a signal.** SAM never errors, so a badly tuned $\rho$ just underperforms baseline. Only an ablation against SAM-off catches it; the loss curve won't.
+- **Batch normalization and mixed precision.** Both passes need consistent statistics. A naive implementation that lets the ascent and descent passes see different [[Breakdown - Batch Normalization|BatchNorm]] batch stats computes an inconsistent $\hat\epsilon$. The practical trap is making the perturbation, the norm computation and the base optimizer's weight decay compose correctly.
 
 ## The non-obvious
 
-SAM's benefit depends on the batch size used for the *ascent* step, not just the descent — the **m-sharpness** effect. If you compute $\hat\epsilon$ per-GPU or per-microbatch (small $m$) instead of over the full batch, SAM works *better*, and nobody has a fully satisfying mechanistic account of why. This means a naive data-parallel SAM that averages the perturbation across the whole global batch throws away much of the gain; the folklore-correct implementation computes the ascent perturbation on small local shards. It also means SAM's "sharpness" is not the clean Hessian sharpness of [[Concept - The Edge of Stability|EoS]] and [[Concept - The Hessian Spectrum in Deep Learning|the Hessian spectrum]] — it is a stochastic, batch-dependent surrogate, and the gap between the two is part of why the flatness-generalization story remains contested rather than closed.
+SAM's benefit depends on the batch size used for the *ascent* step as well as the descent, the **m-sharpness** effect. Compute $\hat\epsilon$ per-GPU or per-microbatch (small $m$) instead of over the full batch and SAM works *better*. Nobody has a fully satisfying mechanistic account of why. A naive data-parallel SAM that averages the perturbation over the global batch throws away much of the gain; the folklore-correct version computes it on small local shards. SAM's "sharpness" also differs from the clean Hessian sharpness of [[Concept - The Edge of Stability|EoS]] and [[Concept - The Hessian Spectrum in Deep Learning|the Hessian spectrum]]. It's a stochastic, batch-dependent surrogate, and that gap is part of why the flatness-generalization story is still contested.
 
-Open (as of 2026): whether SAM's flatness advantage survives — and justifies its compute — at frontier LLM scale is unresolved. It is a proven regularizer for data-limited vision and fine-tuning, and an unproven bet everywhere else.
+Open (as of 2026): whether SAM's flatness advantage survives, and pays for its compute, at frontier LLM scale. It's a proven regularizer for data-limited vision and fine-tuning and an unproven bet everywhere else.
 
 ## Connections
 

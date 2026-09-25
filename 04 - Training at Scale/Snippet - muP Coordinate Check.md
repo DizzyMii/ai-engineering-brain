@@ -6,11 +6,11 @@ summary: "Runnable check that a muP implementation keeps activation coordinates 
 
 # Snippet - muP Coordinate Check
 
-**What it does:** builds the same MLP at several widths, applies [[Concept - muP and Hyperparameter Transfer|muP]] scaling (fan-in init, per-layer LR, output multiplier), runs a few AdamW steps on an *identical* batch and seed, and prints the mean absolute activation of each layer per width. A correct muP keeps those magnitudes roughly constant across width (flat rows); standard parametrization (SP) makes them fan out. This is the single most reliable test that a muP implementation is wired correctly — a wrong multiplier passes unit tests and silently fails here.
+**What it does:** builds the same MLP at several widths, applies [[Concept - muP and Hyperparameter Transfer|muP]] scaling (fan-in init, per-layer LR, output multiplier), runs a few AdamW steps on an *identical* batch and seed, then prints each layer's mean absolute activation per width. With correct muP those magnitudes stay roughly constant across width (flat rows). Standard parametrization (SP) makes them fan out. It's the most reliable test that a muP implementation is wired correctly: a wrong multiplier passes unit tests and fails here.
 
 **Dependencies:** `torch>=2.1` (CPU is fine).
 
-**Expected output:** two tables. The muP table's rows are ~flat left-to-right; the SP table's `fc2`/`logits` rows grow with width, most visibly *after* the update steps.
+**Expected output:** two tables. muP rows are ~flat left to right. SP's `fc2`/`logits` rows grow with width, most visibly *after* the update steps.
 
 ```python
 import torch, torch.nn as nn, torch.nn.functional as F
@@ -103,10 +103,13 @@ logits      0.18     0.33     0.61     1.14     2.16
 
 ## Why it's written this way
 
-- **Readout init to zero + divide the output by `width_mult`.** These are the two muP rules that make the *output* width-invariant. Drop either and the `logits` row is where the check fails first, because the output-layer update scales with width. `fc1` (fan-in init) already looks fine under both parametrizations — the input layer is not where muP earns its keep.
-- **Per-layer Adam LR via param groups (hidden & readout `LR/m`, input constant).** This *is* the mechanism muP encodes. The SP branch deliberately uses a single global LR — that is the bug muP fixes, and it is why the SP rows fan out only after `opt.step()` runs.
-- **Identical batch and identical seed across widths.** Width must be the only variable, or you cannot attribute divergence to the parametrization instead of to noise. The data generator is seeded separately from the init so the batch is byte-identical at every width.
-- **Measure at step 0 *and* after a few steps.** Init can look width-invariant while the *updates* blow up (a wrong LR exponent shows up only under optimization). Reading the coordinates after ~5 steps is what actually catches a broken implementation; here we print the post-step state. In production you would use `mup.set_base_shapes` rather than hand-rolling these three rules, but the check is identical.
+**Zero readout init, output divided by `width_mult`.** These two muP rules make the *output* width-invariant. Drop either one and the `logits` row fails first, because the output-layer update scales with width. `fc1` (fan-in init) looks fine under both parametrizations; muP doesn't earn its keep at the input layer.
+
+**Per-layer Adam LR through param groups** (hidden and readout at `LR/m`, input constant). This is the mechanism muP encodes. The SP branch uses a single global LR on purpose. That's the bug muP fixes, and it's why the SP rows fan out only after `opt.step()` runs.
+
+**Same batch and seed at every width.** Width has to be the only variable, or you can't pin divergence on the parametrization instead of noise. The data generator is seeded separately from the init so the batch is byte-identical across widths.
+
+**Measure at step 0 *and* after a few steps.** Init can look width-invariant while the *updates* blow up; a wrong LR exponent only shows up under optimization. Reading coordinates after ~5 steps is what catches a broken implementation, so this script prints the post-step state. In production you'd use `mup.set_base_shapes` instead of hand-rolling the three rules, but the check is the same.
 
 ## Connections
 

@@ -6,11 +6,11 @@ summary: "Runnable top-2 token-choice MoE FFN layer: gate, softmax, renormalized
 
 # Snippet - Top-2 MoE Routing Layer
 
-**What it does:** implements a dense-compute top-2 token-choice [[Concept - Mixture of Experts Architecture|MoE]] FFN layer: a linear gate, softmax, top-2 selection, renormalization of the selected weights, and a weighted combination of expert outputs — the same routing math as [[Breakdown - Mixtral 8x7B]]'s FFN sublayer, run here as a reference "loop over every expert" implementation rather than the scatter/gather dispatch [[Concept - MoE Inference and Expert Parallelism|production systems]] use for efficiency. Also logs a per-expert token-count histogram, because that number is the first thing you should look at whenever an MoE layer misbehaves.
+**What it does:** implements a dense-compute top-2 token-choice [[Concept - Mixture of Experts Architecture|MoE]] FFN layer: a linear gate, softmax, top-2 selection, renormalization of the selected weights, and a weighted combination of expert outputs. The routing math matches [[Breakdown - Mixtral 8x7B]]'s FFN sublayer, written as a reference "loop over every expert" instead of the scatter/gather dispatch [[Concept - MoE Inference and Expert Parallelism|production systems]] use for efficiency. It also logs a per-expert token-count histogram, since that's the first number to check whenever an MoE layer misbehaves.
 
 **Dependencies:** `torch >= 2.0` (CPU is fine).
 
-**Expected output** (seeded, `torch==2.x` CPU — exact counts can shift a little across major torch versions since the RNG stream isn't guaranteed stable, but the imbalance itself is the point; see [[Gotchas - Mixture of Experts]]):
+**Expected output** (seeded, `torch==2.x` CPU; exact counts can shift a little across major torch versions because the RNG stream isn't guaranteed stable, but the imbalance itself is the point, see [[Gotchas - Mixture of Experts]]):
 ```text
 output shape: torch.Size([64, 32])
 expert token counts: [12, 13, 15, 11, 18, 30, 17, 12]
@@ -122,10 +122,13 @@ if __name__ == "__main__":
 
 ## Why it's written this way
 
-1. **Top-2 renormalization is an explicit, commented line, not folded into the combine step.** It's the single most commonly omitted correctness detail in a hand-rolled router — easy to skip because the model still "works" without it, just with a token-dependent output scale that quietly distorts training.
-2. **The dense mask-and-loop form is deliberate, not naive.** A real expert-parallel implementation gathers tokens per expert and dispatches across devices for efficiency; this snippet keeps the "compute every expert, mask what wasn't selected" form because it's the version whose correctness you can read off the code directly, and it's the right first implementation to numerically match before optimizing (see [[Playbook - Numerically Matching a Reference Implementation]]).
-3. **The load histogram is a first-class return value, not something you'd have to bolt on.** In production MoE, per-expert token counts are the single most useful health signal you can log — a spiky histogram is the earliest visible symptom of routing collapse, well before it shows up in loss (see [[Gotchas - Mixture of Experts]]).
-4. **The expert module intentionally mirrors a dense [[Concept - Feed-Forward Networks and GLU Variants|FFN]] block**, not a simplified stand-in — MoE is a sparsification of exactly this sublayer, and using the same shape (`w1` up-project, activation, `w2` down-project) makes the parameter-count comparison against a dense model direct: $N$ experts at this size cost roughly $N\times$ one dense FFN's parameters, while forward compute per token stays pinned to 2 experts' worth.
+**Top-2 renormalization gets its own commented line** instead of being folded into the combine step. It's the correctness detail most often left out of hand-rolled routers. Skipping it is easy because the model still "works", just with a token-dependent output scale that distorts training.
+
+**The dense mask-and-loop form is on purpose.** A real expert-parallel implementation gathers tokens per expert and dispatches across devices for efficiency. This snippet computes every expert and masks what wasn't selected, because in that form you can read correctness straight off the code, and it's the right first implementation to match numerically before optimizing (see [[Playbook - Numerically Matching a Reference Implementation]]).
+
+**The load histogram is a return value**, so nobody has to bolt it on later. In production MoE, per-expert token counts are the most useful health signal you can log. A spiky histogram is the earliest visible symptom of routing collapse, well before it shows up in loss (see [[Gotchas - Mixture of Experts]]).
+
+**The expert module mirrors a dense [[Concept - Feed-Forward Networks and GLU Variants|FFN]] block** instead of a simplified stand-in. MoE sparsifies this sublayer, and keeping the same shape (`w1` up-project, activation, `w2` down-project) makes the parameter comparison against a dense model direct: $N$ experts at this size cost roughly $N\times$ one dense FFN's parameters, while forward compute per token stays at 2 experts' worth.
 
 ## Connections
 - [[Concept - Mixture of Experts Architecture]] — the full mechanism (routing granularity, capacity, shared experts) this snippet implements the top-2 slice of.

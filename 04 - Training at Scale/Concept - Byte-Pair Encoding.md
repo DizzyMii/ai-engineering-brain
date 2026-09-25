@@ -6,11 +6,11 @@ summary: "The greedy merge algorithm that turns raw bytes into subword tokens, s
 
 # Concept - Byte-Pair Encoding
 
-> **One-paragraph hook:** Every LLM's context window, arithmetic ability, and multilingual fluency is downstream of a decision made once, before pretraining even starts: how to chop text into tokens. Byte-Pair Encoding (BPE) is the algorithm nearly every frontier model uses to make that decision, and it is dumber than people expect — a greedy, frequency-driven merge procedure with no notion of "optimal" segmentation, frozen for the model's entire lifetime.
+> **One-paragraph hook:** Every LLM's context window, arithmetic ability and multilingual fluency depend on a decision made once, before pretraining starts: how to chop text into tokens. Nearly every frontier model makes that decision with Byte-Pair Encoding (BPE), and BPE is dumber than people expect. It's a greedy, frequency-driven merge procedure with no notion of "optimal" segmentation, and it stays frozen for the model's entire lifetime.
 
 ## The mechanism
 
-BPE training starts from the smallest possible alphabet — individual bytes or characters — and builds up a vocabulary by repeatedly merging the most frequent adjacent pair of symbols into a new symbol:
+BPE training starts from the smallest possible alphabet (individual bytes or characters) and grows a vocabulary by repeatedly merging the most frequent adjacent pair of symbols into a new symbol:
 
 ```text
 vocab = {256 byte values}
@@ -24,28 +24,28 @@ while len(vocab) < target_vocab_size:
     corpus = replace_all(corpus, best_pair, new_symbol)
 ```
 
-The final vocabulary is the base alphabet plus N learned merges (vocab size = base + N). Crucially, what gets recorded isn't just *which* merges happened but *what order* — that ordering (the "merge rank") is what encoding replays: to tokenize new text, you apply the recorded merges greedily in rank order until no more apply. This is why BPE is fast and deterministic at inference — no search, just a lookup table walk.
+The final vocabulary is the base alphabet plus N learned merges (vocab size = base + N). The training run records the *order* of the merges as well as which ones happened. Encoding replays that ordering (the "merge rank"): to tokenize new text, apply the recorded merges greedily in rank order until none apply. No search, just a lookup-table walk, so inference-time encoding is fast and deterministic.
 
-**Byte-level BPE** (used by GPT-2 and nearly every model since) operates over the 256 raw byte values as the base alphabet rather than Unicode characters. This is the guarantee that makes it robust: every possible byte string — any language, any emoji, any malformed encoding — is representable, so there is never an `<UNK>` token. The original algorithm predates NLP entirely (Gage 1994, a text compression trick); Sennrich et al. (2016) adapted it for neural machine translation as a subword segmentation method, and Radford et al. (2019, GPT-2) made the byte-level variant standard, with a vocabulary of 50257.
+**Byte-level BPE** (GPT-2 and nearly every model since) uses the 256 raw byte values as the base alphabet instead of Unicode characters. That makes it robust: every possible byte string, whether any language, any emoji or a malformed encoding, is representable, so there's never an `<UNK>` token. The algorithm itself predates NLP. Gage (1994) invented it as a text compression trick; Sennrich et al. (2016) adapted it as a subword segmentation method for neural machine translation, and Radford et al. (2019, GPT-2) made the byte-level variant standard, with a vocabulary of 50257.
 
-**Pre-tokenization** happens before merging: a regex splits text on whitespace/punctuation boundaries so that merges never cross word boundaries (you'll never see a merge spanning "the cat" into one token). GPT-2's pre-tokenizer marks a leading space with a special glyph (commonly rendered as "Ġ") rather than a literal space character, so `" the"` and `"the"` become distinguishable, differently-tokenized strings.
+**Pre-tokenization** runs before merging. A regex splits text on whitespace and punctuation boundaries so merges never cross word boundaries; you'll never see "the cat" merged into one token. GPT-2's pre-tokenizer marks a leading space with a special glyph (commonly rendered "Ġ") instead of a literal space, so `" the"` and `"the"` are distinct strings that tokenize differently.
 
 ## In practice
 
-Typical production vocab sizes range from 32k (Llama-2) to 128k (GPT-4, Llama-3) up to 256k (Gemma) — see [[Concept - Tokenizer Training]] for the tradeoff calculus behind that choice. On English text, BPE achieves roughly 3.5-4 characters per token; code and non-English languages compress noticeably worse because the merge statistics are dominated by whatever corpus trained the tokenizer. The vocabulary size directly couples to model size: the embedding and unembedding matrices cost `vocab_size × hidden_dim` parameters each (often tied), so doubling the vocab to shorten sequences is not free — see [[Concept - Pretraining Objectives]] for how this interacts with the causal-LM loss over the vocabulary. [[Snippet - Training a BPE Tokenizer]] walks through training one end-to-end with the `tokenizers` library, including reserving special and FIM sentinel tokens up front.
+Production vocab sizes run from 32k (Llama-2) to 128k (GPT-4, Llama-3) up to 256k (Gemma); [[Concept - Tokenizer Training]] covers the tradeoffs behind that choice. BPE gets roughly 3.5-4 characters per token on English. Code and non-English languages compress noticeably worse, because whatever corpus trained the tokenizer dominates the merge statistics. Vocab size also couples directly to model size: the embedding and unembedding matrices cost `vocab_size × hidden_dim` parameters each (often tied), so doubling the vocab to shorten sequences isn't free. See [[Concept - Pretraining Objectives]] for how this interacts with the causal-LM loss over the vocabulary. [[Snippet - Training a BPE Tokenizer]] trains one end-to-end with the `tokenizers` library, including reserving special and FIM sentinel tokens up front.
 
 ## Failure modes
 
-- **Arithmetic errors from digit merges**: whether digits are split individually or merged into multi-digit chunks changes how a model sees numbers; inconsistent digit tokenization is a well-documented contributor to poor multi-digit arithmetic.
-- **Multilingual under-segmentation (high fertility)**: a tokenizer trained mostly on English text produces far more tokens per word for other languages — a 2-4x "token tax" that inflates cost and effectively shrinks the usable context window for non-English users.
-- **Imperfect round-trip invertibility**: naive Unicode normalization applied inconsistently between training and serving can make some byte sequences fail to decode back to their exact original string.
-- **Whitespace-sensitive merges**: because pre-tokenization treats leading-space and no-space variants of a word as different strings, code and heavily-indented text can tokenize unpredictably.
+- **Arithmetic errors from digit merges.** Splitting digits individually versus merging them into multi-digit chunks changes how a model sees numbers. Inconsistent digit tokenization is a well-documented contributor to poor multi-digit arithmetic.
+- **Multilingual under-segmentation (high fertility).** A tokenizer trained mostly on English produces far more tokens per word for other languages. That 2-4x "token tax" inflates cost and effectively shrinks the usable context window for non-English users.
+- **Imperfect round-trip invertibility.** If naive Unicode normalization is applied inconsistently between training and serving, some byte sequences won't decode back to their exact original string.
+- **Whitespace-sensitive merges.** Pre-tokenization treats the leading-space and no-space forms of a word as different strings, so code and heavily indented text can tokenize unpredictably.
 
 ## The non-obvious
 
-BPE's merge criterion is **frequency-greedy, not likelihood-optimal** — at each step it merges whatever pair is most common right now, with no lookahead and no attempt to minimize the expected token count or maximize corpus likelihood. This is a genuinely different optimization target from the unigram language-model approach used by SentencePiece (see [[Concept - Tokenizer Training]]), which prunes a candidate vocabulary via EM to directly maximize likelihood and can do probabilistic subword regularization. BPE is simpler and faster to train but there is no guarantee its greedy merges are the best possible segmentation for language modeling — it just happens to work well enough that essentially every large model uses it anyway.
+BPE's merge criterion is frequency-greedy, not likelihood-optimal. Each step merges whatever pair is most common right now, with no lookahead and no attempt to minimize expected token count or maximize corpus likelihood. The unigram language-model approach in SentencePiece (see [[Concept - Tokenizer Training]]) optimizes a different target: it prunes a candidate vocabulary via EM to maximize likelihood directly, and it supports probabilistic subword regularization. BPE is simpler and faster to train. Nothing guarantees its greedy merges are the best segmentation for language modeling; it just works well enough that essentially every large model uses it anyway.
 
-The deeper practitioner lesson: the tokenizer is trained once, frozen before a single pretraining token is seen, and then silently governs everything downstream — effective context length in "concepts" rather than tokens, arithmetic capability, multilingual fairness, and even loss magnitude (a worse tokenizer inflates cross-entropy loss for reasons that have nothing to do with the model's intelligence). Debugging a "weird" model behavior by inspecting the tokenizer first, before the weights, is a habit worth having.
+The practical lesson: the tokenizer is trained once, frozen before the first pretraining token, and then governs everything downstream without anyone looking at it. That covers effective context length in "concepts" as opposed to tokens, arithmetic, multilingual fairness, even loss magnitude (a worse tokenizer inflates cross-entropy loss for reasons unrelated to the model's intelligence). When a model does something weird, inspect the tokenizer before the weights.
 
 ## Connections
 - [[Concept - Tokenizer Training]] — the vocab-size and unigram-vs-BPE decisions that sit one level above this algorithm.

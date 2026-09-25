@@ -12,7 +12,7 @@ Defaults for instruction/behavior [[Concept - Supervised Fine-Tuning (SFT)|SFT]]
 
 | Knob | LoRA ([[Deep Dive - LoRA]]) | QLoRA ([[Concept - QLoRA]]) | Full FT (7B SFT) | One-line rationale |
 |---|---|---|---|---|
-| Learning rate | 1e-4 – 3e-4 | ~2e-4 | 1e-5 – 2e-5 | LoRA wants ~10× full-FT LR — only $A,B$ train, and $\alpha/r$ folds into the effective step¹ |
+| Learning rate | 1e-4 – 3e-4 | ~2e-4 | 1e-5 – 2e-5 | LoRA wants ~10× full-FT LR: only $A,B$ train, and $\alpha/r$ folds into the effective step¹ |
 | Epochs | 1–3 | 1–3 | 1–3 | >3 overfits small sets fast; large datasets often run a single epoch |
 | Rank $r$ | 8–64 (16 default) | 8–64 (16 default) | — | Raise for hard domains, **with** rsLoRA scaling² |
 | $\alpha$ (lora_alpha) | $2r$ or $r$ | $2r$ (=32 at r=16) | — | $\alpha/r$ is the update scale, not a free knob² |
@@ -35,7 +35,7 @@ Defaults for instruction/behavior [[Concept - Supervised Fine-Tuning (SFT)|SFT]]
 | 64 | 128 | 2.0 | 16.0 | Hard domains (code/math); **rsLoRA on or it plateaus** |
 | 256 | 512 | 2.0 | 32.0 | Only worthwhile with rsLoRA; approaching full-FT capacity |
 
-Note how holding $\alpha=2r$ pins the *standard* scale at 2.0 across all ranks — that is the whole point of the $2r$ convention. Under rsLoRA the effective scale $\alpha/\sqrt r$ rises with rank instead, which is the intended rank-invariant-magnitude behavior; see [[Concept - rsLoRA and the Rank-Alpha Scaling Trap]].
+Holding $\alpha=2r$ pins the *standard* scale at 2.0 across all ranks, which is the whole point of the $2r$ convention. Under rsLoRA the effective scale $\alpha/\sqrt r$ rises with rank instead. That's intended: it's what keeps the update magnitude rank-invariant. See [[Concept - rsLoRA and the Rank-Alpha Scaling Trap]].
 
 ## QLoRA-specific config
 
@@ -49,17 +49,17 @@ Note how holding $\alpha=2r$ pins the *standard* scale at 2.0 across all ranks �
 
 ## Memory sizing anchors
 
-- Optimizer + gradient + master state ≈ **16 bytes per trainable parameter** under [[Concept - Adam and AdamW|AdamW]] mixed precision — the term PEFT collapses. Full derivation: [[Reference - Memory Math for Transformers]].
+- Optimizer + gradient + master state ≈ **16 bytes per trainable parameter** under [[Concept - Adam and AdamW|AdamW]] mixed precision. This is the term PEFT collapses. Full derivation: [[Reference - Memory Math for Transformers]].
 - Full FT of 7B in bf16 ≈ 14 GB weights + 14 GB grads + ~56 GB fp32 master+moments ≈ **~84 GB** → needs an 80 GB A100 with offload or multi-GPU.
-- QLoRA 7B (4-bit base ≈ 3.5–4 GB + bf16 adapter state) **fits in <16 GB** on one consumer card — the democratization result.
+- QLoRA 7B (4-bit base ≈ 3.5–4 GB + bf16 adapter state) **fits in <16 GB** on one consumer card, the democratization result.
 
 ## Footnotes
 
-1. **LoRA LR ~10× full-FT** — because only the small $A,B$ factors are optimized and the $\alpha/r$ scaling composes multiplicatively with the LR; part of the "10×" *is* the scaling factor, not the optimizer. Fix the scaling regime first, then sweep LR (see footnote 2).
-2. **Rank/alpha scaling caveat** — $\Delta W = (\alpha/r)BA$ by default; the branch magnitude decays $\propto 1/\sqrt r$, so naively raising $r$ collapses the effective LR and quality plateaus. Use `use_rslora=True` (scaling $\alpha/\sqrt r$) at $r \ge 32$. Copying an $\alpha$ from a config with a different $r$ silently retunes your effective LR. Full mechanism: [[Concept - rsLoRA and the Rank-Alpha Scaling Trap]].
-3. **LR–batch coupling** — larger effective batch reduces gradient noise; the rough heuristic is linear LR scaling with batch (or $\sqrt{\cdot}$ for adaptive optimizers). Effective batch = micro-batch × grad-accum × data-parallel world size.
-4. **all-linear targets** — `q,k,v,o` plus MLP `gate,up,down`. If you added special tokens / resized embeddings, also add `embed_tokens` and `lm_head` to `modules_to_save`, or new tokens emit garbage.
-5. **Precision** — keep norm layers and the softmax in fp32 under mixed precision to avoid NaNs; store 4-bit in QLoRA but compute in bf16.
+1. **LoRA LR ~10× full-FT.** Only the small $A,B$ factors are optimized, and the $\alpha/r$ scaling multiplies with the LR, so part of the "10×" *is* the scaling factor, not the optimizer. Fix the scaling regime first, then sweep LR (see footnote 2).
+2. **Rank/alpha scaling caveat.** By default $\Delta W = (\alpha/r)BA$, and the branch magnitude decays $\propto 1/\sqrt r$, so naively raising $r$ collapses the effective LR and quality plateaus. Use `use_rslora=True` (scaling $\alpha/\sqrt r$) at $r \ge 32$. Copying an $\alpha$ from a config with a different $r$ silently retunes your effective LR. Full mechanism: [[Concept - rsLoRA and the Rank-Alpha Scaling Trap]].
+3. **LR–batch coupling.** A larger effective batch reduces gradient noise. The rough heuristic is to scale LR linearly with batch (or by $\sqrt{\cdot}$ for adaptive optimizers). Effective batch = micro-batch × grad-accum × data-parallel world size.
+4. **all-linear targets:** `q,k,v,o` plus MLP `gate,up,down`. If you added special tokens or resized embeddings, also put `embed_tokens` and `lm_head` in `modules_to_save`, or the new tokens emit garbage.
+5. **Precision.** Keep norm layers and the softmax in fp32 under mixed precision to avoid NaNs. QLoRA stores 4-bit but computes in bf16.
 
 ## Connections
 - [[Deep Dive - LoRA]] — defines $r$, $\alpha$, target modules, and the $\Delta W = (\alpha/r)BA$ these values parameterize.

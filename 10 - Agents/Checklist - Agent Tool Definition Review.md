@@ -6,59 +6,59 @@ summary: "Pre-flight review for any tool exposed to an agent -- naming, descript
 
 # Checklist - Agent Tool Definition Review
 
-Run this against every tool schema before it goes in front of a model. The agent [[Concept - Tool Use and Function Calling|only ever sees the name, description, and parameter descriptions]] -- never your implementation -- so this document *is* the tool as far as the model is concerned.
+Run this on every tool schema before a model sees it. The agent [[Concept - Tool Use and Function Calling|only ever sees the name, description and parameter descriptions]], never your implementation, so for the model this document *is* the tool.
 
 ## Naming
 
 - [ ] Name is verb-noun and unambiguous (`get_order_status`, not `orders`)
-- [ ] Name doesn't semantically overlap with a sibling tool -- two tools that both plausibly mean "search" get confused for each other
+- [ ] Name doesn't overlap in meaning with a sibling tool. Two tools that could both mean "search" get confused for each other
 
 ## Description
 
-- [ ] Description states **when to use** the tool
-- [ ] Description also states **when NOT to use** it, especially against a similarly-named or similarly-scoped sibling
-- [ ] Description includes a short example invocation
-- [ ] Description length is proportional to how confusable the tool is -- trivial tools need one line, ambiguous ones need more
+- [ ] Says **when to use** the tool
+- [ ] Also says **when NOT to use** it, especially relative to a sibling with a similar name or scope
+- [ ] Includes a short example invocation
+- [ ] Length matches how confusable the tool is: one line for trivial tools, more for ambiguous ones
 
 ## Parameters
 
-- [ ] Every parameter has a description, including units and format (`"date, ISO-8601 (YYYY-MM-DD)"`, not just `"date"`)
-- [ ] Free-string parameters are replaced with enums wherever the valid value set is finite
-- [ ] Required-vs-optional is set correctly, and every optional parameter's default behavior is documented in its description
-- [ ] The schema was round-tripped through the provider's validator, not just eyeballed -- a malformed schema fails silently in some SDKs
+- [ ] Every parameter has a description with units and format (`"date, ISO-8601 (YYYY-MM-DD)"`, not `"date"`)
+- [ ] Free-string parameters become enums wherever the set of valid values is finite
+- [ ] Required vs. optional is set correctly, and each optional parameter's default behavior is in its description
+- [ ] The schema went through the provider's validator; eyeballing doesn't count, since some SDKs fail silently on a malformed schema
 
 ## Returns
 
 - [ ] Return payload is concise and structured (JSON, not a prose paragraph the model has to re-parse)
-- [ ] Return size is token-budgeted -- measure it; a tool that can return 10K tokens of JSON on a bad day crowds out the rest of the transcript (see [[Concept - Context Engineering for Agents]])
-- [ ] Large or paginated results are truncated or summarized before being handed back, with a documented way to fetch more
+- [ ] Return size is token-budgeted and measured. A tool that can return 10K tokens of JSON on a bad day crowds out the rest of the transcript (see [[Concept - Context Engineering for Agents]])
+- [ ] Large or paginated results get truncated or summarized before they go back, with a documented way to fetch more
 
 ## Errors
 
-- [ ] Errors return actionable, model-readable text ("no order found for id X; check the id format"), never a raw stack trace or exception repr
-- [ ] The error path was tested by deliberately calling the tool with a bad argument, not just imagined
+- [ ] Errors come back as actionable text the model can read ("no order found for id X; check the id format"), never a raw stack trace or exception repr
+- [ ] The error path was tested by calling the tool with a bad argument on purpose
 
 ## Safety & side effects
 
-- [ ] Side effects (writes, sends, deletes) are declared explicitly in the description, not left implicit
-- [ ] Idempotency is documented -- can this tool be safely retried after a timeout?
-- [ ] Destructive or irreversible actions are gated behind an explicit confirmation step or a human-in-the-loop approval (see [[Checklist - Sandboxing an Agent]])
+- [ ] Side effects (writes, sends, deletes) are stated explicitly in the description
+- [ ] Idempotency is documented: can the tool be retried safely after a timeout?
+- [ ] Destructive or irreversible actions sit behind an explicit confirmation step or human-in-the-loop approval (see [[Checklist - Sandboxing an Agent]])
 
 ## Cost
 
-- [ ] The token cost of the schema itself -- name, description, and every parameter description, multiplied across every tool loaded into the system prompt -- has been measured, not assumed (see [[Concept - Cost Engineering for LLM Applications]])
+- [ ] The token cost of the schema itself (name, description and every parameter description, times every tool loaded into the system prompt) has been measured (see [[Concept - Cost Engineering for LLM Applications]])
 
 ## Why these items
 
-**Vague description → wrong tool picked.** Tool selection is entirely a function of the description text; an ambiguous one causes the model to call the wrong tool or hedge between two, which looks like a "capability" problem but is actually a documentation problem.
+**Vague description → wrong tool picked.** Tool selection depends entirely on the description text. An ambiguous one makes the model call the wrong tool or waver between two. It looks like a capability problem and is really a documentation problem.
 
-**Unhelpful error text → the agent loops.** A stack trace tells a human what broke; it tells the model nothing actionable, so it retries the same broken call or gives up -- see [[Gotchas - Tool Use and Function Calling]] for the loop failure mode this causes.
+**Unhelpful error text → the agent loops.** A stack trace tells a human what broke and tells the model nothing it can act on, so it retries the same broken call or gives up. [[Gotchas - Tool Use and Function Calling]] covers the resulting loop.
 
-**Verbose returns → context blowout.** An unbudgeted tool result is the single most common way a long-running agent silently burns its context window mid-task.
+**Verbose returns → context blowout.** An unbudgeted tool result is the most common way a long-running agent silently burns through its context window mid-task.
 
-**Ungated destructive ops → data loss.** The incident class behind this item is exactly the "agent ran `rm -rf`," "agent sent the email," or "agent issued the refund" story -- cheap to prevent here, expensive to clean up after.
+**Ungated destructive ops → data loss.** This is the "agent ran `rm -rf`", "agent sent the email", "agent issued the refund" story. Cheap to prevent here, expensive to clean up afterward.
 
-**Unmeasured schema cost → surprise bill.** Tool schemas are re-sent (or re-cached) on every turn; a system with thirty verbosely-described tools can spend more tokens describing itself than doing the task.
+**Unmeasured schema cost → surprise bill.** Tool schemas get re-sent (or re-cached) every turn. A system with thirty verbosely described tools can spend more tokens describing itself than doing the task.
 
 ## Connections
 - [[Concept - Tool Use and Function Calling]] -- the wire mechanics (schemas, `tool_choice`, parallel calls) this checklist is reviewing the surface of.

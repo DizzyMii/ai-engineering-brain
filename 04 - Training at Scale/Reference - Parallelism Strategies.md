@@ -6,13 +6,13 @@ summary: "Lookup table of DP, ZeRO/FSDP, TP, PP, SP, CP, and EP: what each shard
 
 # Reference - Parallelism Strategies
 
-*Reflects 2026 practice across Megatron-Core, DeepSpeed, PyTorch FSDP2 (see [[Concept - Fully Sharded Data Parallel (FSDP)]]), and TorchTitan. Comm-volume figures are per-step, order-of-magnitude, not exact byte counts — profile your own topology before trusting them.*
+*Reflects 2026 practice across Megatron-Core, DeepSpeed, PyTorch FSDP2 (see [[Concept - Fully Sharded Data Parallel (FSDP)]]), and TorchTitan. Comm-volume figures are per-step and order-of-magnitude, not byte counts. Profile your own topology before trusting them.*
 
 ## The seven dimensions
 
 | Strategy | What it shards | Collective(s) | Comm volume / step | Interconnect need | Memory effect | Typical degree | Primary failure mode |
 |---|---|---|---|---|---|---|---|
-| **DP** ([[Concept - Data Parallelism and ZeRO]]) | nothing — full replica per rank | all-reduce (grads), ring algorithm | ≈2× model size in grad bytes¹ | Bandwidth-tolerant, overlaps with backward | none — full model+grad+opt per GPU | 8 – thousands | wasted compute above the [[Concept - Critical Batch Size]] |
+| **DP** ([[Concept - Data Parallelism and ZeRO]]) | nothing (full replica per rank) | all-reduce (grads), ring algorithm | ≈2× model size in grad bytes¹ | Bandwidth-tolerant, overlaps with backward | none: full model+grad+opt per GPU | 8 – thousands | wasted compute above the [[Concept - Critical Batch Size]] |
 | **ZeRO-1/2/3 / FSDP** ([[Concept - Fully Sharded Data Parallel (FSDP)]]) | optimizer state (stage 1), +grads (2), +params (3) | all-gather (params) + reduce-scatter (grads) | ZeRO-1/2 ≈ DDP volume; ZeRO-3 ≈1.5× DDP² | Tolerant if prefetch overlaps compute | (model+grad+opt)/N per GPU | = DP world size | all-gather stall if not overlapped with compute |
 | **TP** ([[Concept - Tensor and Pipeline Parallelism]]) | weight matrices within a layer | all-reduce (activations), 2× fwd + 2× bwd per block | one activation tensor, every layer | NVLink required, intra-node only | params / TP degree | ≤ 8 | MFU collapse if TP spans a node boundary |
 | **PP** ([[Concept - Tensor and Pipeline Parallelism]]) | layers, into pipeline stages | point-to-point (activations) | one activation tensor per microbatch boundary | Latency-tolerant, inter-node OK | params / #stages (roughly) | 4 – 16+ | fill/drain bubble + stage imbalance |
@@ -20,22 +20,22 @@ summary: "Lookup table of DP, ZeRO/FSDP, TP, PP, SP, CP, and EP: what each shard
 | **CP** ([[Concept - Sequence and Context Parallelism]]) | the sequence dimension, for attention | ring send/recv or all-gather of KV blocks | KV-block-sized × ring steps | Latency-sensitive if not overlapped | attention activations O(seq²) → O(seq²/CP) | 2 – 8+, scales with target context | causal load imbalance, online-softmax rescale bugs |
 | **EP** ([[Concept - Expert Parallelism]]) | experts, across devices | two all-to-all (dispatch + combine) | tokens × hidden × top-k × 2 | Cross-node all-to-all dominates step time | expert params / EP degree | 8 – 256 | straggler stalls, capacity-drop quality loss |
 
-¹ Ring all-reduce moves ≈2×(N−1)/N of the gradient tensor per rank; treated as ≈2× model size for N ≥ 8.
-² ZeRO-3 replaces DDP's single gradient all-reduce with an all-gather of params (every forward *and* backward) plus a reduce-scatter of grads — the extra all-gather is the ~0.5× tax over plain DDP.
+¹ Ring all-reduce moves ≈2×(N−1)/N of the gradient tensor per rank, treated here as ≈2× model size for N ≥ 8.
+² ZeRO-3 replaces DDP's single gradient all-reduce with an all-gather of params (every forward *and* backward) plus a reduce-scatter of grads. That extra all-gather is the ~0.5× tax over plain DDP.
 
 ## Composition
 
 $$\text{world size} = DP \times TP \times PP \times CP \times EP$$
 
-Per-GPU memory ≈ $\dfrac{\text{sharded params+grad+opt}}{DP_{\text{shard}}} + \dfrac{\text{activations}}{TP \times CP \times PP}$ — see [[Pattern - 3D Parallelism Composition]] for the full device-mesh derivation.
+Per-GPU memory ≈ $\dfrac{\text{sharded params+grad+opt}}{DP_{\text{shard}}} + \dfrac{\text{activations}}{TP \times CP \times PP}$. The full device-mesh derivation is in [[Pattern - 3D Parallelism Composition]].
 
 | Dimension | Physical placement | Why |
 |---|---|---|
-| TP | intra-node ([[Concept - GPU Interconnects (NVLink, InfiniBand, RoCE)]], NVLink ~900 GB/s) | every layer pays a synchronous all-reduce; a slow link stalls every block |
+| TP | intra-node ([[Concept - GPU Interconnects (NVLink, InfiniBand, RoCE)]], NVLink ~900 GB/s) | synchronous all-reduce every layer; a slow link stalls every block |
 | SP | rides with TP | free activation-memory win, no independent placement decision |
-| PP | inter-node (InfiniBand/RoCE) OK | point-to-point and latency-tolerant if microbatch count is high enough |
+| PP | inter-node (InfiniBand/RoCE) OK | point-to-point, latency-tolerant with enough microbatches |
 | DP / ZeRO shard | outermost, spans the whole cluster | bandwidth-tolerant with prefetch/overlap |
-| CP | added only as sequence length demands | shards nothing until context length forces O(seq²) activation memory down |
+| CP | added only as sequence length demands | not needed until context length forces O(seq²) activation memory down |
 | EP | orthogonal, on the expert axis, combined as EP × DP | independent of the DP/TP/PP mesh; MoE-specific |
 
 ## Connections

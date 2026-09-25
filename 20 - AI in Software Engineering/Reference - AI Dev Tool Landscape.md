@@ -5,7 +5,7 @@ summary: "Date-stamped market map of AI coding tools as of mid-2026: category, o
 ---
 # Reference - AI Dev Tool Landscape
 
-All $ figures are press- or vendor-reported and volatile; ARR ≠ profit; "users" are typically all-time unless marked "paid"/"active." Re-verify before quoting past 2026. This table covers the tool layer — for the [[Concept - AI Coding Assistants|three-generation taxonomy]] these tools implement see that note; for whether *measured productivity* backs up any given scale claim see [[Reference - Developer Productivity Studies]] and [[Decision - Build vs Buy vs Wrap]] for the adopt-vs-build call this table feeds.
+Every $ figure here is press- or vendor-reported and volatile. ARR ≠ profit. "Users" are typically all-time unless marked "paid"/"active." Re-verify before quoting past 2026. This page covers the tool layer only. The [[Concept - AI Coding Assistants|three-generation taxonomy]] these tools implement has its own note. Whether *measured productivity* backs any given scale claim is in [[Reference - Developer Productivity Studies]], and the adopt-vs-build call this table feeds is [[Decision - Build vs Buy vs Wrap]].
 
 ## Incumbent / model-backed assistants
 
@@ -21,12 +21,12 @@ All $ figures are press- or vendor-reported and volatile; ARR ≠ profit; "users
 
 | Tool | Owner | Scale / funding | Tier | Date |
 |---|---|---|---|---|
-| Cursor (full case study: [[Breakdown - Cursor]]) | Anysphere (founded 2022) | ARR: ~$100M (Jan 2025) → ~$1B (Nov 2025) → ~$2B (Feb 2026) → ~$4B annualized (Jun 2026). Series D: $2.3B raise at $29.3B post-money (Nov 2025). **Acquired by SpaceX for $60B all-stock, announced Jun 16 2026, expected to close Q3 2026** — reportedly the largest acquisition of a VC-backed startup on record; SpaceX had held an option since Apr 21 2026 (walk-away fee ~$10B). Deal ties Cursor into SpaceX's post-xAI-merger AI push. | E1/E2 (press-reported ARR/valuation; deal terms company-confirmed) | Jun 2026 |
+| Cursor (full case study: [[Breakdown - Cursor]]) | Anysphere (founded 2022) | ARR: ~$100M (Jan 2025) → ~$1B (Nov 2025) → ~$2B (Feb 2026) → ~$4B annualized (Jun 2026). Series D: $2.3B raise at $29.3B post-money (Nov 2025). **Acquired by SpaceX for $60B all-stock, announced Jun 16 2026, expected to close Q3 2026**; reportedly the largest acquisition of a VC-backed startup on record; SpaceX had held an option since Apr 21 2026 (walk-away fee ~$10B). Deal ties Cursor into SpaceX's post-xAI-merger AI push. | E1/E2 (press-reported ARR/valuation; deal terms company-confirmed) | Jun 2026 |
 | Windsurf (formerly Codeium) | Split three ways in Jul 2025: OpenAI's $3B acquisition letter of intent collapsed (Microsoft IP-access dispute) → Google DeepMind hired CEO Varun Mohan + core team and licensed the tech non-exclusively (~$2.4B reported "reverse acqui-hire") → Cognition Labs (Devin) acquired the remaining product, brand, IP, and staff, all within ~72 hours | E2 (multiple outlets: TechCrunch, CNBC, Fortune) | Jul 2025 |
 
 ## Autonomous coding agents
 
-How these agents actually run day-to-day inside real engineering orgs — not just their benchmark scores — is covered in [[Deep Dive - Agentic Coding in Production]].
+How these agents run day to day inside real engineering orgs, beyond their benchmark scores, is in [[Deep Dive - Agentic Coding in Production]].
 
 | Tool | Owner | Scale claim | Tier | Date |
 |---|---|---|---|---|
@@ -35,7 +35,7 @@ How these agents actually run day-to-day inside real engineering orgs — not ju
 
 ## AI code review
 
-Mechanism, what these tools catch vs. miss, and the alert-fatigue failure mode are covered in [[Concept - AI Code Review]]; this table is funding/ownership only.
+Mechanism, what these tools catch and miss, and the alert-fatigue failure mode are in [[Concept - AI Code Review]]. This table is funding and ownership only.
 
 | Tool | Owner | Funding / scale | Tier | Date |
 |---|---|---|---|---|
@@ -48,16 +48,16 @@ Mechanism, what these tools catch vs. miss, and the alert-fatigue failure mode a
 | Model | Examples | Note |
 |---|---|---|
 | Per-seat subscription | GitHub Copilot (~$10-39/mo tiers) | Predictable cost; doesn't scale with usage intensity |
-| Usage-based (tokens) | Agent modes across most tools | Pass-through on model inference cost — see [[Concept - Unit Economics of LLM Products]]; heavy users can cost the vendor more than they pay |
+| Usage-based (tokens) | Agent modes across most tools | Pass-through on model inference cost (see [[Concept - Unit Economics of LLM Products]]); heavy users can cost the vendor more than they pay |
 | Hybrid | Cursor, most AI-native IDEs | Seat floor + usage ceiling; margins depend on [[Concept - Token Price Deflation]] outpacing usage growth |
 
-This tool-level view is a fraction of the macro number: see [[Reference - AI Market Sizing Claims]] for how analysts size the AI-coding-tools category overall, and [[Reference - Model Genealogy]] for which frontier model lineage sits underneath each wrapper's actual capability.
+The tool-level view is a fraction of the macro number. [[Reference - AI Market Sizing Claims]] covers how analysts size the whole AI-coding-tools category, and [[Reference - Model Genealogy]] shows which frontier model lineage sits under each wrapper's capability.
 
 ## Consolidation and churn risk (as of mid-2026)
 
-- **Vertical integration**: Cursor's Graphite acquisition (write + review) and the SpaceX acquisition (coding tool folded into a much larger AI/compute platform) both signal the market moving from point tools to owned pipelines — see [[Concept - Moats in the AI Application Layer]].
-- **Vendor discontinuity is not hypothetical**: the Windsurf split shows a well-funded, widely-adopted tool can be reorganized across three acquirers within days. Teams building workflows on a single vendor's specific agent harness carry real switching-cost risk — the general form of this is [[Concept - Vendor and Model Churn Risk]].
-- **No independent cross-vendor benchmark exists** for code-review quality or agent task-completion rate as of 2026 — every scale/quality claim in this table is vendor- or press-sourced (E1/E2); treat vendor-vs-vendor comparisons as marketing until an independent evaluator publishes one.
+- **Vertical integration.** Cursor buying Graphite (write + review) and SpaceX buying Cursor (a coding tool folded into a much larger AI/compute platform) both point to the market moving from point tools to owned pipelines. See [[Concept - Moats in the AI Application Layer]].
+- **Vendor discontinuity has already happened.** The Windsurf split showed a well-funded, widely adopted tool can be reorganized across three acquirers within days. Teams that build workflows on one vendor's agent harness carry real switching-cost risk; the general form is [[Concept - Vendor and Model Churn Risk]].
+- **There's no independent cross-vendor benchmark** for code-review quality or agent task-completion rate as of 2026. Every scale or quality claim in these tables is vendor- or press-sourced (E1/E2). Treat vendor-vs-vendor comparisons as marketing until an independent evaluator publishes one.
 
 ## Connections
 

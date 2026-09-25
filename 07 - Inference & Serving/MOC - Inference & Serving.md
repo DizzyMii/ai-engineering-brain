@@ -5,32 +5,34 @@ summary: "Map of Inference & Serving: request lifecycle, KV cache, batching, qua
 ---
 # MOC - Inference & Serving
 
-This domain owns everything that happens after a model is trained and someone actually sends it a request: tokenization through prefill, decode, sampling, and streaming back a response inside a latency and dollar budget. It matters because training happens once but serving happens on every request forever — a 2x gain in tokens-per-dollar here compounds across a company's entire query volume in a way no training-time optimization can match. Most of the domain's tricks fall out of one split: prefill is parallel and compute-bound, decode is sequential and memory-bandwidth-bound, and the GPU's HBM capacity — not its FLOPs — is usually the thing actually rationed. The notes here trace that constraint through the KV cache (the memory hog), batching and scheduling (how you share a GPU across concurrent requests), quantization and speculative decoding (how you buy back bandwidth and latency), and the frameworks (vLLM, SGLang, TensorRT-LLM, llama.cpp) that implement all of it.
+This domain covers everything after a model is trained and someone sends it a request: tokenization, prefill, decode, sampling, and streaming a response back inside a latency and dollar budget. Training happens once; serving happens on every request, forever. A 2x gain in tokens-per-dollar here compounds across a company's whole query volume in a way no training-time optimization can match.
+
+Most of the tricks follow from one split. Prefill is parallel and compute-bound, decode is sequential and memory-bandwidth-bound, and the thing usually rationed is the GPU's HBM capacity, not its FLOPs. The notes follow that constraint through the KV cache (the memory hog), batching and scheduling (sharing a GPU across concurrent requests), quantization and speculative decoding (buying back bandwidth and latency), and the frameworks that implement all of it: vLLM, SGLang, TensorRT-LLM, llama.cpp.
 
 **Start here, by level:**
-- **Surface:** [[Concept - The Inference Request Lifecycle]] — the path a generation request takes end-to-end: tokenize, prefill, decode loop, sample, detokenize, stream; every other note in this domain zooms into one leg of this trip.
-- **Core:** [[Concept - KV Cache]] — caching per-token K/V turns O(N²) attention recompute into O(N) reads, and its memory footprint is the single number that caps how many requests you can serve at once.
-- **Advanced:** [[Concept - PagedAttention]] — the virtual-memory-style paging fix that cut KV cache waste from 60-80% down to under 4%, and the mechanism underneath vLLM, SGLang, and most modern engines.
-- **Frontier:** [[Concept - Prefill-Decode Disaggregation]] — splitting prefill and decode onto separate GPU pools linked by a KV transfer so each phase can hit its own latency SLO instead of fighting over the same batch.
-- **Unicorn:** [[Lore - The KV Cache Fragmentation Crisis]] — the war story behind why PagedAttention had to be invented: memory wasted to fragmentation, not compute, capped GPU-served concurrency for years before anyone framed it as an OS problem.
+- **Surface:** [[Concept - The Inference Request Lifecycle]]: the end-to-end path of a generation request (tokenize, prefill, decode loop, sample, detokenize, stream). Every other note here zooms into one leg of it.
+- **Core:** [[Concept - KV Cache]]: caching per-token K/V turns O(N²) attention recompute into O(N) reads, and its memory footprint is the one number that caps how many requests you can serve at once.
+- **Advanced:** [[Concept - PagedAttention]]: the virtual-memory-style paging fix that cut KV cache waste from 60-80% to under 4%. vLLM, SGLang and most modern engines run on it.
+- **Frontier:** [[Concept - Prefill-Decode Disaggregation]]: prefill and decode on separate GPU pools linked by a KV transfer, so each phase hits its own latency SLO instead of fighting over one batch.
+- **Unicorn:** [[Lore - The KV Cache Fragmentation Crisis]]: why PagedAttention had to be invented. Memory lost to fragmentation, not compute, capped GPU-served concurrency for years before anyone framed it as an OS problem.
 
 ## The request lifecycle and its economics
 - [[Concept - The Inference Request Lifecycle]] — the path a generation request takes end-to-end: tokenize, prefill, decode loop, sample, detokenize, stream.
-- [[Concept - Prefill and Decode Phases]] — prefill is parallel and compute-bound; decode is sequential and memory-bandwidth-bound — the split that shapes all LLM serving design.
+- [[Concept - Prefill and Decode Phases]] — prefill is parallel and compute-bound, decode is sequential and memory-bandwidth-bound. This split shapes all LLM serving design.
 - [[Concept - Latency, Throughput, and Cost in LLM Serving]] — how TTFT, TPOT, and throughput trade off, and how to derive dollars-per-million-tokens from GPU price and decode throughput.
 - [[Reference - Inference Performance Math]] — formula and metric sheet: KV cache bytes, decode step time, max batch, TTFT/TPOT/throughput/goodput, and cost per token.
 
 ## Sampling and decoding
 - [[Concept - Sampling and Decoding Parameters]] — how raw logits become one token each step: penalties, temperature, truncation, and why identical params disagree across serving stacks.
 - [[Snippet - Sampling from Logits]] — reference implementation of the logits-to-token pipeline: repetition penalty, temperature, top-k/top-p/min-p, softmax, multinomial draw.
-- [[Concept - Advanced Samplers (min-p, Mirostat, DRY)]] — the community sampler zoo beyond temperature/top-p — min-p, Mirostat, DRY, XTC — the mechanism of each and the folklore of when it helps.
-- [[Concept - Constrained Decoding]] — masking invalid tokens' logits each decode step so generation is forced to conform to a JSON schema, regex, or CFG — a guarantee, not a hope.
+- [[Concept - Advanced Samplers (min-p, Mirostat, DRY)]] — the community sampler zoo beyond temperature/top-p (min-p, Mirostat, DRY, XTC): how each works and the folklore on when it helps.
+- [[Concept - Constrained Decoding]] — masking invalid tokens' logits each decode step so generation must conform to a JSON schema, regex, or CFG. A guarantee, not a hope.
 - [[Concept - Token Healing]] — fixing prompts that end mid-token: back up and re-constrain so the model re-chooses the natural BPE merge at the boundary.
 - [[Concept - Streaming Detokenization]] — reassembling correct UTF-8 text from a streamed token-ID sequence, where multi-byte characters and stop strings straddle token boundaries.
 - [[Concept - Nondeterminism in LLM Inference]] — why temperature 0 isn't deterministic on a real server: FP non-associativity, batch-variant kernels, and how batch-invariant kernels fix it.
 
 ## The KV cache and memory management
-- [[Concept - KV Cache]] — caching per-token K/V turns O(N²) attention recompute into O(N) reads — and its memory footprint caps serving concurrency.
+- [[Concept - KV Cache]] — caching per-token K/V turns O(N²) attention recompute into O(N) reads; its memory footprint caps serving concurrency.
 - [[Concept - PagedAttention]] — virtual-memory-style paging of the KV cache into fixed blocks, cutting KV waste from 60-80% to under 4% and enabling continuous batching.
 - [[Concept - Automatic Prefix Caching]] — reusing already-computed KV blocks across requests that share a leading prefix, so shared system prompts and chat history skip prefill entirely.
 - [[Concept - KV Cache Quantization]] — quantizing the KV cache (not the weights) to fit more context or concurrency, and why keys and values need different treatment.
@@ -54,7 +56,7 @@ This domain owns everything that happens after a model is trained and someone ac
 - [[Gotchas - Quantization Quality Loss]] — six ways quantized models lose real capability while perplexity looks fine, from proxy-metric traps to hardware precision gating.
 
 ## Specialized serving workloads
-- [[Concept - MoE Inference and Expert Parallelism]] — serving MoE models by sharding experts across GPUs with all-to-all routing — compute-cheap per token but memory- and communication-expensive to run.
+- [[Concept - MoE Inference and Expert Parallelism]] — serving MoE models by sharding experts across GPUs with all-to-all routing. Cheap in compute per token, expensive in memory and communication.
 - [[Concept - Multi-LoRA Serving]] — serving thousands of LoRA adapters over one shared base model via batched heterogeneous-adapter kernels and adapter paging, not N deployments.
 
 ## Serving frameworks and engines
@@ -73,4 +75,4 @@ This domain owns everything that happens after a model is trained and someone ac
 - [[MOC - Hardware & Systems]] — the HBM bandwidth, interconnect, and GPU generation facts that this domain's memory and quantization math treats as fixed constraints.
 - [[MOC - Training at Scale]] — the parallelism strategies (tensor, pipeline, expert) that MoE and multi-GPU serving repurpose from the training side of the stack.
 - [[MOC - Fine-Tuning]] — LoRA adapters are trained there and served here; multi-LoRA serving only exists because fine-tuning produces cheap, swappable deltas.
-- [[MOC - Production & Ops]] — this domain tunes the engine; that one keeps it alive under real traffic — monitoring, rollout, and incident response for the service this domain builds.
+- [[MOC - Production & Ops]] — this domain tunes the engine; that one keeps it alive under real traffic with monitoring, rollout, and incident response.

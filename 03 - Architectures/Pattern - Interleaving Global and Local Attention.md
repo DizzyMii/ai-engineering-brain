@@ -6,15 +6,15 @@ summary: "Alternate cheap local sliding-window layers with a minority of global 
 
 # Pattern - Interleaving Global and Local Attention
 
-> **Problem:** full attention in every layer is `O(N²)` compute and a KV cache that grows linearly with context in *every* layer, but making every layer local (sliding-window) throws away exact long-range recall. **Solution shape:** make most layers local and sprinkle in a minority of full-context global layers, so the model keeps long-range mixing while the KV cache is dominated by the few global layers.
+> **Problem:** full attention in every layer costs `O(N²)` compute and a KV cache that grows linearly with context in *every* layer. Making every layer local (sliding-window) throws away exact long-range recall. **Solution shape:** make most layers local and add a minority of full-context global layers. The model keeps long-range mixing, and the KV cache is dominated by the few global layers.
 
 ## Context & forces
 
-The forces in tension are recall, compute, and — the one that actually drives 2024–2025 designs — **KV-cache memory at serve time**.
+The forces are recall, compute, and KV-cache memory at serve time. Memory is what drives 2024–2025 designs.
 
-- **Full attention** ([[Concept - Attention Mechanism]]) gives exact recall over the whole context but costs `O(N²·d)` per layer and, worse for serving, keeps a per-layer [[Concept - KV Cache]] of `2·n_layers·n_kv_heads·d_head·N` elements. At long `N` and high batch, that cache — not the weights — is what fills the GPU.
-- **Sliding-window (local) attention** ([[Concept - Sparse and Sliding-Window Attention]]) caps each token's attention to the previous `w` tokens, so per-layer cache is bounded by `w` instead of `N`. But a token can only reach information more than `w` away by hopping through depth, which degrades exact copy/retrieval.
-- The insight that resolves the tension: **you do not need long-range mixing in every layer.** A small fraction of global layers is enough to move information across the full context, while the local majority does the cheap within-window work. This is the attention-side cousin of the SSM/attention split in [[Concept - Hybrid SSM-Attention Architectures]] — same "cheap-majority + a few expensive-recall layers" idea, different cheap primitive.
+- **Full attention** ([[Concept - Attention Mechanism]]) gives exact recall over the whole context but costs `O(N²·d)` per layer. Worse for serving, it keeps a per-layer [[Concept - KV Cache]] of `2·n_layers·n_kv_heads·d_head·N` elements. At long `N` and high batch, the cache fills the GPU before the weights do.
+- **Sliding-window (local) attention** ([[Concept - Sparse and Sliding-Window Attention]]) caps each token's attention to the previous `w` tokens, so per-layer cache is bounded by `w` instead of `N`. Information more than `w` away is reachable only by hopping through depth, which degrades exact copy/retrieval.
+- You don't need long-range mixing in every layer. A few global layers move information across the full context; the local majority does the cheap within-window work. It's the attention-side cousin of the SSM/attention split in [[Concept - Hybrid SSM-Attention Architectures]]: cheap majority plus a few expensive recall layers, with a different cheap primitive.
 
 ## The pattern
 
@@ -36,9 +36,9 @@ flowchart TB
     style G6 fill:#c1666b,stroke:#000,color:#fff
 ```
 
-Effective receptive field compounds two ways: within a run of local layers, depth stacks windows (`L` local layers reach `~L·w`); and every global layer resets reach to the entire context in a single hop. So the model never has a "blind spot" longer than one global-layer interval.
+Receptive field grows two ways. Within a run of local layers, depth stacks windows (`L` local layers reach `~L·w`). Each global layer resets reach to the entire context in one hop. So the model never has a blind spot longer than one global-layer interval.
 
-**KV-cache payoff, made concrete.** Take 40 layers, context `N = 32k`, window `w = 1k`.
+The KV-cache payoff for 40 layers, context `N = 32k`, window `w = 1k`:
 
 ```
 All-global:   40 layers × 32k  = 1,280k KV "rows" / token-dim
@@ -46,30 +46,30 @@ All-global:   40 layers × 32k  = 1,280k KV "rows" / token-dim
               → ~5× smaller KV cache, same context length
 ```
 
-That multiplier is the whole reason the pattern exists: it converts a linear-in-context memory cost into something close to constant for most of the stack.
+That multiplier is why the pattern exists: for most of the stack, memory goes from linear in context to near-constant.
 
 ## Implementation notes
 
-- **Ratio and window are the primary knobs.** Gemma 2 used a **1:1** local:global interleave with a **4096** window; Gemma 3 pushed to **5:1** with a **1024** window specifically to shrink the KV cache further for long-context serving. More global layers → better retrieval, larger cache; the ratio is where you spend your memory budget.
-- **Placement:** periodic (every `k`-th layer is global) is the common choice; a few designs front-load or back-load global layers. Periodic is simplest for KV-paging bookkeeping.
-- **Global and local layers can use different RoPE settings.** Gemma 3, for instance, uses a larger [[Concept - Rotary Position Embeddings (RoPE)]] base on the global layers (which must span the full context) than on the local layers (which only ever rotate within `w`) — a subtlety that silently breaks a port if you assume one base for all layers.
-- **Attention sinks interact with the window.** Streaming-style local attention needs to retain the first few tokens or it destabilizes; the [[Concept - Attention Sinks]] phenomenon is why StreamingLLM keeps a few "sink" tokens alongside the sliding window.
-- **Kernel support is the hidden cost.** [[Deep Dive - FlashAttention]] and mature serving stacks handle uniform full or uniform sliding-window attention well; a *mixed* per-layer pattern needs the engine to track two cache geometries and dispatch the right masked kernel per layer. This is real engineering, not a config flag.
+- **Ratio and window are the main knobs.** Gemma 2 used a **1:1** local:global interleave with a **4096** window. Gemma 3 moved to **5:1** with a **1024** window specifically to shrink the KV cache further for long-context serving. More global layers buys retrieval at the price of cache; the ratio is where you spend your memory budget.
+- **Placement:** periodic (every `k`-th layer is global) is the common choice. A few designs front-load or back-load global layers. Periodic keeps KV-paging bookkeeping simplest.
+- **Global and local layers can use different RoPE settings.** Gemma 3, for instance, uses a larger [[Concept - Rotary Position Embeddings (RoPE)]] base on the global layers, which must span the full context, than on the local layers, which only ever rotate within `w`. Assume one base for all layers and a port breaks silently.
+- **Attention sinks interact with the window.** Streaming-style local attention destabilizes unless it retains the first few tokens. The [[Concept - Attention Sinks]] phenomenon is why StreamingLLM keeps a few "sink" tokens alongside the sliding window.
+- **Kernel support is the hidden cost.** [[Deep Dive - FlashAttention]] and mature serving stacks handle uniform full or uniform sliding-window attention well. A *mixed* per-layer pattern needs the engine to track two cache geometries and dispatch the right masked kernel per layer. That's real engineering work, not a config flag.
 
 ## Tradeoffs & when NOT to use
 
-- **Retrieval-heavy / long-range-exact workloads** (needle-in-haystack, long-document QA, code with distant references) may need a richer global ratio; a 5:1 mix trades measurable long-range accuracy for memory. Test on *your* long-context task, not passkey retrieval, which passes far too early.
-- **KV-cache paging gets more complex:** two cache geometries per model complicate prefix caching and block allocation in the serving layer ([[Concept - KV Cache]]).
-- **When NOT to use:** short-context models (if `N ≲ w` the pattern buys nothing), or when your serving stack lacks mixed-pattern kernel support and the eng cost outweighs the memory win. For a from-scratch long-context model where recall is paramount and memory is not the binding constraint, uniform full attention is still the safe default. If your binding constraint is *training* compute rather than serving memory, an SSM/linear hybrid or logit-stabilized full attention ([[Concept - Attention Logit Stabilization (QK-Norm and Soft-Capping)]], as in the same Gemma line) may be the better lever.
+- **Retrieval-heavy or long-range-exact workloads** (needle-in-haystack, long-document QA, code with distant references) may need more global layers. A 5:1 mix trades measurable long-range accuracy for memory. Test on *your* long-context task; passkey retrieval passes far too early.
+- **KV-cache paging gets harder.** Two cache geometries per model complicate prefix caching and block allocation in the serving layer ([[Concept - KV Cache]]).
+- **When NOT to use:** short-context models (if `N ≲ w` the pattern buys nothing), or a serving stack without mixed-pattern kernel support where the eng cost outweighs the memory win. For a from-scratch long-context model where recall matters most and memory isn't the limit, uniform full attention is still the safe default. If *training* compute is your limit and serving memory isn't, an SSM/linear hybrid or logit-stabilized full attention ([[Concept - Attention Logit Stabilization (QK-Norm and Soft-Capping)]], as in the same Gemma line) may be the better lever.
 
 ## Known uses
 
-- **Gemma 2 (Google, 2024):** 1:1 local:global interleave, 4096-token sliding window — the design that popularized the pattern in an open model.
+- **Gemma 2 (Google, 2024):** 1:1 local:global interleave, 4096-token sliding window. The design that popularized the pattern in an open model.
 - **Gemma 3 (Google, 2025):** 5:1 local:global, 1024-token window, explicitly to cut long-context KV memory.
 - **OpenAI gpt-oss (2025):** alternates full-context and sliding-window (banded) attention layers, echoing GPT-3's original alternating dense/locally-banded scheme.
 - **Cohere Command (2025):** interleaves sliding-window layers with periodic full-attention layers for efficient long-context serving.
-- **Character.AI inference work (Shazeer's team, 2024):** local sliding-window attention with a small minority of global layers plus cross-layer KV sharing, reported to cut KV cache by ~20× (company engineering blog — treat the exact multiplier as company-claimed).
-- **Ancestors:** Longformer (Beltagy et al. 2020) window + global tokens, and Sparse Transformer (Child et al. 2019) alternating local/strided factorized attention.
+- **Character.AI inference work (Shazeer's team, 2024):** local sliding-window attention with a small minority of global layers plus cross-layer KV sharing, reported to cut KV cache by ~20× (company engineering blog; treat the exact multiplier as company-claimed).
+- **Ancestors:** Longformer (Beltagy et al. 2020) with window + global tokens, and Sparse Transformer (Child et al. 2019) with alternating local/strided factorized attention.
 
 ## Connections
 

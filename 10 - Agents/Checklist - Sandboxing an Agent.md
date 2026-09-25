@@ -7,62 +7,62 @@ summary: "Pre-flight hardening checklist before granting an agent real tool acce
 
 ## Isolation
 
-- [ ] Agent execution runs inside an isolated container or microVM (gVisor, Firecracker), never directly on a host with production access
-- [ ] No host filesystem is mounted into the sandbox; any mounted paths are read-only unless a specific write is required
-- [ ] The sandbox is single-use or fully reset between tasks — state from one run cannot leak into the next
+- [ ] Agent execution runs in an isolated container or microVM (gVisor, Firecracker), never directly on a host with production access
+- [ ] No host filesystem is mounted into the sandbox; any mounted path is read-only unless a specific write needs it
+- [ ] The sandbox is single-use or fully reset between tasks, so state from one run can't leak into the next
 
 ## Network egress
 
-- [ ] Outbound network access is default-deny with an explicit allowlist of domains/IPs the task actually needs
-- [ ] DNS resolution is scoped to the same allowlist — an open resolver is itself an exfiltration channel
-- [ ] Egress logging captures every outbound request the agent's tools make, not just the ones that "look" suspicious
+- [ ] Outbound network is default-deny, with an explicit allowlist of the domains/IPs the task needs
+- [ ] DNS resolution is limited to the same allowlist; an open resolver is an exfiltration channel in its own right
+- [ ] Egress logging captures every outbound request the agent's tools make, including the ones that don't "look" suspicious
 
 ## Credentials and identity
 
-- [ ] No long-lived or ambient credentials (API keys, SSH keys, cloud identity) sit in the sandbox environment by default
-- [ ] Every credential the agent uses is short-lived and scoped to exactly the tool/action that needs it, not a broad service account
-- [ ] Secrets are injected per-call and never echoed back into the transcript or logs in plaintext
+- [ ] No long-lived or ambient credentials (API keys, SSH keys, cloud identity) in the sandbox environment by default
+- [ ] Every credential the agent uses is short-lived and scoped to the one tool/action that needs it, never a broad service account
+- [ ] Secrets are injected per call and never echoed into the transcript or logs in plaintext
 
 ## Permission gating
 
 - [ ] Every tool the agent can call has an explicit, reviewed permission level (read-only / write / destructive)
-- [ ] Destructive or irreversible actions (delete, overwrite, send, pay, deploy) require a human-approval gate before execution, not just a log entry after
-- [ ] Actions with exfiltration potential (send email, post externally, write to a public endpoint) are gated the same as destructive ones
+- [ ] Destructive or irreversible actions (delete, overwrite, send, pay, deploy) need human approval before they run; a log entry afterward isn't enough
+- [ ] Actions that could exfiltrate (send email, post externally, write to a public endpoint) are gated like destructive ones
 
 ## Resource limits
 
-- [ ] CPU, memory, and wall-clock limits are enforced on the sandbox itself, independent of any application-level timeout
-- [ ] A hard token/cost budget per run is enforced and the run is killed, not just alerted on, past the ceiling
-- [ ] External API calls the agent triggers are rate-limited to cap blast radius on both cost and downstream systems
+- [ ] CPU, memory and wall-clock limits are enforced on the sandbox itself, separately from any application-level timeout
+- [ ] Each run has a hard token/cost budget, and the run is killed past the ceiling, not merely alerted on
+- [ ] External API calls the agent triggers are rate-limited to cap the blast radius on cost and on downstream systems
 
 ## Trust boundary
 
-- [ ] Every tool output — web page, file contents, email body, [[Concept - Model Context Protocol (MCP)|MCP]] resource — is treated as untrusted input that may carry embedded instructions, never as trusted context
-- [ ] Tool descriptions from third-party or unreviewed sources are diffed on every update before being re-trusted
+- [ ] Every tool output (web page, file contents, email body, [[Concept - Model Context Protocol (MCP)|MCP]] resource) is treated as untrusted input that may carry embedded instructions, never as trusted context
+- [ ] Tool descriptions from third-party or unreviewed sources are diffed on every update before being trusted again
 
 ## Audit and control
 
-- [ ] Every tool call is audit-logged with full arguments and results, tied to a run ID, before the call executes
-- [ ] A kill switch exists that can halt a running agent immediately, independent of the agent's own loop noticing anything is wrong
-- [ ] Logs are retained long enough to reconstruct a full incident timeline after the fact
+- [ ] Every tool call is audit-logged with full arguments and results, tied to a run ID, before it executes
+- [ ] A kill switch can halt a running agent immediately, whether or not the agent's own loop has noticed anything wrong
+- [ ] Logs are kept long enough to reconstruct a full incident timeline afterward
 
 ## Why these items
 
-**Isolation in a microVM, not a container alone**, is on this list because a compromised or hallucinating agent that runs a destructive shell command needs a blast-radius boundary that survives kernel-level exploits, not just process isolation — gVisor and Firecracker (the microVM behind AWS Lambda, Agache et al. 2020) both interpose a minimal kernel surface specifically because container namespacing alone has a long history of escape CVEs. The same reasoning applies doubly to [[Concept - Computer Use and GUI Grounding|computer-use agents]], whose action space (arbitrary clicks and keystrokes) can trigger anything the underlying OS permits, not just what an API surface exposes.
+**A microVM, not a container alone.** A compromised or hallucinating agent that runs a destructive shell command needs a blast-radius boundary that survives kernel-level exploits, and process isolation doesn't provide one. gVisor and Firecracker (the microVM behind AWS Lambda, Agache et al. 2020) both put a minimal kernel surface in the way because container namespacing has a long history of escape CVEs. This goes double for [[Concept - Computer Use and GUI Grounding|computer-use agents]]. Their action space (arbitrary clicks and keystrokes) can trigger anything the OS permits, beyond what an API surface exposes.
 
-**Network egress allowlisting** is the single highest-leverage item here because it is the one control that breaks the [[Concept - The Lethal Trifecta for Agents|exfiltration chain]] regardless of what went wrong upstream: an agent that read a poisoned document and decided to leak a secret still cannot succeed if it has nowhere to send the data.
+**Network egress allowlisting** is the highest-leverage item on the list. It's the one control that breaks the [[Concept - The Lethal Trifecta for Agents|exfiltration chain]] whatever went wrong upstream. An agent that read a poisoned document and decided to leak a secret still fails if it has nowhere to send the data.
 
-**No ambient credentials** is on this list because the default failure mode isn't a targeted attack, it's an agent with a broad service-account key that a prompt-injected instruction repurposes for something the task never asked for — scoping credentials per-call means the blast radius of any single compromised step is one action, not the whole account.
+**No ambient credentials.** The default failure isn't a targeted attack. It's an agent holding a broad service-account key that a prompt-injected instruction redirects to something the task never asked for. Scope credentials per call, and a single compromised step can do one action instead of anything the whole account allows.
 
-**Reviewed permission levels per tool** assumes each tool has already passed [[Checklist - Agent Tool Definition Review|its own definition review]] — side effects and idempotency documented at definition time are what make a runtime permission gate meaningful instead of guesswork.
+**Reviewed permission levels per tool** assume each tool already passed [[Checklist - Agent Tool Definition Review|its own definition review]]. Side effects and idempotency documented at definition time are what give a runtime permission gate something to check besides guesses.
 
-**Human approval on destructive/irreversible actions** is here because agents rationalize a wrong action the same way they rationalize a wrong belief: once a delete or send is queued as "the right next step," nothing in the loop stops to double-check unless a human is explicitly in the path.
+**Human approval on destructive or irreversible actions.** Agents rationalize a wrong action the same way they rationalize a wrong belief. Once a delete or send is queued as "the right next step", nothing in the loop double-checks it unless a human is explicitly in the path.
 
-**Enforced resource limits, not just monitored ones,** exist because a runaway agent doesn't announce itself before it burns the budget — the same rate-limiting discipline used to protect any external-facing system (see [[Concept - Rate Limiting and Quota Design]]) has to apply to the calls an agent triggers on your behalf.
+**Enforced resource limits, beyond monitoring.** A runaway agent doesn't announce itself before it burns the budget. The rate-limiting discipline that protects any external-facing system (see [[Concept - Rate Limiting and Quota Design]]) has to cover the calls an agent triggers on your behalf.
 
-**Treating every tool output as untrusted** is on this list because it's the one item teams skip once they trust a tool "because we wrote it" — but the content the tool *returns* (a search result, an email, a fetched page) is attacker-reachable even when the tool code itself is safe, and that content is exactly what carries the [[Concept - Prompt Injection|injection]].
+**Every tool output is untrusted.** Teams skip this once they trust a tool "because we wrote it". The tool code can be safe while the content it *returns* (a search result, an email, a fetched page) is attacker-reachable, and that content is what carries the [[Concept - Prompt Injection|injection]].
 
-**A kill switch independent of the agent's own loop** exists because a runaway or looping agent cannot be trusted to notice it should stop — the same failure mode documented in [[Gotchas - Agents in Production]] means the halt mechanism has to live outside the thing that's malfunctioning.
+**A kill switch outside the agent's own loop.** A runaway or looping agent can't be trusted to notice it should stop. Given the failure modes in [[Gotchas - Agents in Production]], the halt mechanism has to live outside the thing that's malfunctioning.
 
 ## Connections
 

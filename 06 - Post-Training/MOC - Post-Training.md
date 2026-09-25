@@ -6,7 +6,7 @@ summary: "Map of Post-Training: SFT, RLHF, DPO/GRPO, reward hacking, and the pip
 
 # MOC - Post-Training
 
-This domain covers everything that happens after pretraining produces a raw next-token predictor: the staged pipeline — SFT, then preference optimization, then optional RLVR, then distillation or merging — that turns it into a model people can actually talk to, ship, and trust. It matters because post-training is where most of a frontier lab's differentiation now lives; pretraining recipes have largely converged, but how a lab aligns, rewards, and shapes a model's behavior is where the DeepSeek-R1, Tulu 3, and GPT-4o-sycophancy stories all play out. The notes here span the full toolchain: SFT and loss masking, RLHF's four-model machinery and its instabilities, the DPO family that replaced RLHF for most shops, and GRPO/RLVR — the technique behind 2025-2026's reasoning-training paradigm. Every method here fails in a specific, documented way — reward hacking, entropy collapse, sycophancy, length bias — and knowing the failure mode is as load-bearing as knowing the algorithm. The question this domain answers: *given a pretrained base model and a target behavior, which post-training recipe gets you there, and what will it break if you're not watching?*
+This domain covers everything after pretraining hands you a raw next-token predictor. The staged pipeline (SFT, then preference optimization, then optional RLVR, then distillation or merging) turns it into a model people can talk to, ship, and trust. Most of a frontier lab's differentiation now lives here. Pretraining recipes have largely converged; how a lab aligns, rewards, and shapes behavior is where the DeepSeek-R1, Tulu 3, and GPT-4o-sycophancy stories play out. The notes span the full toolchain: SFT and loss masking, RLHF's four-model machinery and its instabilities, the DPO family that replaced RLHF for most shops, and GRPO/RLVR, the technique behind 2025-2026's reasoning-training paradigm. Every method here fails in a specific, documented way (reward hacking, entropy collapse, sycophancy, length bias), and you need the failure mode as much as the algorithm. The question this domain answers: *given a pretrained base model and a target behavior, which post-training recipe gets you there, and what will it break if you're not watching?*
 
 ## Start here
 
@@ -22,7 +22,7 @@ This domain covers everything that happens after pretraining produces a raw next
 - [[Concept - Supervised Fine-Tuning (SFT)]] — behavior-cloning a base model on curated (prompt, response) pairs via next-token cross-entropy computed only on completions.
 - [[Concept - Loss Masking and Sequence Packing]] — the masking and packing mechanics that make SFT both correct (loss only on completions) and efficient (many examples per sequence, no cross-contamination).
 - [[Snippet - Loss Masking a Chat Dataset]] — tokenizes a multi-turn chat example and builds a label mask so cross-entropy loss lands only on assistant tokens and EOS.
-- [[Gotchas - Chat Template Bugs]] — the silent, no-error-thrown bugs in template application — double BOS, template drift — that quietly degrade a shipped model.
+- [[Gotchas - Chat Template Bugs]] — the silent, no-error-thrown bugs in template application — double BOS, template drift — that degrade a shipped model without warning.
 
 ## Preference optimization: DPO and its family
 
@@ -37,7 +37,7 @@ This domain covers everything that happens after pretraining produces a raw next
 ## RLHF core: reward models, PPO, KL control
 
 - [[Concept - Reward Models]] — a scalar RM trained on pairwise human preferences via the Bradley-Terry model, and the calibration biases it inherits from that data.
-- [[Concept - PPO for Language Models]] — how the clipped surrogate, GAE, and a value head map onto autoregressive generation, and why its implementation details are load-bearing.
+- [[Concept - PPO for Language Models]] — how the clipped surrogate, GAE, and a value head map onto autoregressive generation, and why its implementation details decide whether it works.
 - [[Concept - KL Control in RLHF]] — why beta times KL-to-reference is RLHF's master dial: the reward-KL frontier, adaptive schedules, the k1/k2/k3 estimators.
 - [[Deep Dive - RLHF End to End]] — the SFT/RM/PPO pipeline behind InstructGPT and ChatGPT: four resident models, a KL-regularized reward, and real training instability.
 - [[Gotchas - RLHF Training Instabilities]] — RLHF/DPO/GRPO failure modes ordered by pain: reward hacking, entropy collapse, value divergence, DPO degeneracy, length explosion, silent setup bugs.
@@ -51,7 +51,7 @@ This domain covers everything that happens after pretraining produces a raw next
 - [[Concept - Rejection Sampling and Expert Iteration]] — sample N candidates, keep the best by reward or verifier, SFT on the winners, repeat: RL-flavored post-training without RL.
 - [[Concept - Process and Outcome Reward Models]] — scoring a whole answer (ORM) versus scoring every reasoning step (PRM), and why RLVR at scale mostly displaced PRMs anyway.
 - [[Concept - Reasoning Training and Long Chain-of-Thought]] — RL on verifiable rewards turns models into extended-thinking reasoners, making think-tokens a scaling axis of their own.
-- [[Concept - Spurious Rewards and RLVR Failure Modes]] — RLVR can lift some base models even with random or wrong rewards, because RL elicits latent behavior rather than teaching new reasoning.
+- [[Concept - Spurious Rewards and RLVR Failure Modes]] — RLVR can lift some base models even with random or wrong rewards, because RL elicits latent behavior instead of teaching new reasoning.
 - [[Concept - Entropy Collapse and Exploration in RL Fine-Tuning]] — on-policy RL fine-tuning bleeds policy entropy and kills exploration; managing the entropy budget is the core RL-tuning skill.
 - [[Breakdown - DeepSeek-R1]] — DeepSeek-AI's Jan 2025 open reasoning model that matched o1 on math/code using GRPO-only RL, proof that RL alone can drive reasoning gains.
 

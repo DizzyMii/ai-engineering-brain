@@ -5,48 +5,52 @@ summary: "End-to-end procedure for valid, schema-conforming LLM output: mechanis
 ---
 # Playbook - Reliable Structured Output
 
-> **Goal:** get an LLM to emit valid, schema-conforming JSON (or another structured format) at a reliability you can build a pipeline on top of — not "usually works in the demo." **When to run this:** any time a downstream system — a database write, a function dispatch, a UI render — parses the model's output programmatically. **Prerequisites:** a concrete schema (JSON Schema, a pydantic/zod model, or a fully-populated typed example), a parser, and a holdout set of representative inputs to measure against.
+> **Goal:** get an LLM to emit valid, schema-conforming JSON (or another structured format) reliably enough to build a pipeline on, which is a higher bar than "usually works in the demo." **When to run this:** whenever a downstream system (a database write, a function dispatch, a UI render) parses the model's output in code. **Prerequisites:** a concrete schema (JSON Schema, a pydantic/zod model, or a fully populated typed example), a parser, and a holdout set of representative inputs to measure against.
 
 ## Steps
 
-1. **Choose a mechanism sized to your reliability bar.**
-   Action: rank the four available mechanisms by strength and pick the cheapest one that clears your error budget. Weakest to strongest: (a) plain prompt + described schema — no API support required, works on any model, but only ~85-98% valid-JSON rate depending on model and schema complexity; (b) provider-native structured output (OpenAI's `response_format` with a `json_schema`, Anthropic's forced [[Concept - Tool Use and Function Calling|tool use]]) — the provider enforces the shape server-side, pushing syntactic validity close to 100%; (c) grammar-constrained decoding ([[Concept - Constrained Decoding]]) — masks invalid tokens at every decoding step so output is syntactically valid *by construction*, not by training, the strongest guarantee available; (d) tool/function calling used purely as a JSON transport, forcing a single named tool — routes generation through whatever tool-call machinery the model was most heavily post-trained on, and is what most production teams reach for first because it's both robust and framework-supported everywhere.
-   Expected observation: your error budget picks the tier. A one-off internal script tolerates (a); a customer-facing pipeline that fails loudly on a bad parse wants (b) or (d); a system with no repair loop available at all (an embedded agent, a single-shot batch job) wants the hard guarantee of (c).
-   What deviation means: reaching for grammar-constrained decoding on a low-stakes prototype means paying setup cost and content-distortion risk (see Tradeoffs below) for a guarantee you don't need yet.
+1. **Pick a mechanism that matches your reliability bar.**
+   Action: rank the four mechanisms by strength and take the cheapest one that fits your error budget. From weakest to strongest:
+   (a) Plain prompt plus a described schema. Needs no API support and works on any model, but gives only ~85-98% valid JSON depending on model and schema complexity.
+   (b) Provider-native structured output (OpenAI's `response_format` with a `json_schema`, Anthropic's forced [[Concept - Tool Use and Function Calling|tool use]]). The provider enforces the shape server-side, which gets syntactic validity close to 100%.
+   (c) Grammar-constrained decoding ([[Concept - Constrained Decoding]]). Invalid tokens are masked at every decoding step, so output is syntactically valid *by construction*, not by training. It's the strongest guarantee available.
+   (d) Tool/function calling used purely as a JSON transport, forcing one named tool. Generation goes through whatever tool-call machinery the model got the most post-training on. Most production teams reach for this first, since it's robust and every framework supports it.
+   Expected observation: the error budget picks the tier. A one-off internal script can live with (a). A customer-facing pipeline that fails loudly on a bad parse wants (b) or (d). A system with no repair loop at all (an embedded agent, a single-shot batch job) wants the hard guarantee of (c).
+   What deviation means: grammar-constrained decoding on a low-stakes prototype costs setup time and risks content distortion (see Tradeoffs below) for a guarantee you don't need yet.
 
-2. **Construct the prompt to make compliance the path of least resistance.**
-   Action: state the exact schema in the prompt (paste the real JSON Schema, or a fully-populated typed example of the target object), include one or two few-shot output examples in the identical target format, and — if the API supports it — prefill the assistant turn with the opening brace ([[Snippet - Prefilling the Assistant Turn]]) so the model continues an already-open turn ([[Concept - Chat Templates and Special Tokens]]) instead of deciding from scratch whether to explain itself first.
-   Expected observation: with prefill, the first token you get back is whatever follows `{` — no "Sure, here's the JSON:" preamble to strip.
-   What deviation means: if preamble still appears after prefilling, the provider likely doesn't support raw assistant-turn continuation (OpenAI's chat API does not; Anthropic's Messages API does) — fall back to `response_format`/tool-calling plus a hard "output only the JSON object, no commentary" instruction, and strip fences defensively regardless.
+2. **Write the prompt so compliance is the easiest path.**
+   Action: put the exact schema in the prompt (paste the real JSON Schema, or a fully populated typed example of the target object) and include one or two few-shot outputs in the identical format. If the API allows it, prefill the assistant turn with the opening brace ([[Snippet - Prefilling the Assistant Turn]]). The model then continues an already-open turn ([[Concept - Chat Templates and Special Tokens]]) instead of deciding from scratch whether to explain itself first.
+   Expected observation: with prefill, the first token back is whatever follows `{`, with no "Sure, here's the JSON:" preamble to strip.
+   What deviation means: if you still get preamble after prefilling, the provider probably doesn't support raw assistant-turn continuation (OpenAI's chat API doesn't; Anthropic's Messages API does). Fall back to `response_format` or tool calling plus a hard "output only the JSON object, no commentary" instruction, and strip fences defensively anyway.
 
-3. **Set decoding parameters for the mechanism you picked.**
-   Action: under prompt-only or provider-JSON-mode reliability (tiers a/b), keep [[Concept - Sampling and Decoding Parameters|temperature]] low (0-0.3) — sampling noise is the only thing standing between you and a clean parse. Under grammar-constrained decoding (tier c), you can safely run a higher temperature for content diversity, because the constraint machinery guarantees syntactic validity regardless of which token the sampler ends up picking.
-   Expected observation: malformed-output rate drops measurably as temperature drops under tiers (a)/(b); it stays flat under tier (c) because the failure mode there is never syntactic.
-   What deviation means: sporadic broken JSON at high temperature under tier (a) is expected behavior, not a model bug — either lower temperature or move up a tier rather than retrying blind.
+3. **Set decoding parameters for your mechanism.**
+   Action: under prompt-only or provider JSON mode (tiers a/b), keep [[Concept - Sampling and Decoding Parameters|temperature]] low (0-0.3). Sampling noise is the only thing between you and a clean parse. Under grammar-constrained decoding (tier c) you can safely raise temperature for content diversity, because the constraint guarantees syntactic validity whatever token the sampler picks.
+   Expected observation: under tiers (a)/(b), the malformed-output rate drops measurably as temperature drops. Under tier (c) it stays flat, because failures there are never syntactic.
+   What deviation means: occasional broken JSON at high temperature under tier (a) is expected, not a model bug. Lower the temperature or move up a tier; don't retry blind.
 
-4. **Validate, and on failure, repair — bounded.**
-   Action: parse the raw response against your schema with pydantic (Python) or zod (TypeScript). On a parse failure, issue a second call that includes the original malformed output plus the literal parser-error string, and ask the model to fix only what's broken; cap total repair attempts (two is a common default) so a pathological input can't loop indefinitely.
-   Expected observation: single-shot valid-parse rate of 85-98% typically climbs to 99%+ after one bounded repair pass, at the cost of one extra round trip on the failing minority.
-   What deviation means: if repair attempts are hitting the cap on more than a small fraction of traffic, the schema or prompt is under-specified — fix Step 2, don't just raise the cap.
+4. **Validate, and repair on failure, with a cap.**
+   Action: parse the raw response against your schema with pydantic (Python) or zod (TypeScript). On a parse failure, make a second call with the original malformed output and the literal parser error, and ask the model to fix only what's broken. Cap total repair attempts (two is a common default) so a pathological input can't loop forever.
+   Expected observation: a single-shot valid-parse rate of 85-98% typically rises to 99%+ after one bounded repair pass, at the cost of one extra round trip for the failing minority.
+   What deviation means: if more than a small fraction of traffic hits the repair cap, the schema or prompt is under-specified. Fix Step 2 instead of raising the cap.
 
 ## Verification
 
-Track the *measured* valid-parse rate on a holdout set of representative inputs — not a handful of examples eyeballed while writing the prompt. Log it per prompt version alongside field-level accuracy ([[Concept - Prompt Evaluation and Versioning]]): an object that parses cleanly but has a hallucinated field, a wrong enum value, or a null where a real value belonged is a silent failure that schema validation alone never catches. Parseability is necessary, not sufficient — you need both numbers before trusting the pipeline in production.
+Track the *measured* valid-parse rate on a holdout set of representative inputs, not a few examples you eyeballed while writing the prompt. Log it per prompt version along with field-level accuracy ([[Concept - Prompt Evaluation and Versioning]]). An object that parses cleanly but has a hallucinated field, a wrong enum value, or a null where a real value belonged is a silent failure schema validation never catches. Parseability is necessary but not sufficient. You need both numbers before you trust the pipeline in production.
 
 ## When it goes wrong
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Output wrapped in ` ```json ... ``` ` fences | Chat-trained habit of formatting code as markdown | Instruct "no code fences," strip them defensively before parsing regardless ([[Gotchas - Prompt Formatting and Tokenization]]) |
-| Trailing comma before a closing `}`/`]` | Model imitates a common but invalid JSON pattern from training data | Strip trailing commas with a regex pre-pass, or fall back to a lenient parser |
-| Missing or silently hallucinated fields | Schema under-specified, or few-shot examples didn't cover that field | Add explicit per-field descriptions plus a "use null if absent" instruction |
-| Enum value drift ("Yes" instead of `true`, an invented category) | Allowed values weren't enumerated verbatim in the prompt | List every allowed enum value literally in the schema text, not just its type |
-| Unescaped quotes inside string values | Model doesn't reliably self-escape embedded quotes | Ask for explicit escaping, and run a JSON-repair library as a pre-parse pass before failing the record |
-| Truncated object at `max_tokens` | Output limit set below the schema's actual token footprint | Raise `max_tokens` to comfortably exceed the largest expected object, or stream and detect truncation, then retry with a higher cap |
+| Output wrapped in ` ```json ... ``` ` fences | Chat-trained habit of formatting code as markdown | Instruct "no code fences" and strip them defensively before parsing anyway ([[Gotchas - Prompt Formatting and Tokenization]]) |
+| Trailing comma before a closing `}`/`]` | Model copies a common but invalid JSON pattern from training data | Strip trailing commas with a regex pre-pass, or fall back to a lenient parser |
+| Missing or silently hallucinated fields | Schema under-specified, or few-shot examples didn't cover that field | Add explicit per-field descriptions and a "use null if absent" instruction |
+| Enum value drift ("Yes" instead of `true`, an invented category) | Allowed values weren't listed verbatim in the prompt | List every allowed enum value literally in the schema text, beyond its type |
+| Unescaped quotes inside string values | Model doesn't reliably escape embedded quotes itself | Ask for explicit escaping, and run a JSON-repair library as a pre-parse pass before failing the record |
+| Object truncated at `max_tokens` | Output limit below the schema's actual token footprint | Raise `max_tokens` well above the largest expected object, or stream, detect truncation and retry with a higher cap |
 
 ## Tradeoffs
 
-Constrained decoding (tier c) guarantees syntax, never semantics — a grammar forces a well-formed object with correct field names and still lets the model fill fields with wrong or hallucinated *values*, and narrowing the token distribution onto a grammar path can measurably distort content quality and log-probabilities relative to unconstrained generation. Tool-calling (tier d) is the most robust choice in practice because it rides the model's dedicated tool-call post-training, but it adds a round trip's worth of latency and, on some providers, a small cost premium versus a raw completion. Don't default to the heaviest mechanism — pick the cheapest tier that clears the reliability bar measured in Verification above.
+Constrained decoding (tier c) guarantees syntax and never semantics. The grammar forces a well-formed object with the right field names, and the model can still fill the fields with wrong or hallucinated *values*. Squeezing the token distribution onto a grammar path can also measurably distort content quality and log-probabilities compared with unconstrained generation. Tool calling (tier d) is the most robust in practice because it uses the model's dedicated tool-call post-training, but it adds a round trip of latency and, on some providers, a small cost premium over a raw completion. Don't default to the heaviest mechanism. Pick the cheapest tier that clears the reliability bar you measured under Verification.
 
 ## Connections
 - [[Concept - Constrained Decoding]] — the grammar-masking algorithm behind tier (c); read it before promising "guaranteed valid" to a stakeholder.

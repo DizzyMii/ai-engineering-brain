@@ -6,9 +6,9 @@ summary: "A minimal runnable PyTorch FSDP2 training step: per-block fully_shard 
 
 # Snippet - FSDP Minimal Setup
 
-**What it does:** wraps a toy transformer's blocks with PyTorch's FSDP2 (`fully_shard`) API, applies a mixed-precision policy that computes in bf16 but reduces gradients in fp32, adds activation checkpointing per block, and runs one training step — demonstrating the full [[Concept - Fully Sharded Data Parallel (FSDP)]] wiring pattern used by TorchTitan-style trainers.
-**Dependencies:** `torch>=2.4` (FSDP2's `fully_shard` composable API), run under `torchrun`. No other libraries required.
-**Expected output:** per-step loss printed on rank 0, decreasing across a handful of toy steps; peak allocated memory per GPU roughly `1/world_size` of the single-GPU baseline (checked with `torch.cuda.max_memory_allocated()`).
+**What it does:** wraps a toy transformer's blocks with PyTorch's FSDP2 (`fully_shard`) API, sets a mixed-precision policy that computes in bf16 and reduces gradients in fp32, adds per-block activation checkpointing, and runs a training step. It's the full [[Concept - Fully Sharded Data Parallel (FSDP)]] wiring that TorchTitan-style trainers use.
+**Dependencies:** `torch>=2.4` (FSDP2's `fully_shard` composable API), run under `torchrun`. Nothing else.
+**Expected output:** per-step loss printed on rank 0, falling over a handful of toy steps. Peak allocated memory per GPU roughly `1/world_size` of the single-GPU baseline (checked with `torch.cuda.max_memory_allocated()`).
 
 ```python
 # train_fsdp2.py — launch with:
@@ -83,10 +83,10 @@ if __name__ == "__main__":
 
 ## Why it's written this way
 
-- **Wrap per block, not the whole model, first.** `fully_shard` applied to a leaf module means only that unit's all-gather has to complete before it runs — wrapping the entire model as one FSDP unit forces a single giant all-gather that can't overlap with anything and peaks at full-model memory during it, defeating the entire point of sharding. The root-level `fully_shard` call at the end just makes the top-level module (embedding, final head, and residual buffers) participate in the same sharding scheme; the per-block calls are what create overlap opportunity.
-- **Reduce in fp32, compute in bf16.** `param_dtype=bf16` gets you the throughput of low-precision matmuls (see [[Concept - Mixed Precision Training]]); `reduce_dtype=fp32` is not optional at scale — reducing gradients in bf16 across hundreds of ranks compounds rounding error into a measurable loss-curve difference versus fp32 reduction, and the extra cost is one upcast per bucket, not a real bottleneck.
-- **Checkpoint before sharding, in that order.** `checkpoint_wrapper` needs to see the block's real forward/backward to record what to recompute; wrapping it before `fully_shard` keeps the recomputation logic local to the block rather than fighting FSDP's parameter-gather/free lifecycle. This mirrors [[Concept - Data Parallelism and ZeRO|ZeRO-3]]'s own memory-for-compute trade, layered on top of the sharding trade.
-- **Sharded state dicts, not full ones, for checkpointing.** This snippet doesn't show the save path, but the corresponding load/save must use `torch.distributed.checkpoint` (DCP) rather than materializing a full unsharded `state_dict()` on rank 0 — see [[Concept - Distributed Checkpointing]] — because gathering a 70B+ model's full fp32 state onto one rank to write it out is exactly the OOM you sharded to avoid in the first place.
+- **Wrap per block first, then the root.** With `fully_shard` on a leaf module, only that unit's all-gather has to finish before it runs. Wrap the whole model as one FSDP unit and you get a single giant all-gather that can't overlap with anything and peaks at full-model memory while it runs, which defeats the point of sharding. The per-block calls create the overlap. The root-level `fully_shard` at the end just pulls the top-level module (embedding, final head, residual buffers) into the same sharding scheme.
+- **Compute in bf16, reduce in fp32.** `param_dtype=bf16` gets you low-precision matmul throughput (see [[Concept - Mixed Precision Training]]). `reduce_dtype=fp32` is not optional at scale: reducing gradients in bf16 across hundreds of ranks compounds rounding error into a measurable loss-curve difference against fp32 reduction. The cost is one upcast per bucket, which isn't a real bottleneck.
+- **Checkpoint before sharding.** `checkpoint_wrapper` has to see the block's real forward/backward to record what to recompute. Applying it before `fully_shard` keeps the recomputation local to the block, so it doesn't fight FSDP's parameter gather/free lifecycle. It's the same memory-for-compute trade as [[Concept - Data Parallelism and ZeRO|ZeRO-3]], stacked on the sharding trade.
+- **Save sharded state dicts, never full ones.** The snippet skips the save path, but the matching load/save must go through `torch.distributed.checkpoint` (DCP) instead of materializing a full unsharded `state_dict()` on rank 0 (see [[Concept - Distributed Checkpointing]]). Gathering a 70B+ model's full fp32 state onto one rank to write it out is the OOM you sharded to avoid.
 
 ## Connections
 - [[Concept - Fully Sharded Data Parallel (FSDP)]] — the mechanism (all-gather/free per unit, wrapping-policy granularity, FSDP1 vs FSDP2) that this snippet is a minimal instance of.

@@ -6,9 +6,9 @@ summary: "Evidence-tiered catalog of AI-coding productivity, quality, and securi
 
 # Reference - Developer Productivity Studies
 
-_As of 2026. Effect sizes below are NOT comparable across differing tasks and populations — do not average them into one number. Read the [reading guide](#reading-guide) footnotes before quoting any row._
+_As of 2026. Effect sizes below are NOT comparable across different tasks and populations, so don't average them into one number. Read the [reading guide](#reading-guide) footnotes before quoting any row._
 
-## Productivity — controlled / randomized
+## Productivity: controlled / randomized
 
 | Study | Design | N | Task / population | Effect | Tier |
 |---|---|---|---|---|---|
@@ -17,7 +17,7 @@ _As of 2026. Effect sizes below are NOT comparable across differing tasks and po
 | GitHub–Accenture 2024 [^funder] | Enterprise deployment | ~thousands | Enterprise devs | ~80% retention; higher PR throughput | E2 (company-claimed) |
 | **METR 2025** [^pop] | **Within-subject RCT** | 16 devs, 246 tasks | Experienced OSS maintainers on mature repos they'd owned ~5 yrs | **−19% (i.e. 19% SLOWER)** | **E3** (independent, randomized) |
 
-Peng's +55.8% and METR's −19% are the two poles of the whole field. They do not contradict: the first is juniors/freelancers on a greenfield toy task; the second is experts on familiar production code. The effect is a function of task type and population, not a single constant. Prose interpretation lives in [[Breakdown - GitHub Copilot's Measured Productivity Impact]] and [[Breakdown - The METR Developer Slowdown RCT]].
+Peng's +55.8% and METR's −19% are the two poles of the field, and they don't contradict. One is juniors and freelancers on a greenfield toy task. The other is experts on familiar production code. The effect depends on task type and population; there's no single constant. Interpretation is in [[Breakdown - GitHub Copilot's Measured Productivity Impact]] and [[Breakdown - The METR Developer Slowdown RCT]].
 
 ## Quality & delivery
 
@@ -27,7 +27,7 @@ Peng's +55.8% and METR's −19% are the two poles of the whole field. They do no
 | GitClear 2024–25 [^funder] | Git history analysis | 211M+ changed lines (2020–2024) | Churn **3.1%→5.7%**; copy-paste **8.3%→12.3%**; refactoring **25%→<10%**; 8x duplicated blocks in 2024 | E2 (single-vendor, methodology debated) |
 | GitHub "passes tests" claim [^funder] | Single study | — | Copilot code "53.2% more likely to pass unit tests" (sometimes misreported as 56%) | E2 (single study; read against the oracle caveat) |
 
-Detail and mechanism in [[Concept - AI's Effect on Code Quality and Security]]. Note the GitClear churn: an earlier report *projected* ~7% for 2024; measured actual was 5.7%.
+Detail and mechanism in [[Concept - AI's Effect on Code Quality and Security]]. On GitClear churn: an earlier report *projected* ~7% for 2024, and the measured figure was 5.7%.
 
 ## Security
 
@@ -43,21 +43,21 @@ Detail and mechanism in [[Concept - AI's Effect on Code Quality and Security]]. 
 | SWE-bench Verified | Patch resolves a real GitHub issue (hidden tests) | ~70–80%+ on Verified, but ≥59% of a hard subset had flawed tests; **retired by OpenAI Feb 2026** | E2 |
 | SWE-bench Pro | Contamination-resistant successor | Same models drop to ~23–58% | E2 |
 
-A benchmark score is a *model + scaffold + prompt* tuple, not a productivity measurement — see [[Breakdown - SWE-bench]]. Benchmark competence overstates deployed reliability, the [[Concept - The Capability-Reliability Gap]].
+A benchmark score belongs to a *model + scaffold + prompt* tuple and doesn't measure productivity (see [[Breakdown - SWE-bench]]). Benchmark competence overstates deployed reliability; that's [[Concept - The Capability-Reliability Gap]].
 
 ## Enterprise / self-report
 
-Vendor ROI surveys (developers report saving 20–55% of time) are **E1/E2** and, per METR's finding that developers mis-estimate their own speedup by ~40 points, measure *perception*, not output. Treat any "our engineers feel faster" metric as evidence of adoption, not productivity — the core warning of [[Concept - The Evaluation Gap]].
+Vendor ROI surveys (developers report saving 20–55% of time) are **E1/E2**. METR found developers mis-estimate their own speedup by ~40 points, so these surveys measure *perception*, not output. Read any "our engineers feel faster" metric as evidence of adoption, not productivity. That's the core warning of [[Concept - The Evaluation Gap]].
 
 ## Reading guide
 
-Before quoting any row, classify it on four axes — nearly all large *positive* effects are greenfield, junior, speed-metric, and vendor-affiliated:
+Before quoting any row, classify it on four axes. Nearly all large *positive* effects are greenfield, junior, speed-metric and vendor-affiliated.
 
 [^task]: **Task type.** Greenfield/synthetic (Peng's HTTP server) vs mature high-context production code (METR). Gains shrink or reverse as context grows.
-[^pop]: **Population.** Juniors/newcomers gain most; senior devs on familiar code can lose. METR sits at the population where every prior study found the *smallest* benefit — which is why its slowdown is not a contradiction of the RCTs above.
-[^funder]: **Funder.** Vendor-affiliated (GitHub, Microsoft, GitClear) vs independent (METR, Stanford, academic). Publication and task-selection bias run one direction. Apply the discipline of [[Concept - Statistical Rigor in Model Evaluation]].
+[^pop]: **Population.** Juniors/newcomers gain most; senior devs on familiar code can lose. METR sits at the population where every prior study found the *smallest* benefit, so its slowdown doesn't contradict the RCTs above.
+[^funder]: **Funder.** Vendor-affiliated (GitHub, Microsoft, GitClear) vs independent (METR, Stanford, academic). Publication and task-selection bias both run one way. Apply the discipline of [[Concept - Statistical Rigor in Model Evaluation]].
 
-Fourth axis — **metric**: speed vs PRs/tasks vs code quality vs delivery stability vs security. A study can be positive on one and negative on another *simultaneously* (fast to write, costly to maintain); never collapse them. Date-stamp everything (as of 2026); effect sizes decay as tools and models change. For building your own eval instead of borrowing these, see [[Deep Dive - Designing an Eval Harness]]; for how these forecasts have held up historically, [[Reference - The AI Forecasting Track Record]]; for the market/funding side, [[Reference - AI Dev Tool Landscape]].
+The fourth axis is **metric**: speed, PRs/tasks, code quality, delivery stability, security. A study can be positive on one and negative on another *at the same time* (fast to write, costly to maintain), so never collapse them. Date-stamp everything (as of 2026), because effect sizes decay as tools and models change. To build your own eval instead of borrowing these, see [[Deep Dive - Designing an Eval Harness]]. For how these forecasts have held up, see [[Reference - The AI Forecasting Track Record]]; for the market and funding side, [[Reference - AI Dev Tool Landscape]].
 
 ## Connections
 - [[Breakdown - GitHub Copilot's Measured Productivity Impact]] — prose reading of the pro-productivity rows.

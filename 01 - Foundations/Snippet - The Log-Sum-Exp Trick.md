@@ -6,13 +6,13 @@ summary: "Compute log-sum-exp, log-softmax, and cross-entropy from logits withou
 
 # Snippet - The Log-Sum-Exp Trick
 
-**What it does:** computes $\mathrm{LSE}(x) = \log\sum_i e^{x_i}$, log-softmax, cross-entropy-from-logits, and softplus in numerically stable form, and demonstrates the naive versions returning `inf`/`NaN` on realistic inputs. This is the single most-used stability technique in ML: `exp(x)` overflows to `inf` at $x \approx 88.7$ in fp32 and $x \approx 11.09$ in fp16 (the logs of each format's max finite value — see [[Concept - Floating Point for Deep Learning]]), so any naive softmax or [[Concept - Entropy and Cross-Entropy]] computation on real logits is one large activation away from a `NaN` loss.
+**What it does:** computes $\mathrm{LSE}(x) = \log\sum_i e^{x_i}$, log-softmax, cross-entropy from logits, and softplus in numerically stable form, and shows the naive versions returning `inf`/`NaN` on realistic inputs. It's the most-used stability technique in ML. `exp(x)` overflows to `inf` at $x \approx 88.7$ in fp32 and $x \approx 11.09$ in fp16 (the log of each format's max finite value; see [[Concept - Floating Point for Deep Learning]]). Any naive softmax or [[Concept - Entropy and Cross-Entropy]] computation on real logits is one large activation away from a `NaN` loss.
 
 **The identity:** with $m = \max_i x_i$,
 
 $$\mathrm{LSE}(x) = m + \log\sum_i e^{x_i - m}$$
 
-This is algebraically *exact* — factor $e^m$ out of the sum — not an approximation. After the shift, the largest term is $e^0 = 1$ and every other term is $\le 1$, so overflow is impossible by construction. Everything else falls out of it: $\log\mathrm{softmax}(x)_i = x_i - \mathrm{LSE}(x)$, and cross-entropy from logits is $\mathrm{LSE}(x) - x_{\text{target}}$.
+Factor $e^m$ out of the sum and you get this, so it's algebraically *exact*, with no approximation. After the shift the largest term is $e^0 = 1$ and every other term is $\le 1$, so overflow can't happen. The rest follows: $\log\mathrm{softmax}(x)_i = x_i - \mathrm{LSE}(x)$, and cross-entropy from logits is $\mathrm{LSE}(x) - x_{\text{target}}$.
 
 **Dependencies:** Python ≥ 3.10, PyTorch ≥ 2.0 (CPU is fine).
 
@@ -104,14 +104,14 @@ masked row LSE: -inf
 stable softplus: tensor([  0.0000,   0.6931, 100.0000])
 ```
 
-The exact reference values: $\mathrm{LSE}([1000, 999, 0]) = 1000 + \log(1 + e^{-1} + e^{-1000}) = 1000.31326\ldots$, and CE against the 999 logit is $1.31326\ldots$
+Exact reference values: $\mathrm{LSE}([1000, 999, 0]) = 1000 + \log(1 + e^{-1} + e^{-1000}) = 1000.31326\ldots$, and CE against the 999 logit is $1.31326\ldots$
 
 ## Why it's written this way
 
-1. **Subtract the max, not the mean.** Only the max guarantees every shifted exponent is $\le 0$; a mean shift still overflows whenever the spread of logits exceeds ~88 in fp32. The shift also fixes the underflow side of the ledger: the stable path returns $-105$ where the naive path returns $-\inf$, because log-space represents magnitudes down to $e^{-10^{38}}$-ish that probabilities cannot. Same discipline, both directions — this is the top entry in [[Gotchas - Numerical Stability]] for a reason.
-2. **Guard the all-`-inf` row.** Every [[Concept - Attention Mechanism]] implementation masks with $-\infty$ before its row-softmax; a row that is *entirely* masked (padding, causal edge cases) makes the unguarded version compute $(-\infty) - (-\infty) = \mathrm{NaN}$, which then poisons every gradient through [[Concept - Softmax]]. The `torch.where` costs nothing and turns the pathological row into a clean $-\infty$.
-3. **Accumulate in fp32.** bf16 has 7 mantissa bits (machine epsilon $\approx 7.8\times10^{-3}$); summing a 128K-vocabulary row of $\le 1$ terms in bf16 loses the tail entirely. The `.float()` upcast before the reduction is exactly what fused log-softmax/cross-entropy kernels do internally — and the same streaming form of this identity (online softmax) is the core of [[Deep Dive - FlashAttention]].
-4. **Never materialize probabilities.** `cross_entropy_from_logits` goes straight from logits to loss; the branchless `softplus` uses `log1p` so the small-argument regime keeps full relative precision (`log(1 + eps)` rounds to `0`; `log1p(eps)` returns `eps`). Anything downstream that samples — see [[Concept - Sampling and Decoding Parameters]] — should also be fed log-probs, not probs that were exponentiated and re-logged.
+1. **Subtract the max, not the mean.** Only the max guarantees every shifted exponent is $\le 0$. A mean shift still overflows once the spread of logits passes ~88 in fp32. The shift fixes underflow too: the stable path returns $-105$ where the naive one returns $-\inf$, because log-space can hold magnitudes down to roughly $e^{-10^{38}}$ and probabilities can't. It's the top entry in [[Gotchas - Numerical Stability]].
+2. **Guard the all-`-inf` row.** Every [[Concept - Attention Mechanism]] implementation masks with $-\infty$ before its row-softmax. If a row is *entirely* masked (padding, causal edge cases), the unguarded version computes $(-\infty) - (-\infty) = \mathrm{NaN}$, and that NaN poisons every gradient through [[Concept - Softmax]]. The `torch.where` costs nothing and turns the bad row into a clean $-\infty$.
+3. **Accumulate in fp32.** bf16 has 7 mantissa bits (machine epsilon $\approx 7.8\times10^{-3}$). Sum a 128K-vocabulary row of $\le 1$ terms in bf16 and the tail disappears. Fused log-softmax/cross-entropy kernels do the same `.float()` upcast before the reduction internally. A streaming form of this identity (online softmax) is the core of [[Deep Dive - FlashAttention]].
+4. **Never materialize probabilities.** `cross_entropy_from_logits` goes straight from logits to loss. The branchless `softplus` uses `log1p` so small arguments keep full relative precision (`log(1 + eps)` rounds to `0`, `log1p(eps)` returns `eps`). Anything downstream that samples (see [[Concept - Sampling and Decoding Parameters]]) should also get log-probs, not probs that were exponentiated and logged again.
 
 ## Connections
 

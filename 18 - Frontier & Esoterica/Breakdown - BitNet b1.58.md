@@ -6,14 +6,14 @@ summary: "Microsoft's ternary-weight LLM: weights in {−1,0,+1} at ~1.58 bits, 
 
 # Breakdown - BitNet b1.58
 
-> A line of models from Microsoft Research (Ma et al., first paper Feb 2024) that constrains every weight in the main linear layers to one of three values, $\{-1, 0, +1\}$. The provocative title — *"The Era of 1-bit LLMs: All Large Language Models are in 1.58 Bits"* — claims that ternary weights are enough to match full-precision transformers while turning the dominant matrix multiply into additions. It matters because it is the sharpest live test of the folklore that LLMs need FP16 dynamic range to work at all. (As of 2026, the thesis is intriguing but not settled at true frontier scale.)
+> A line of models from Microsoft Research (Ma et al., first paper Feb 2024) that restricts every weight in the main linear layers to one of three values, $\{-1, 0, +1\}$. The provocative title, *"The Era of 1-bit LLMs: All Large Language Models are in 1.58 Bits"*, claims ternary weights are enough to match full-precision transformers while turning the dominant matrix multiply into additions. It's the sharpest live test of the folklore that LLMs need FP16 dynamic range to work at all. (As of 2026, the thesis is intriguing but not settled at true frontier scale.)
 
 ## The headline numbers
 
-- **Weight precision:** ternary, $\log_2 3 \approx 1.585$ bits per weight. The "b1.58" is the information content of a three-state weight — not a storage format you get for free (packing 5 ternary weights into 8 bits, or 4 into a byte, is the practical layout).
-- **Arithmetic:** the main GEMM has **no floating-point multiply**. A ternary weight times an activation is $+a$, $-a$, or $0$ — the matmul is a signed sum. Multiplies dominate the energy of arithmetic, so removing them is the whole economic pitch.
-- **Reported gains (Ma et al. 2024, authors' own measurements):** at 3B parameters, matched or better perplexity vs an FP16 LLaMA baseline while claiming ~**3.5× lower memory**, ~**2.7× higher throughput**, and large energy reductions; the reported gap to FP16 *narrows as scale grows* in their curves.
-- **Activations:** kept at **INT8** (per-token absmax), not ternary — the "1.58 bits" is a weights-only claim in the original recipe.
+- **Weight precision:** ternary, $\log_2 3 \approx 1.585$ bits per weight. "b1.58" is the information content of a three-state weight. You don't get it as a storage format for free; the practical layouts pack 5 ternary weights into 8 bits, or 4 into a byte.
+- **Arithmetic:** the main GEMM has **no floating-point multiply**. A ternary weight times an activation is $+a$, $-a$, or $0$, so the matmul is a signed sum. Multiplies dominate the energy of arithmetic, and removing them is the whole economic pitch.
+- **Reported gains (Ma et al. 2024, authors' own measurements):** at 3B parameters, matched or better perplexity than an FP16 LLaMA baseline, with claimed ~**3.5× lower memory**, ~**2.7× higher throughput** and large energy reductions. In their curves the gap to FP16 *narrows as scale grows*.
+- **Activations:** kept at **INT8** (per-token absmax), not ternary. In the original recipe "1.58 bits" is a weights-only claim.
 
 ## How it actually works
 
@@ -51,28 +51,28 @@ y         = (x_q  @  W_q) * (gamma_x * beta / 127)
                     y (fp) → RMSNorm → next layer
 ```
 
-Backward pass uses the **straight-through estimator (STE)**: gradients flow through the `round`/`clip` as if they were identity, updating the full-precision *master weights*. The ternary weights are re-derived from the master copy each step. This is why b1.58 is [[Concept - Mixed Precision Training|quantization-aware training]], not a storage trick — the network learns *inside* the ternary constraint over the whole run.
+The backward pass uses the **straight-through estimator (STE)**. Gradients flow through `round`/`clip` as if they were identity and update the full-precision *master weights*, and the ternary weights are re-derived from the master copy every step. So b1.58 is [[Concept - Mixed Precision Training|quantization-aware training]], not a storage trick: the network learns *inside* the ternary constraint for the whole run.
 
-The added `0` state (versus the original binary BitNet, which used only $\{-1,+1\}$) is what buys the accuracy: it lets a weight explicitly *filter out* a feature, which binary weights cannot, and it makes the ternary matrix behave like a learned sparse-signed mask.
+The extra `0` state (the original binary BitNet used only $\{-1,+1\}$) is what buys the accuracy. It lets a weight explicitly *filter out* a feature, which a binary weight can't, and makes the ternary matrix act like a learned sparse signed mask.
 
 ## The clever parts
 
-1. **Absmean weight quantization.** Scaling by the *mean* absolute weight $\beta=\mathrm{mean}|W|$ (not absmax) is deliberate: absmax would be dragged around by [[Concept - Massive Activations and Outlier Features|outlier weights]], pushing most weights to round to 0. Absmean centers the rounding threshold so a healthy mix of $-1/0/+1$ survives. The 0 state emerges naturally at $|W/\beta| < 0.5$.
-2. **Multiply-free GEMM as the point, not a side effect.** Contrast with [[Concept - Post-Training Quantization Formats|post-training quantization]] (GPTQ/AWQ), which shrinks *memory* but still runs FP16/INT8 multiplies on [[Concept - Tensor Cores|tensor cores]]. BitNet targets the *arithmetic energy* — relevant to the [[Concept - The Roofline Model|roofline]] because it moves you from a multiply-bound to a memory/add-bound regime, and to on-device inference where energy is the budget.
-3. **QAT-from-scratch instead of conversion.** You cannot take an FP16 checkpoint and cast it to b1.58 — the trained-in tolerance to ternary weights doesn't exist post hoc. The team's bet is that the extra training cost is amortized by cheaper inference forever after, which is the same logic as any [[Decision - Choosing a Quantization Method|quantization decision]] but taken to the extreme.
-4. **Kernel co-design.** The gains are theoretical until you have kernels that do ternary-add fast; stock GPU tensor cores don't. `bitnet.cpp` ships lookup-table GEMM kernels (I2_S / TL formats) that realize the throughput and energy claims on CPU and some accelerators. Without them, b1.58 runs *slower* than FP16 on an A100.
+1. **Absmean weight quantization.** Scaling by the *mean* absolute weight $\beta=\mathrm{mean}|W|$, not absmax, is deliberate. Absmax gets dragged around by [[Concept - Massive Activations and Outlier Features|outlier weights]] and pushes most weights to round to 0. Absmean centers the rounding threshold so a healthy mix of $-1/0/+1$ survives, and the 0 state falls out naturally at $|W/\beta| < 0.5$.
+2. **The multiply-free GEMM is the goal.** Compare [[Concept - Post-Training Quantization Formats|post-training quantization]] (GPTQ/AWQ), which shrinks *memory* but still runs FP16/INT8 multiplies on [[Concept - Tensor Cores|tensor cores]]. BitNet goes after *arithmetic energy*. On the [[Concept - The Roofline Model|roofline]] that moves you from a multiply-bound regime to a memory/add-bound one, and it matters most on-device, where energy is the budget.
+3. **QAT from scratch, no conversion.** You can't take an FP16 checkpoint and cast it to b1.58; tolerance to ternary weights has to be trained in and doesn't appear post hoc. The team is betting the extra training cost pays for itself through cheaper inference from then on. That's the logic of any [[Decision - Choosing a Quantization Method|quantization decision]], pushed to the extreme.
+4. **Kernel co-design.** The gains stay theoretical without kernels that do ternary adds fast, and stock GPU tensor cores don't. `bitnet.cpp` ships lookup-table GEMM kernels (I2_S / TL formats) that deliver the throughput and energy claims on CPU and some accelerators. Without them, b1.58 runs *slower* than FP16 on an A100.
 
 ## What it got wrong / what's dated
 
-- **The "all LLMs" headline is a thesis, not a result.** Independent reproductions at true frontier scale (70B+) remain thin as of 2026; the strongest parity evidence is at ~3B–7B. Treat the sweeping claim with the same skepticism you'd apply to any single-lab result before replication — a good instance for [[Reference - Model Genealogy|tracing a model's lineage and claims]] before betting on them.
-- **Activations are still INT8.** The first recipe is not "1-bit end-to-end." Follow-ups (**BitNet a4.8**, 2024) push activations to 4 bits with sparsification, and **BitNet b1.58 2B4T** (2025) is a fully open, natively-trained 2B model — the frontier is moving, and each step re-opens the parity question.
-- **Ecosystem gravity fights it.** Almost the entire stack ([[Concept - Floating Point for Deep Learning|floating-point formats]], tensor cores, [[Reference - Memory Math for Transformers|memory accounting]], CUDA kernels) assumes FP16/BF16/INT8. Ternary is off the well-paved road, so tooling, not accuracy, may be the binding constraint.
+- **"All LLMs" is a thesis, not a result.** Independent reproductions at true frontier scale (70B+) are still thin as of 2026; the strongest parity evidence is at ~3B–7B. Give the sweeping claim the skepticism you'd give any single-lab result before replication, and [[Reference - Model Genealogy|trace the model's lineage and claims]] before betting on it.
+- **Activations are still INT8.** The first recipe isn't 1-bit end to end. Follow-ups push further: **BitNet a4.8** (2024) takes activations to 4 bits with sparsification, and **BitNet b1.58 2B4T** (2025) is a fully open, natively trained 2B model. The frontier keeps moving and each step reopens the parity question.
+- **Ecosystem gravity works against it.** Nearly the whole stack ([[Concept - Floating Point for Deep Learning|floating-point formats]], tensor cores, [[Reference - Memory Math for Transformers|memory accounting]], CUDA kernels) assumes FP16/BF16/INT8. Ternary is off the paved road, so tooling, more than accuracy, may be what limits it.
 
 ## What to steal
 
-- The **absmean + STE** recipe is a clean, transferable template for any extreme-quantization-aware training, ternary or not.
-- The framing "**move the multiply out of the inner loop**" is worth internalizing even if you never ship ternary — it points at energy and memory-bandwidth wins that precision-only quantization leaves on the table.
-- The reflex to check *where the parity claim holds* (scale range, whose measurement, reproduced or not) before adopting — b1.58 is a case study in reading a bold result correctly. This is why it lives in esoterica: it stress-tests the assumption that models need FP16 dynamic range, and is one of the standing [[Reference - Open Problems in LLM Engineering|open problems]] about how little precision an LLM actually requires. It also rhymes with [[Concept - Knowledge Distillation|distillation]] — both trade a cheaper student/representation against a full-precision teacher's quality.
+- The **absmean + STE** recipe is a clean, reusable template for any extreme quantization-aware training, ternary or not.
+- "**Move the multiply out of the inner loop**" is worth remembering even if you never ship ternary. It points at energy and memory-bandwidth wins that precision-only quantization leaves on the table.
+- The habit of checking *where the parity claim holds* (scale range, whose measurement, reproduced or not) before adopting. b1.58 is a case study in reading a bold result correctly. That's why it sits in esoterica: it stress-tests the assumption that models need FP16 dynamic range, and it's one of the standing [[Reference - Open Problems in LLM Engineering|open problems]] about how little precision an LLM actually needs. It also rhymes with [[Concept - Knowledge Distillation|distillation]]; both trade a cheaper student or representation against a full-precision teacher's quality.
 
 ## Connections
 - [[Concept - Post-Training Quantization Formats]] — the contrast class: PTQ shrinks memory but keeps multiplies; b1.58 removes the multiply but demands training-from-scratch.

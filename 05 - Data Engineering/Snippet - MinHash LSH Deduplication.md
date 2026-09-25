@@ -6,11 +6,11 @@ summary: "Runnable MinHash + LSH banding pipeline that near-deduplicates documen
 
 # Snippet - MinHash LSH Deduplication
 
-**What it does:** near-deduplicates a small document set by shingling each document into word 5-grams, computing 128-permutation MinHash signatures, building an LSH index with explicit (bands, rows) banding, querying near-duplicate candidates, and clustering transitively-connected candidates with union-find so only one representative per cluster survives — the same shingle → signature → band → cluster pipeline that runs as one stage of the full [[Deep Dive - The Pretraining Data Pipeline]], just single-machine and in-memory instead of distributed.
+**What it does:** near-deduplicates a small document set. It shingles each document into word 5-grams, computes 128-permutation MinHash signatures, builds an LSH index with explicit (bands, rows) banding, queries for near-duplicate candidates, and clusters transitively connected candidates with union-find so one representative per cluster survives. That shingle → signature → band → cluster pipeline is one stage of the full [[Deep Dive - The Pretraining Data Pipeline]], here run single-machine and in-memory instead of distributed.
 
 **Dependencies:** `datasketch` (tested against 1.6.x; `pip install datasketch`), Python 3.10+.
 
-**Expected output:** the printed banding threshold, then one line per cluster — the two near-duplicate documents grouped together, the unrelated one alone.
+**Expected output:** the printed banding threshold, then one line per cluster: the two near-duplicate documents grouped together, the unrelated one alone.
 
 ```python
 """
@@ -114,11 +114,11 @@ Cluster 1: [2]
 
 ## Why it's written this way
 
-- **Word-level 5-grams, not character-level.** Web documents carry HTML/whitespace noise that character shingles are more sensitive to; word shingles match what production pipelines actually shingle on, at the cost of needing enough words per document to produce shingles at all.
-- **128 permutations as 20 bands x 6 rows**, landing near the ~0.8 [[Concept - Vector Norms and Distances|Jaccard similarity]] threshold [[Concept - Deduplication at Scale]] cites as typical for web-corpus dedup. Fewer permutations save memory and compute but widen the S-curve's dead zone — more false negatives and false positives near the threshold.
-- **LSH for candidate generation, not brute-force all-pairs comparison.** At n=3 this is invisible overhead; at n=10^9 documents it's the entire reason dedup is tractable — brute-force Jaccard is O(n^2) and doesn't fit in any reasonable wall-clock budget. LSH banding is the hashing-based sibling of graph-based approximate-nearest-neighbor indexes like [[Concept - HNSW]]; both exist to avoid the same all-pairs comparison.
-- **Union-find for transitive clustering, explicitly flagged as risky.** A chain A~B, B~C can leave A and C dissimilar under direct comparison, so clustering is needed to decide which documents count as "the same" — but that same transitivity is exactly what causes over-merging in production dedup runs. This snippet keeps the union-find in-memory and single-machine; real corpora need the equivalent computed as a distributed union-find over a per-band external shuffle, not a single Python dict.
-- **Not shown here: ordering relative to other pipeline stages.** In production this stage runs before [[Concept - Quality Filtering for Pretraining Data|quality filtering]] scores documents, so classifier compute isn't wasted scoring duplicates that dedup would have removed anyway.
+- **Word-level 5-grams instead of character-level.** Web documents carry HTML/whitespace noise, and character shingles are more sensitive to it. Word shingles match what production pipelines shingle on. The cost: a document needs enough words to produce any shingles at all.
+- **128 permutations as 20 bands x 6 rows.** This lands near the ~0.8 [[Concept - Vector Norms and Distances|Jaccard similarity]] threshold that [[Concept - Deduplication at Scale]] cites as typical for web-corpus dedup. Fewer permutations save memory and compute but widen the S-curve's dead zone, so you get more false negatives and false positives near the threshold.
+- **LSH for candidate generation, not brute-force all-pairs comparison.** At n=3 the overhead is invisible. At n=10^9 documents it's the whole reason dedup is tractable: brute-force Jaccard is O(n^2) and doesn't fit any reasonable wall-clock budget. LSH banding is the hashing-based sibling of graph-based approximate-nearest-neighbor indexes like [[Concept - HNSW]]. Both exist to avoid the same all-pairs comparison.
+- **Union-find for transitive clustering, flagged as risky.** A chain A~B, B~C can leave A and C dissimilar under direct comparison, so you need clustering to decide which documents count as "the same". That same transitivity causes over-merging in production dedup runs. The union-find here is in-memory and single-machine; real corpora need a distributed union-find over a per-band external shuffle instead of a single Python dict.
+- **Not shown: ordering relative to other pipeline stages.** In production this stage runs before [[Concept - Quality Filtering for Pretraining Data|quality filtering]] scores documents, so classifier compute isn't spent scoring duplicates that dedup would have removed anyway.
 
 ## Connections
 - [[Concept - Deduplication at Scale]] — this snippet makes concrete the MinHash+LSH banding math that concept describes abstractly; production pipelines replace the in-memory union-find here with a distributed shuffle-and-join.

@@ -6,7 +6,7 @@ summary: "Scan a model's vocabulary for glitch/under-trained tokens via unembedd
 
 # Snippet - Finding Under-Trained Tokens
 
-> **What it does:** ranks every vocabulary token by how likely it is to be an under-trained or unreachable "glitch" token — the [[Lore - Glitch Tokens|SolidGoldMagikarp]] class — using cheap unembedding statistics plus a tokenizer round-trip, then confirms the worst offenders behaviorally with a repeat probe. **Deps:** `torch>=2.0`, `transformers>=4.40` (`pip install torch transformers`). **Expected output:** on `gpt2` the tail of the ranking surfaces reserved byte tokens plus the canonical cluster (`' SolidGoldMagikarp'`, `' petertodd'`, `' TheNitromeFan'`, `'davidjl'`, `' externalToEVA'`, `' guiActiveUn'`); on large-vocab models (Llama, Mistral, Gemma) you get hundreds of candidates dominated by code and multilingual fragments — the count [[Checklist - Auditing a Tokenizer for Glitch Tokens|the auditing checklist]] tells you to expect.
+> **What it does:** ranks every vocabulary token by how likely it is to be an under-trained or unreachable "glitch" token (the [[Lore - Glitch Tokens|SolidGoldMagikarp]] class) using cheap unembedding statistics plus a tokenizer round-trip, then confirms the worst offenders behaviorally with a repeat probe. **Deps:** `torch>=2.0`, `transformers>=4.40` (`pip install torch transformers`). **Expected output:** on `gpt2` the tail of the ranking shows reserved byte tokens plus the canonical cluster (`' SolidGoldMagikarp'`, `' petertodd'`, `' TheNitromeFan'`, `'davidjl'`, `' externalToEVA'`, `' guiActiveUn'`). On large-vocab models (Llama, Mistral, Gemma) you get hundreds of candidates, mostly code and multilingual fragments, which is the count [[Checklist - Auditing a Tokenizer for Glitch Tokens|the auditing checklist]] tells you to expect.
 
 ```python
 """
@@ -75,15 +75,20 @@ for tid in [t for t in worst.tolist() if not unreachable[t]][:8]:
 
 ## Why it's written this way
 
-**Statistics first, behavior second — because the screen is free and the probe is not.** The whole-vocab score is one norm, one cosine, and one argsort over the `[V, d]` unembedding: O(V·d) with *zero* forward passes, so it ranks a 256k-token vocabulary in milliseconds. Only step 5 runs the model, and only on the few dozen worst tokens. This ordering is the entire point of Land & Bartolo's "Fishing for Magikarp" — you cannot afford a generative probe on 256k tokens, but you can afford a matmul-free statistic on all of them and a `generate()` on the tail.
+### Statistics first, behavior second
+The screen is free and the probe isn't. The whole-vocab score is one norm, one cosine and one argsort over the `[V, d]` unembedding: O(V·d) with *zero* forward passes, so it ranks a 256k-token vocabulary in milliseconds. Only step 5 runs the model, and only on the few dozen worst tokens. That ordering is the whole idea of Land & Bartolo's "Fishing for Magikarp." You can't afford a generative probe on 256k tokens, but you can afford a matmul-free statistic on all of them and a `generate()` on the tail.
 
-**Three signals that fail differently, deliberately combined.** The unembedding norm and cosine-to-mean catch tokens the model *never learned to predict*; reachability catches tokens the *tokenizer can never emit*; the behavioral probe catches tokens whose embedding sits in a meaningless region of activation space. A token can trip one and not the others (a rare-but-fine Unicode glyph has a small unembedding norm yet echoes perfectly), so no single signal is trusted alone.
+### Three signals that fail differently
+The unembedding norm and cosine-to-mean catch tokens the model *never learned to predict*. Reachability catches tokens the *tokenizer can never emit*. The behavioral probe catches tokens whose embedding sits in a meaningless region of activation space. A token can trip one and not the others (a rare but fine Unicode glyph has a small unembedding norm and echoes perfectly), so no single signal is trusted alone.
 
-**The tie caveat is load-bearing.** When `tie_word_embeddings=True` (GPT-2, Gemma), `get_input_embeddings()` and `get_output_embeddings()` return the *same tensor* — folding the input norm into the score would just double-weight one signal and manufacture false confidence. Guarding on the config flag is the difference between two independent votes and one vote counted twice. This is exactly the kind of thing that silently corrupts a homegrown detector.
+### The tie caveat matters
+With `tie_word_embeddings=True` (GPT-2, Gemma), `get_input_embeddings()` and `get_output_embeddings()` return the *same tensor*. Adding the input norm to the score would double-weight one signal and manufacture false confidence. The config-flag guard is the difference between two independent votes and one vote counted twice, and it's the kind of thing that silently corrupts a homegrown detector.
 
-**The stronger-but-costlier alternative, named honestly.** Land & Bartolo's most discriminative indicator is the token's *maximum predicted probability across a set of eliciting contexts* — a [[Concept - Softmax|softmax over the vocabulary]] at many positions, then the per-token max. It separates under-trained tokens more cleanly than row norms but needs many forward passes; the row statistic here is the cheap proxy that gets you ~90% of the way. Swap it in when a checkpoint's tail is ambiguous.
+### The stronger, costlier alternative
+Land & Bartolo's most discriminative indicator is a token's *maximum predicted probability across a set of eliciting contexts*: a [[Concept - Softmax|softmax over the vocabulary]] at many positions, then the per-token max. It separates under-trained tokens more cleanly than row norms but needs many forward passes. The row statistic here is the cheap proxy that gets you ~90% of the way. Swap it in when a checkpoint's tail is ambiguous.
 
-**Caveats to state before you act on the list.** Legitimately rare tokens (obscure Unicode, deliberately reserved slots, padding rows appended after pretraining) look under-trained without being harmful; thresholds are model-specific and there is no universal cutoff; and on large-vocab tokenizers the candidate list is dominated by multilingual and code ranges — the same ranges where a [[Concept - Byte-Pair Encoding|BPE]] tokenizer trained on one corpus but deployed on another leaves the most orphaned merges.
+### Caveats before you act on the list
+Legitimately rare tokens (obscure Unicode, deliberately reserved slots, padding rows added after pretraining) look under-trained without being harmful. Thresholds are model-specific; there's no universal cutoff. On large-vocab tokenizers the candidates are dominated by multilingual and code ranges, the same ranges where a [[Concept - Byte-Pair Encoding|BPE]] tokenizer trained on one corpus and deployed on another leaves the most orphaned merges.
 
 ## Connections
 

@@ -6,7 +6,7 @@ summary: "DeepMind's cross-attention VLM: frozen NFNet + frozen Chinchilla graft
 
 # Breakdown - Flamingo
 
-> Flamingo (Alayrac et al. 2022, DeepMind, NeurIPS) is the VLM that proved you could graft vision onto a large frozen language model without retraining or damaging it, and get genuine in-context few-shot multimodal learning out the other side — show the model a few (image, answer) examples and it generalizes to a new image, the way GPT-3 generalizes over text. It set the template for [[Concept - VLM Architectures|cross-attention fusion]] VLMs and, after a few years where the simpler projector approach ([[Breakdown - LLaVA]]) dominated for its ease of training, its core idea returned in production form in Llama-3.2-Vision precisely because keeping the LLM frozen has real serving and safety advantages. *(as of 2026, architecturally superseded but its stability trick is still load-bearing folklore.)*
+> Flamingo (Alayrac et al. 2022, DeepMind, NeurIPS) showed you could graft vision onto a large frozen language model without retraining or damaging it and get real in-context few-shot multimodal learning. Show it a few (image, answer) examples and it generalizes to a new image, the way GPT-3 generalizes over text. It set the template for [[Concept - VLM Architectures|cross-attention fusion]] VLMs. The simpler projector approach ([[Breakdown - LLaVA]]) then dominated for a few years because it was easier to train, but Flamingo's core idea came back in production form in Llama-3.2-Vision, since keeping the LLM frozen has real serving and safety advantages. *(as of 2026, architecturally superseded, but its stability trick is still folklore people rely on.)*
 
 ## The headline numbers
 
@@ -18,11 +18,11 @@ summary: "DeepMind's cross-attention VLM: frozen NFNet + frozen Chinchilla graft
 | Visual token budget | Fixed 64 tokens per image regardless of resolution or image count (Perceiver Resampler) |
 | New trainable modules | Perceiver Resampler + gated cross-attention-dense layers interleaved into the frozen LM |
 | Training data | M3W (interleaved image-text web documents) + ALIGN- and LTIP-style image-text pairs |
-| Headline result | Strong in-context few-shot performance across VQA/captioning benchmarks, competitive with task-specific fine-tuned SOTA using only a handful of in-context examples |
+| Headline result | Strong in-context few-shot performance across VQA/captioning benchmarks, competitive with task-specific fine-tuned SOTA from a handful of in-context examples |
 
-## How it actually works
+## How it works
 
-Flamingo keeps two large pretrained models — a vision encoder and a language model — entirely frozen, and inserts new trainable layers *between* the LM's existing blocks that let visual information flow in without ever updating the LM's own weights.
+Two large pretrained models, a vision encoder and a language model, stay fully frozen. New trainable layers go *between* the LM's existing blocks and let visual information flow in without touching the LM's own weights.
 
 ```mermaid
 flowchart TB
@@ -41,30 +41,33 @@ flowchart TB
     ADD --> LM2
 ```
 
-**Perceiver Resampler.** A small stack of cross-attention layers with a fixed set of learned latent query vectors attends over however many vision-encoder features the input produced and compresses them to exactly 64 output tokens, always — one image, five images, or a video's worth of frames all collapse to the same fixed budget. This decouples the LLM's cost from the input's visual complexity, the opposite tradeoff from AnyRes tiling's linear scaling (see [[Concept - Any-Resolution Vision Encoding]]).
+**Perceiver Resampler.** A small stack of cross-attention layers with a fixed set of learned latent queries attends over however many vision-encoder features came in and compresses them to 64 output tokens, every time. One image, five images or a video's worth of frames all land in the same budget. The LLM's cost no longer depends on how visually complex the input is, which is the opposite tradeoff from AnyRes tiling's linear scaling (see [[Concept - Any-Resolution Vision Encoding]]).
 
-**GATED XATTN-DENSE layers.** Between existing frozen Chinchilla blocks, Flamingo inserts new [[Concept - Attention Mechanism|cross-attention]] layers where the LM's hidden states act as queries and the 64 visual tokens act as keys/values, followed by a dense (FFN) layer — both wrapped in a residual connection.
+**GATED XATTN-DENSE layers.** Between the frozen Chinchilla blocks sit new [[Concept - Attention Mechanism|cross-attention]] layers. The LM's hidden states are the queries and the 64 visual tokens are the keys/values. A dense (FFN) layer follows, and both are wrapped in a residual connection.
 
-**Tanh gating — the stability trick.** The output of each new gated block is multiplied by `tanh(alpha)`, with `alpha` initialized to exactly zero. At initialization, `tanh(0) = 0`, so the new layers contribute nothing and the grafted model is mathematically identical to the original frozen LM. As training proceeds, `alpha` moves away from zero and the gate opens gradually. This is what makes it safe to bolt trainable layers onto an otherwise-frozen, already-good language model without an initial phase of destructive, high-variance updates flowing back through weights you're trying to preserve.
+**Tanh gating.** This is the stability trick. Each new gated block's output is multiplied by `tanh(alpha)`, and `alpha` starts at zero. Since `tanh(0) = 0`, the new layers add nothing at initialization and the grafted model is mathematically identical to the frozen LM. During training `alpha` drifts away from zero and the gate opens gradually. You can bolt trainable layers onto a frozen, already-good language model without an early phase of destructive, high-variance updates flowing back through the weights you want to keep.
 
-**Per-image causal masking.** In interleaved training data (a webpage with several images and surrounding text), each text token is masked to attend only to the single image immediately preceding it, not to all images in the document — which keeps the interleaved cross-attention coherent instead of blurring together unrelated images.
+**Per-image causal masking.** Interleaved training data (a webpage with several images and text around them) masks each text token so it only attends to the image immediately before it, not every image in the document. Otherwise the cross-attention blurs unrelated images together.
 
-**Interleaved training on M3W.** Training on naturally interleaved image-text web documents, rather than only clean (image, caption) pairs, is what produces the in-context few-shot behavior: the model learns from data that already looks like "here's an example, here's another example, now here's a new case," so at inference time you can construct exactly that pattern in the prompt.
+**Interleaved training on M3W.** The in-context few-shot behavior comes from training on naturally interleaved image-text web documents, not only clean (image, caption) pairs. That data already looks like "here's an example, here's another, now a new case," so at inference you can build the same pattern in the prompt.
 
 ## The clever parts
 
-1. **Zero-init tanh gating as a general module-grafting technique.** This is the same idea later reused in [[Concept - ControlNet and Spatial Conditioning for Diffusion|ControlNet's zero convolutions]] and [[Concept - Diffusion Transformers (DiT)|DiT's adaLN-zero]]: initialize any newly-inserted module so it contributes nothing at step zero, guaranteeing training starts from a known-good state and letting the new capability phase in smoothly.
-2. **Perceiver Resampler decouples visual token count from input complexity.** A fixed 64-token budget per image means cost is predictable and multi-image/video sequences don't blow up context the way tiling-based tokenization does — the opposite design point from LLaVA-NeXT's AnyRes.
-3. **Freezing both pretrained towers.** Neither the vision encoder nor the LLM is ever fine-tuned; only the new glue is trained. This preserves both models' pretrained capabilities intact and is dramatically cheaper than end-to-end training — a strategy that only works because of the gating trick above.
-4. **Interleaved data unlocks in-context multimodal learning.** Training distribution shaped like the intended prompting pattern (interleaved examples) is what makes few-shot prompting work at inference — the multimodal analog of how large text LMs' [[Concept - Chain-of-Thought and Why It Works|in-context reasoning]] emerges from training data structure, not an explicit few-shot objective.
+Zero-init tanh gating works as a general way to graft modules. [[Concept - ControlNet and Spatial Conditioning for Diffusion|ControlNet's zero convolutions]] and [[Concept - Diffusion Transformers (DiT)|DiT's adaLN-zero]] reuse it: initialize any inserted module so it contributes nothing at step zero, training starts from a known-good state, and the new capability phases in smoothly.
 
-## What is dated / what's wrong
+The Perceiver Resampler cuts the link between visual token count and input complexity. With 64 tokens per image, cost is predictable and multi-image or video sequences don't blow up context the way tiling does. LLaVA-NeXT's AnyRes sits at the opposite design point.
 
-NFNet as a vision encoder was already a somewhat unusual choice by the time CLIP-style ViTs became the default, and Flamingo made no special provision for high-resolution or OCR-heavy input — a 64-token fixed budget is efficient but throws away exactly the fine detail AnyRes tiling exists to preserve. The added gated cross-attention layers are architecturally heavier and more complex to implement and train than a simple projector, which is a real part of why the field's center of gravity shifted to [[Breakdown - LLaVA|LLaVA]]-style projection for a few years: it's simpler to build, and open-source reproducibility mattered more than Flamingo's efficiency advantages. Cross-attention fusion returned in force in Llama-3.2-Vision specifically because keeping the LLM's weights untouched has concrete value (safety review, catastrophic-forgetting avoidance, easier versioning) that the field re-learned once the simplicity phase had run its course.
+Neither pretrained tower is ever fine-tuned. Only the new glue trains, so both models keep their pretrained capabilities and training costs far less than end-to-end. This only works because of the gating trick.
+
+Interleaved data is what makes multimodal in-context learning possible. A training distribution shaped like the intended prompt (interleaved examples) makes few-shot prompting work at inference. It's the multimodal analog of how [[Concept - Chain-of-Thought and Why It Works|in-context reasoning]] in large text LMs comes from the structure of the training data and not from an explicit few-shot objective.
+
+## What's dated or wrong
+
+NFNet was already an unusual encoder choice once CLIP-style ViTs became the default. Flamingo also did nothing special for high-resolution or OCR-heavy input: a fixed 64-token budget is efficient, but it throws away the fine detail AnyRes tiling exists to keep. The gated cross-attention layers are heavier and harder to implement and train than a simple projector. That's a big part of why the field moved to [[Breakdown - LLaVA|LLaVA]]-style projection for a few years. It was simpler to build, and open-source reproducibility mattered more than Flamingo's efficiency. Cross-attention fusion came back in Llama-3.2-Vision because leaving the LLM's weights untouched has concrete value (safety review, avoiding catastrophic forgetting, easier versioning), which the field re-learned once the simplicity phase ran its course.
 
 ## What to steal
 
-Zero-init gating for grafting any new module onto a pretrained model without destabilizing it; the resampler pattern for pinning a fixed compute/token budget regardless of input size; and interleaved multi-document training data whenever you want a model to generalize in-context rather than only from single (input, label) pairs.
+Zero-init gating, to graft a new module onto a pretrained model without destabilizing it. The resampler, to pin a fixed compute/token budget whatever the input size. Interleaved multi-document training data, whenever you want a model to generalize in-context and not only from single (input, label) pairs.
 
 ## Connections
 - [[Concept - VLM Architectures]] — Flamingo is the canonical instance of the cross-attention fusion family in the general VLM taxonomy.

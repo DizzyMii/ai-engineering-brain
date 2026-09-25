@@ -4,67 +4,67 @@ aliases: [Tokenization Bugs, Tokenizer Footguns]
 summary: "Aggregated failure modes that trace back to tokenization, ordered by how often they bite — boundary merges, double-BOS, digit inconsistency, glitch tokens."
 ---
 
-Every failure below is real, silent, and traceable to the tokenizer rather than the model. Ordered by how often they bite in practice.
+Every failure below is real, silent, and comes from the tokenizer, not the model. Ordered by how often they bite in practice.
 
 ## 1. Leading-space and word-boundary merges
 
-**Symptom:** "My prompt works with a trailing space but not without." Few-shot examples that are correct in the docstring silently degrade in production; a prefilled assistant turn produces off-by-one wrong tokens; the same text pasted two ways gives different outputs.
+**Symptom:** "My prompt works with a trailing space but not without." Few-shot examples that are correct in the docstring degrade in production; a prefilled assistant turn produces off-by-one wrong tokens; the same text pasted two ways gives different outputs.
 
-**Cause:** In [[Concept - Byte-Pair Encoding]] tokenizers (GPT-2 lineage, Llama SentencePiece with its `▁` meta-space), the word-boundary space is *part of the token*. ` dog` and `dog` are different token ids. If your prompt ends mid-word, or you hand-concatenate strings across a boundary the model never saw during training, the model receives a different token sequence than you intended — the distribution shifts and behavior changes with no error.
+**Cause:** In [[Concept - Byte-Pair Encoding]] tokenizers (GPT-2 lineage, Llama SentencePiece with its `▁` meta-space), the word-boundary space is *part of the token*. ` dog` and `dog` are different ids. End a prompt mid-word, or hand-concatenate strings across a boundary the model never saw in training, and it gets a different token sequence from the one you meant. The distribution shifts and behavior changes with no error.
 
-**Fix:** Never hand-build the token stream across boundaries. Render prompts through the model's own chat template and let the tokenizer decide boundaries; respect `add_prefix_space` semantics; when prefilling, prefill on a boundary the model expects.
+**Fix:** Don't hand-build the token stream across boundaries. Render prompts through the model's own chat template and let the tokenizer place boundaries; respect `add_prefix_space` semantics; when prefilling, stop on a boundary the model expects.
 
-**Detection:** Tokenize the two variants and diff the id lists. Check whether the last token of your prompt is a partial word or an unexpected bare-vs-spaced form.
+**Detection:** Tokenize both variants and diff the id lists. Check whether your prompt's last token is a partial word or an unexpected bare-vs-spaced form.
 
 ## 2. The trailing-whitespace trap
 
-**Symptom:** The first generated token is garbled, lowercased oddly, or the model "stutters" only when the prompt ends with a space or newline.
+**Symptom:** The first generated token is garbled or oddly lowercased, or the model "stutters," but only when the prompt ends in a space or newline.
 
-**Cause:** Most content tokens are *space-prefixed* (` the`, ` and`). If the prompt ends with a literal space, the model must now emit a token that does **not** begin with a space to continue the word — a low-probability, off-distribution move it was rarely trained to make. You have split the natural token and forced the model onto the seam.
+**Cause:** Most content tokens are *space-prefixed* (` the`, ` and`). If the prompt ends with a literal space, the model has to emit a token that does **not** start with a space to continue the word, a low-probability, off-distribution move it was rarely trained on. You've split the natural token and put the model on the seam.
 
-**Fix:** Strip trailing whitespace from the prompt and let the model produce the space-prefixed token itself. [[Concept - Token Healing]] generalizes this: back up over the last few characters and re-tokenize so generation resumes on a natural boundary.
+**Fix:** Strip trailing whitespace and let the model produce the space-prefixed token itself. [[Concept - Token Healing]] generalizes this: back up over the last few characters and re-tokenize so generation resumes on a natural boundary.
 
-**Detection:** Assert `not prompt.endswith((" ", "\n", "\t"))` before sending; watch for anomalous first tokens on prompts that end in whitespace.
+**Detection:** Assert `not prompt.endswith((" ", "\n", "\t"))` before sending, and watch for odd first tokens on prompts ending in whitespace.
 
 ## 3. Double-BOS and template mismatch
 
-**Symptom:** A drop in quality, ignored system prompts, or degraded few-shot performance after switching serving stacks — with an input that looks identical when printed.
+**Symptom:** Quality drops, system prompts get ignored, or few-shot performance degrades after switching serving stacks, on input that looks identical when printed.
 
-**Cause:** The tokenizer adds a BOS token (`add_special_tokens=True`) *and* the chat template also prepends BOS, yielding two BOS tokens. Many models handle this poorly because the [[Concept - Attention Sinks]] mechanism expects exactly one stable anchor at position 0; a second BOS competes with it. The mirror bug — omitting BOS entirely because the template was supposed to add it — also degrades the sink and shifts behavior.
+**Cause:** The tokenizer adds a BOS (`add_special_tokens=True`) *and* the chat template prepends one, so you get two. Many models handle that poorly because the [[Concept - Attention Sinks]] mechanism expects one stable anchor at position 0, and a second BOS competes with it. The mirror bug, dropping BOS entirely because the template was supposed to add it, also weakens the sink and shifts behavior.
 
-**Fix:** Decide once where special tokens come from. If the chat template adds BOS, tokenize with `add_special_tokens=False`; verify the exact special-token sequence by decoding a fully rendered chat. Get the [[Concept - Chat Templates and Special Tokens]] contract right and freeze it.
+**Fix:** Decide once where special tokens come from. If the chat template adds BOS, tokenize with `add_special_tokens=False`, and confirm the exact special-token sequence by decoding a fully rendered chat. Get the [[Concept - Chat Templates and Special Tokens]] contract right and freeze it.
 
-**Detection:** `tokenizer.decode(input_ids)` on a real rendered request and eyeball the specials; count BOS ids — there must be exactly one.
+**Detection:** Run `tokenizer.decode(input_ids)` on a real rendered request and eyeball the specials. Count BOS ids; there must be exactly one.
 
 ## 4. Digit inconsistency and broken arithmetic
 
-**Symptom:** Arithmetic is wrong on long numbers, the model claims `9.11 > 9.9`, and number handling is inconsistent between prompts that "should" be the same.
+**Symptom:** Arithmetic goes wrong on long numbers, the model claims `9.11 > 9.9`, and number handling differs between prompts that "should" be the same.
 
-**Cause:** BPE merges multi-digit substrings by corpus frequency, so `2017` may be one token while `2018` is `201`+`8`. Digit tokens are therefore non-compositional and carry/borrow structure is invisible to the model; the same number can tokenize differently by context. The `9.11 > 9.9` error is this plus a training distribution (version strings, dates, chapter numbers) where `9.11` really does outrank `9.9`.
+**Cause:** BPE merges multi-digit substrings by corpus frequency, so `2017` may be one token and `2018` be `201`+`8`. Digit tokens end up non-compositional, carry/borrow structure is invisible to the model, and the same number can tokenize differently in different contexts. The `9.11 > 9.9` error is this plus training data (version strings, dates, chapter numbers) where `9.11` really does come after `9.9`.
 
-**Fix:** Prefer tokenizers that split digits individually or group them in fixed 3-digit chunks (PaLM/Llama-style) — the full story and the value-aware embedding fixes are in [[Concept - Numeracy and Digit Tokenization]]. For arithmetic-, code-, or finance-heavy workloads, test with off-distribution digit *lengths*, not just short numbers.
+**Fix:** Prefer tokenizers that split digits individually or group them in fixed 3-digit chunks (PaLM/Llama-style). [[Concept - Numeracy and Digit Tokenization]] has the full story and the value-aware embedding fixes. For arithmetic-, code- or finance-heavy workloads, test off-distribution digit *lengths* as well as short numbers.
 
-**Detection:** Tokenize a sweep of integers and decimals and look for inconsistent splits of the same digit strings; evaluate on long-digit arithmetic rather than trusting single-digit spot checks.
+**Detection:** Tokenize a sweep of integers and decimals and look for inconsistent splits of the same digit strings. Evaluate on long-digit arithmetic; single-digit spot checks prove little.
 
 ## 5. Multilingual and code over-fragmentation
 
-**Symptom:** Non-English text and source code cost noticeably more tokens, latency rises, the context window fills faster than expected, and per-token pricing is quietly higher for some languages than others.
+**Symptom:** Non-English text and source code cost noticeably more tokens, latency goes up, the context window fills faster than expected, and per-token pricing is quietly higher for some languages.
 
-**Cause:** A tokenizer trained mostly on English shreds other scripts and code into many short pieces or raw bytes. Tokens-per-word varies 2–5× across languages for the same content, which silently changes both the effective context budget and the cost of a request.
+**Cause:** A tokenizer trained mostly on English shreds other scripts and code into many short pieces or raw bytes. Tokens-per-word varies 2–5× across languages for the same content, which changes both the effective context budget and the cost of a request without anyone noticing.
 
-**Fix:** Choose or train a tokenizer that actually covers your target languages and code; budget context in *tokens*, not words; account for the per-language cost multiplier when pricing. Token count also drives cache economics — repeated prefixes recovered by [[Concept - Prompt Caching]] only pay off relative to how many tokens they actually are.
+**Fix:** Pick or train a tokenizer that covers your target languages and code. Budget context in *tokens*, not words, and include the per-language cost multiplier in pricing. Token count also drives cache economics: prefixes reused through [[Concept - Prompt Caching]] only pay off relative to how many tokens they are.
 
-**Detection:** Measure tokens-per-word (or tokens-per-character) on representative samples for each target language and on your code; a >3–4× ratio versus English flags a quality-and-cost problem and, not coincidentally, the ranges where under-trained tokens cluster.
+**Detection:** Measure tokens-per-word (or per character) on representative samples of each target language and your code. A >3–4× ratio against English flags a quality-and-cost problem, and those are also the ranges where under-trained tokens cluster.
 
 ## 6. Glitch and unreachable tokens
 
-**Symptom:** Garbage, hallucination, refusal, or persona breaks when a rare string is in the input; some vocabulary that is simply dead weight.
+**Symptom:** Garbage, hallucination, refusal or persona breaks when a rare string appears in the input; some vocabulary that's just dead weight.
 
-**Cause:** *Under-trained* tokens (the SolidGoldMagikarp class) have near-random embeddings because the corpus never exercised them; the model reads a meaningless vector and behaves undefinedly. *Unreachable* tokens exist in the vocabulary but are never produced by the tokenizer on any normal string — wasted capacity, and occasionally an exploit surface. The full backstory is in [[Lore - Glitch Tokens]].
+**Cause:** *Under-trained* tokens (the SolidGoldMagikarp class) have near-random embeddings because the corpus never exercised them, so the model reads a meaningless vector and does something undefined. *Unreachable* tokens are in the vocabulary but the tokenizer never produces them from any normal string: wasted capacity and occasionally an exploit surface. The backstory is in [[Lore - Glitch Tokens]].
 
-**Fix:** Audit before trusting a new tokenizer or open-weights model; remap or filter known glitch tokens out of any user-controllable input path. Run the [[Checklist - Auditing a Tokenizer for Glitch Tokens]] as a gate.
+**Fix:** Audit a new tokenizer or open-weights model before trusting it, and remap or filter known glitch tokens out of any user-controllable input path. Use [[Checklist - Auditing a Tokenizer for Glitch Tokens]] as a gate.
 
-**Detection:** Embedding-norm / max-predicted-probability screen across the whole vocab, then a behavioral repeat probe on the worst offenders — the recipe in the checklist above.
+**Detection:** Screen the whole vocab by embedding norm / max predicted probability, then run a behavioral repeat probe on the worst offenders, following the checklist above.
 
 ## Symptom → cause quick table
 

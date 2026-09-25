@@ -4,9 +4,9 @@ aliases: [DPO loss, DPO training step]
 summary: "PyTorch DPO loss from policy and reference log-probs: masked log-prob gather, beta log-ratio margin, and reward-accuracy metric."
 ---
 
-**What it does:** computes the [[Concept - Direct Preference Optimization (DPO)]] loss for one batch of (chosen, rejected) pairs, given the policy and frozen reference models, and returns the loss plus a reward-accuracy diagnostic.
-**Dependencies:** `torch>=2.1` (only). No trainer framework required — this is the loss function, not the training loop.
-**Expected output:** for a batch where the policy already agrees with the preference labels more than the reference does, `reward_accuracy` should read above 0.5 and rise over training; a healthy run shows loss decreasing while `reward_accuracy` climbs toward 0.7–0.9+.
+**What it does:** computes the [[Concept - Direct Preference Optimization (DPO)]] loss for one batch of (chosen, rejected) pairs from the policy and the frozen reference model. Returns the loss and a reward-accuracy diagnostic.
+**Dependencies:** `torch>=2.1`, nothing else. No trainer framework; this is the loss function, and the training loop is yours.
+**Expected output:** if the policy already agrees with the preference labels more than the reference does, `reward_accuracy` reads above 0.5 and rises over training. In a healthy run the loss falls while `reward_accuracy` climbs toward 0.7–0.9+.
 
 ```python
 import torch
@@ -75,10 +75,10 @@ def dpo_loss(
 
 ## Why it's written this way
 
-- **Reuses the SFT completion mask verbatim.** `gather_completion_logps` takes the exact `mask` tensor built for [[Concept - Loss Masking and Sequence Packing]] rather than re-deriving completion spans. Any drift between the mask used to train the reference checkpoint and the mask used here silently corrupts `ref_logratios` — DPO's correctness depends on policy and reference being scored under identical preprocessing.
-- **Sum, not mean, over completion tokens.** Summing log-probs is standard DPO and is what makes the loss (implicitly) prefer shorter completions less and longer ones more — this is the length-bias mechanism (see [[Concept - Length Bias in Preference Optimization]]). Switching the `.sum(dim=-1)` in `gather_completion_logps` to a length-normalized mean turns this into SimPO's reward, documented in [[Concept - The DPO Variant Family (IPO KTO ORPO SimPO)]]. Expose it as a flag if you need to A/B the two.
-- **`chosen_reward`/`rejected_reward` are detached.** They are diagnostics, not part of the loss graph — DPO's implicit reward is a derived quantity (β times the policy/reference log-ratio), and computing it without `.detach()` would silently double-count gradient through the metric path in some autograd setups. `reward_accuracy` is the single most useful training-health number to log: it should climb monotonically even when the raw loss value is noisy.
-- **`F.logsigmoid` instead of `torch.log(torch.sigmoid(...))`.** The naive composition underflows to `-inf` for very negative margins; `logsigmoid` is numerically stable across the full range the [[Concept - KL Divergence]]-derived margin can take, especially early in training when `pi_logratios` and `ref_logratios` are close and the argument can swing widely with a high β.
+- **It reuses the SFT completion mask as-is.** `gather_completion_logps` takes the same `mask` tensor built for [[Concept - Loss Masking and Sequence Packing]] instead of re-deriving completion spans. If the mask used to train the reference checkpoint drifts from the one used here, `ref_logratios` is silently wrong. DPO only works when policy and reference are scored under identical preprocessing.
+- **Sum over completion tokens, not mean.** Summing log-probs is standard DPO. It's also why the loss implicitly prefers shorter completions less and longer ones more, which is the length-bias mechanism in [[Concept - Length Bias in Preference Optimization]]. Change the `.sum(dim=-1)` in `gather_completion_logps` to a length-normalized mean and you get SimPO's reward ([[Concept - The DPO Variant Family (IPO KTO ORPO SimPO)]]). Make it a flag if you need to A/B the two.
+- **`chosen_reward` and `rejected_reward` are detached.** They're diagnostics and stay out of the loss graph. DPO's implicit reward is derived (β times the policy/reference log-ratio), and without `.detach()` some autograd setups would silently double-count gradient through the metric path. Of everything you can log, `reward_accuracy` tells you the most about training health: it should climb monotonically even when the raw loss is noisy.
+- **`F.logsigmoid` instead of `torch.log(torch.sigmoid(...))`.** The naive version underflows to `-inf` for very negative margins. `logsigmoid` stays stable across the whole range the [[Concept - KL Divergence]]-derived margin can take. That matters most early in training, when `pi_logratios` and `ref_logratios` are close and a high β can make the argument swing widely.
 
 ## Connections
 

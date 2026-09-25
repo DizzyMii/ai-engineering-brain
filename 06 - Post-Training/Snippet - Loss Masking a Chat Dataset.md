@@ -5,11 +5,11 @@ summary: "Tokenizes a multi-turn chat example and builds a label mask so cross-e
 ---
 
 ## What it does
-Tokenizes a multi-turn conversation with a model's [[Concept - Chat Templates and Special Tokens|chat template]] and produces `input_ids`/`labels` where every non-assistant token (system, user, role headers, padding) is set to PyTorch's `-100` ignore index, and only assistant content plus its terminal token carries loss. Tokenizes **per-turn** rather than re-tokenizing the full concatenated string, because BPE merges can span a turn boundary and silently shift where the assistant span actually starts.
+Tokenizes a multi-turn conversation with a model's [[Concept - Chat Templates and Special Tokens|chat template]] and builds `input_ids`/`labels`. Every non-assistant token (system, user, role headers, padding) gets PyTorch's `-100` ignore index; only assistant content and its terminal token carry loss. It tokenizes **per turn** instead of tokenizing the whole concatenated string, because BPE merges can cross a turn boundary and silently move where the assistant span starts.
 
 **Dependencies:** `transformers>=4.44` (for tokenizers that ship `return_assistant_tokens_mask`; the manual fallback below works with any version), `torch>=2.0`.
 
-**Expected output:** a printed table of `(token, label)` pairs where system/user tokens show `-100` and assistant tokens show their real token id, plus an assertion that at least one token is unmasked.
+**Expected output:** a printed table of `(token, label)` pairs, with `-100` on system/user tokens and the real token id on assistant tokens, plus an assertion that at least one token is unmasked.
 
 ```python
 import torch
@@ -85,10 +85,10 @@ if __name__ == "__main__":
 ```
 
 ## Why it's written this way
-- **Per-turn re-tokenization instead of string concatenation with offset search.** Tokenizing `messages[:i]` at every step and diffing against the previous prefix length is slightly more expensive than tokenizing the full string once and searching for turn boundaries in the decoded text, but it is exact: [[Concept - Byte-Pair Encoding|BPE]] can merge the last token of a user turn with the first token of the following role header, and a naive string-split approach silently misattributes that merged token's loss to the wrong side of the boundary.
-- **`-100` specifically, not `0` or a padding token id.** `-100` is `torch.nn.CrossEntropyLoss`'s default `ignore_index`; using any real token id there would either compute a spurious loss against that id or require passing a non-default `ignore_index` everywhere downstream, which is a footgun the moment the training loop is refactored.
-- **EOS/eot is left unmasked because it is the assistant turn's terminal token.** The chat template inserts it as part of the assistant span (e.g. Llama-3's `<|eot_id|>`), so the per-turn loop naturally includes it in the unmasked range — if a custom masking scheme trims the last token off each assistant span "to be safe," the model never learns to stop and runs to `max_new_tokens` at inference (see [[Gotchas - Chat Template Bugs]]).
-- **The hard assertion (`n_unmasked > 0`) is not optional.** A silently all-masked batch (e.g. from a role-name typo, or a template that doesn't distinguish `assistant` from `user`) trains at loss ≈ 0 with a gradient of exactly zero and no error — the single most expensive class of SFT bug to debug after the fact because the run looks like it's training normally on the loss curve.
+- **Per-turn re-tokenization, not string concatenation plus offset search.** Tokenizing `messages[:i]` at every step and diffing against the previous prefix length costs a bit more than tokenizing the full string once and searching the decoded text for turn boundaries. But it's exact. [[Concept - Byte-Pair Encoding|BPE]] can merge the last token of a user turn with the first token of the next role header, and a naive string split then silently puts that merged token's loss on the wrong side of the boundary.
+- **Why `-100` and not `0` or a padding token id.** `-100` is the default `ignore_index` of `torch.nn.CrossEntropyLoss`. Any real token id would either compute a spurious loss against that id or force you to pass a non-default `ignore_index` everywhere downstream, which breaks the first time someone refactors the training loop.
+- **EOS/eot stays unmasked because it ends the assistant turn.** The chat template puts it inside the assistant span (e.g. Llama-3's `<|eot_id|>`), so the per-turn loop includes it in the unmasked range automatically. If a custom masking scheme trims the last token off each assistant span "to be safe," the model never learns to stop and runs to `max_new_tokens` at inference (see [[Gotchas - Chat Template Bugs]]).
+- **Keep the hard assertion (`n_unmasked > 0`).** A silently all-masked batch (a role-name typo, say, or a template that doesn't tell `assistant` from `user`) trains at loss ≈ 0 with a gradient of zero and no error. It's the most expensive class of SFT bug to debug after the fact, because the loss curve looks like a normal run.
 
 ## Connections
 

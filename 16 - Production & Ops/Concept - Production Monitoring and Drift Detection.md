@@ -6,20 +6,24 @@ summary: "Detecting quality and behavior drift in production LLM systems with no
 
 # Concept - Production Monitoring and Drift Detection
 
-> **One-paragraph hook:** In classical ML you monitor drift against labels — accuracy fell, alert. In production LLM systems there is no label: nobody tells you the answer was wrong, the "model" is often a third-party API that can change under you, and every output is non-deterministic so no single sample is signal. Monitoring therefore becomes the art of watching *proxy* behavioral signals for a *distribution* shift, running a fixed canary probe to isolate model change from input change, and doing statistical change-detection that doesn't fire on noise. Teams that skip it discover regressions from angry users instead of dashboards.
+> **One-paragraph hook:** Classical ML monitors drift against labels: accuracy fell, alert. Production LLM systems have no label. Nobody tells you the answer was wrong, the "model" is often a third-party API that can change under you, and every output is non-deterministic, so no single sample is signal. Monitoring becomes three jobs: watch *proxy* behavioral signals for a *distribution* shift, run a fixed canary probe to separate model change from input change, and use statistical change detection that doesn't fire on noise. Teams that skip it hear about regressions from angry users instead of dashboards.
 
 ## The mechanism
 
-**Monitor proxy signals, because there is no ground truth.** You cannot measure correctness online, so you track behavioral surrogates whose *distributions* move when quality moves:
+### Proxy signals
+
+You can't measure correctness online, so you track behavioral surrogates whose *distributions* move when quality moves:
 
 - **Output shape:** length distribution (token count), JSON/schema-valid rate, format-conformance rate.
 - **Model behavior:** refusal/decline rate, tool-call error rate, empty/truncated-completion rate, `finish_reason` mix.
 - **System:** latency (TTFT/TPOT), cost per request, cache-hit rate.
-- **Human-in-the-loop:** thumbs-down rate, regeneration rate, human-escalation/handoff rate — the closest thing to a label you get for free.
+- **Human-in-the-loop:** thumbs-down rate, regeneration rate, human-escalation/handoff rate. This is the closest thing to a label you get for free.
 
-These come off your traces ([[Concept - LLM Observability and Tracing]]) and each is a time series you can put a detector on.
+All of these come off your traces ([[Concept - LLM Observability and Tracing]]), and each is a time series you can put a detector on.
 
-**Distinguish the drift *source*, because each has a different fix:**
+### Where the drift came from
+
+Each source has a different fix:
 
 | Source | Signature | Fix |
 |---|---|---|
@@ -29,16 +33,20 @@ These come off your traces ([[Concept - LLM Observability and Tracing]]) and eac
 | RAG-corpus change | retrieval hit-rate / context shifts | re-index / re-eval retrieval |
 | Cache pollution | hit-similarity distribution degrades | purge / re-key the cache |
 
-**Canary probing isolates model drift from everything else.** Run a *fixed* golden set of prompts on a schedule (hourly/daily) against the live endpoint and diff each output against a stored baseline — by embedding similarity and/or an LLM judge. Because the input is held constant, a canary shift can *only* mean the model/backend changed. This catches a silent provider update even when the model id string is pinned (the provider swapped hardware or a system default). It is the one signal that cleanly separates "the model changed" from "the traffic changed."
+### Canary probes
 
-**Statistical change-detection, not single-sample alarms.** Outputs are non-deterministic, so you alert on a windowed distribution shift, never one sample:
+Run a *fixed* golden set of prompts against the live endpoint on a schedule (hourly/daily) and diff each output against a stored baseline, by embedding similarity, an LLM judge, or both. The input is held constant, so a canary shift can *only* mean the model or backend changed. It catches a silent provider update even when the model id string is pinned (the provider swapped hardware or a system default). No other signal cleanly separates "the model changed" from "the traffic changed."
+
+### Change detection over windows
+
+Outputs are non-deterministic, so alert on a windowed distribution shift and never on one sample.
 
 - **Population Stability Index (PSI)** for a metric binned against a baseline:
 $$\text{PSI} = \sum_i (a_i - e_i)\,\ln\frac{a_i}{e_i}$$
-  where $e_i$ = baseline fraction in bin $i$, $a_i$ = current fraction. Classical thresholds: $<0.1$ no shift, $0.1\text{–}0.25$ moderate, $>0.25$ significant. Standard tool for length/refusal-rate distribution shift.
-- **CUSUM** control chart to catch small *persistent* shifts faster than a Shewhart chart: $S_t = \max(0,\, S_{t-1} + (x_t - \mu_0 - k))$, alarm when $S_t > h$. Ideal for a slow quality creep that a threshold alert would miss.
+  where $e_i$ = baseline fraction in bin $i$, $a_i$ = current fraction. Classical thresholds: $<0.1$ no shift, $0.1\text{–}0.25$ moderate, $>0.25$ significant. The standard tool for length or refusal-rate distribution shift.
+- **CUSUM** control chart, which catches small *persistent* shifts faster than a Shewhart chart: $S_t = \max(0,\, S_{t-1} + (x_t - \mu_0 - k))$, alarm when $S_t > h$. Good for a slow quality creep a threshold alert would miss.
 
-See [[Concept - Statistical Rigor in Model Evaluation]] for why the window and the confidence interval, not the point estimate, are what you act on.
+[[Concept - Statistical Rigor in Model Evaluation]] explains why you act on the window and the confidence interval, not the point estimate.
 
 ```
 proxy metrics ─┐
@@ -47,22 +55,26 @@ online judge  ─┘   (PSI / CUSUM /         │no
                     control chart)         └─▶ update baseline
 ```
 
-**Online eval as a first-class signal.** Run an async LLM judge ([[Concept - LLM-as-Judge]]) on sampled live traffic and track the score *trend* — with the caveat that the judge itself can drift (a provider update to the judge model shifts your quality metric with zero change to the system under test), so version-pin and periodically re-validate the judge ([[Concept - Meta-Evaluation of LLM Judges]]).
+### Online eval
+
+Run an async LLM judge ([[Concept - LLM-as-Judge]]) on sampled live traffic and track the score *trend*. The judge can drift too: a provider update to the judge model shifts your quality metric with zero change to the system under test. Version-pin it and re-validate it periodically ([[Concept - Meta-Evaluation of LLM Judges]]).
 
 ## In practice
 
-Wire proxy metrics as first-class dashboards sliced by prompt version and model id (so a regression bisects to a deploy). Cadence: real-time alerts on latency/error/cost, hourly-to-daily windows for behavioral distributions, scheduled canary runs. Tooling: Langfuse / Arize Phoenix for LLM traces and online scores; Evidently and WhyLabs bring classical drift statistics (PSI, distribution tests) to the proxy metrics. This monitoring is the sensor that gates [[Concept - Model Deployment Patterns for LLMs]] (canary/shadow rollout) and trips [[Playbook - Incident Response for LLM Systems]].
+Put the proxy metrics on dashboards sliced by prompt version and model id, so a regression bisects to a deploy. Cadence: real-time alerts on latency, errors and cost; hourly-to-daily windows for behavioral distributions; scheduled canary runs. For tooling, Langfuse and Arize Phoenix handle LLM traces and online scores, and Evidently and WhyLabs bring classical drift statistics (PSI, distribution tests) to the proxy metrics. This monitoring is the sensor that gates [[Concept - Model Deployment Patterns for LLMs]] (canary/shadow rollout) and trips [[Playbook - Incident Response for LLM Systems]].
 
 ## Failure modes
 
-- **Alert fatigue from noise.** Treating [[Concept - Nondeterminism in Production LLM Serving]] as signal — alerting on single samples — trains the team to ignore the pager. *Fix:* windowed detectors with tuned thresholds; alert on distributions.
-- **No stored baseline.** You notice something feels off but have nothing to diff against, so you can't tell drift from your imagination. *Fix:* snapshot a golden baseline at every known-good release.
-- **Monitoring latency but never quality.** The SRE dashboards are green while output quality quietly rots, because nobody put a quality signal on a chart.
-- **Misattributing input drift as model drift.** A new user segment shifts inputs; you "fix" the model/prompt and make it worse. *Fix:* the fixed-input canary — if the canary is stable, the model didn't move, so look at inputs.
+- **Alert fatigue from noise.** Treating [[Concept - Nondeterminism in Production LLM Serving]] as signal, i.e. alerting on single samples, trains the team to ignore the pager. *Fix:* windowed detectors with tuned thresholds; alert on distributions.
+- **No stored baseline.** Something feels off but there's nothing to diff against, so you can't tell drift from your imagination. *Fix:* snapshot a golden baseline at every known-good release.
+- **Monitoring latency but never quality.** The SRE dashboards stay green while output quality rots, because nobody charted a quality signal.
+- **Blaming the model for input drift.** A new user segment shifts inputs; you "fix" the model or prompt and make it worse. *Fix:* the fixed-input canary. If it's stable, the model didn't move, so look at inputs.
 
 ## The non-obvious
 
-**Only a constant-input probe can attribute drift; production metrics alone cannot.** Every proxy metric on live traffic is a convolution of two moving things — the input distribution and the model's behavior. When refusal rate jumps, you genuinely cannot tell from that number whether the model got more cautious or your users started asking edgier questions. The single highest-leverage piece of monitoring is therefore the boring one: a fixed golden prompt set replayed on a schedule. Holding the input constant collapses the ambiguity — any movement is now unambiguously the model/backend. Teams over-invest in fancy live-traffic dashboards and under-invest in the canary, then spend an incident arguing about causation they could have designed away. And the second-order trap: your *judge* is also a model, so an online-eval score drop can mean the system regressed **or** the judge did — a monitoring system that doesn't version-pin and canary its own judge will eventually chase a phantom regression that was really a silent update to the grader.
+**Only a constant-input probe can attribute drift. Production metrics alone can't.** Every proxy metric on live traffic mixes two moving things, the input distribution and the model's behavior. When refusal rate jumps, that number can't tell you whether the model got more cautious or your users started asking edgier questions. So the most valuable piece of monitoring is the boring one: a fixed golden prompt set replayed on a schedule. With the input held constant, any movement is the model or backend. Teams over-invest in live-traffic dashboards, under-invest in the canary, and then spend an incident arguing about causation they could have designed away.
+
+The second-order trap: your *judge* is also a model. An online-eval score drop can mean the system regressed **or** the judge did. A monitoring setup that doesn't version-pin and canary its own judge will eventually chase a phantom regression that was a silent update to the grader.
 
 ## Connections
 - [[Concept - LLM Observability and Tracing]] — the telemetry layer that produces every signal this note detects on; monitoring is the analysis tier over that raw capture.

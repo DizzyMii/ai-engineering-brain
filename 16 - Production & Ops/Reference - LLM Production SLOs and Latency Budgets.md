@@ -28,7 +28,7 @@ summary: "The real latency/SLO targets and budget decompositions teams hold for 
 | 20–50 tok/s | 20–50 ms | reads as fluid; output outruns the eye, total generation time is hidden |
 | 100+ tok/s | < 10 ms | imperceptibly fast; only matters for non-streamed / programmatic consumers |
 
-**Rule:** below reading speed the stream feels slow *regardless of total latency*; above it, only TTFT and total length are perceptible. This is why TTFT, not total latency, is the number to defend for interactive UX. (Perceptual thresholds trace to Miller 1968 / Nielsen 1993: 0.1 s = instantaneous, 1 s = flow unbroken, 10 s = attention lost.)
+**Rule:** below reading speed the stream feels slow *regardless of total latency*. Above it, users only perceive TTFT and total length, so TTFT is the number to defend for interactive UX. (Perceptual thresholds trace to Miller 1968 / Nielsen 1993: 0.1 s = instantaneous, 1 s = flow unbroken, 10 s = attention lost.)
 
 ## End-to-end budget decomposition (worked example)
 
@@ -46,7 +46,7 @@ Target: **p95 end-to-end ≤ 2000 ms**, chat with RAG, ~200 output tokens.
 | **Total** | **~1190 ms** | ~810 ms headroom for the tail |
 | *Perceived (TTFT budget)* | **~630 ms** | network + gateway + guardrail + queue + prefill; decode is hidden behind reading |
 
-The two dominators are **prefill** (buy it down with prompt/[[Concept - KV Cache]] reuse and shorter context) and **decode** (buy it down with [[Concept - Speculative Decoding]], a faster GPU, or fewer output tokens). Everything else is rounding error unless a hop is broken.
+Two lines dominate. **Prefill**: cut it with prompt/[[Concept - KV Cache]] reuse and shorter context. **Decode**: cut it with [[Concept - Speculative Decoding]], a faster GPU, or fewer output tokens. The rest is rounding error unless a hop is broken.
 
 ## Throughput / cost anchors (as of 2026, folklore-grade³)
 
@@ -56,7 +56,7 @@ The two dominators are **prefill** (buy it down with prompt/[[Concept - KV Cache
 | ~70B, H100(s), fp8 | ~20–40 tok/s | few hundred – ~1–2k tok/s | tens |
 | Frontier hosted API | provider-managed | provider-managed | governed by your TPM/RPM tier, not GPUs |
 
-³ These are order-of-magnitude sizing rules of thumb, **not guarantees** — they swing with quantization, context length, [[Concept - Continuous Batching]] settings, and silicon generation. Measure your own; see [[Concept - LLM Load Testing and Capacity Planning]].
+³ Order-of-magnitude sizing rules of thumb, **not guarantees**. They swing with quantization, context length, [[Concept - Continuous Batching]] settings and silicon generation. Measure your own; see [[Concept - LLM Load Testing and Capacity Planning]].
 
 ## Availability targets & error budget
 
@@ -68,9 +68,9 @@ The two dominators are **prefill** (buy it down with prompt/[[Concept - KV Cache
 | 99.95% | 21.6 min | 4.38 h |
 | 99.99% | 4.32 min | 52.6 min |
 
-**Error budget** = $(1 - \text{SLO}) \times \text{period}$. At 99.9% monthly you have **43.2 min** of budget to spend on deploys, provider blips, and incidents; burn it and you freeze risky changes ([[Playbook - Incident Response for LLM Systems]] tracks the burn during an incident).
+**Error budget** = $(1 - \text{SLO}) \times \text{period}$. At 99.9% monthly you get **43.2 min** to spend on deploys, provider blips and incidents. Burn it and risky changes freeze ([[Playbook - Incident Response for LLM Systems]] tracks the burn during an incident).
 
-**Provider reality:** major LLM provider APIs have historically run at roughly 99.x% with occasional multi-hour outages, so a single upstream *cannot* underwrite a 99.9%+ app SLO. Multi-provider fallback is how you buy a higher tier: two independent providers each at 99.5%, both down simultaneously (assuming independence + instant failover), gives $1 - (0.005)^2 = 99.9975\%$. The catch is the independence assumption — shared cloud regions and correlated capacity crunches break it, so discount the compound number. [[Concept - Autoscaling LLM Inference]] and load-test-driven headroom cover the self-inflicted side of the budget.
+**Provider reality:** major LLM provider APIs have historically run at roughly 99.x% with occasional multi-hour outages. One upstream *cannot* underwrite a 99.9%+ app SLO. Multi-provider fallback buys a higher tier: two independent providers at 99.5% each are only down when both fail at once, which (assuming independence + instant failover) gives $1 - (0.005)^2 = 99.9975\%$. The catch is independence. Shared cloud regions and correlated capacity crunches break it, so discount the compound number. [[Concept - Autoscaling LLM Inference]] and load-test-driven headroom cover the self-inflicted side of the budget.
 
 ## Connections
 - [[Concept - LLM Load Testing and Capacity Planning]] — how you *measure* these targets and size capacity to hold them; this note is the target, that note is the method.

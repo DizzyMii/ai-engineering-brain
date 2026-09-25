@@ -15,7 +15,7 @@ summary: "Lookup for OpenTelemetry's gen_ai.* span names, attributes, and metric
 | `embeddings {model}` | `embeddings text-embedding-3-large` | CLIENT |
 | `execute_tool {tool_name}` | `execute_tool get_weather` | INTERNAL |
 
-All LLM-provider-call spans use span kind `CLIENT` and wrap the outbound network call to the provider; tool-execution spans are `INTERNAL` since they run in-process rather than crossing a service boundary.
+LLM-provider-call spans are `CLIENT` and wrap the outbound network call to the provider. Tool-execution spans are `INTERNAL` because they run in-process and never cross a service boundary.
 
 ## Core request attributes
 
@@ -35,16 +35,16 @@ All LLM-provider-call spans use span kind `CLIENT` and wrap the outbound network
 | `gen_ai.response.id` | Provider-assigned response/request id | `chatcmpl-abc123` |
 | `gen_ai.response.finish_reasons` | Why generation stopped | `["stop"]`, `["length"]`, `["tool_calls"]` |
 
-¹ Not always identical to `gen_ai.request.model` — a floating alias or a provider-side reroute can serve a different snapshot than requested. Diffing this field against the request model is a cheap, spec-native drift-detection signal (see [[Lore - When the Model Changed Under You]]).
+¹ Not always the same as `gen_ai.request.model`: a floating alias or a provider-side reroute can serve a different snapshot from the one requested. Diffing the two is a cheap, spec-native drift-detection signal (see [[Lore - When the Model Changed Under You]]).
 
 ## Token usage (span attributes)
 
 | Attribute | Meaning | Billing-authoritative? |
 |---|---|---|
-| `gen_ai.usage.input_tokens` | Prompt/input tokens consumed | Yes — use this, not a local tokenizer estimate |
+| `gen_ai.usage.input_tokens` | Prompt/input tokens consumed | Yes; use this, not a local tokenizer estimate |
 | `gen_ai.usage.output_tokens` | Completion/output tokens generated | Yes |
 
-These two fields are the span-level source of truth for cost computation — see [[Concept - Cost Engineering for LLM Applications]] for the pricing math that consumes them.
+These two fields are the span-level source of truth for cost. [[Concept - Cost Engineering for LLM Applications]] has the pricing math that uses them.
 
 ## Prompt/completion content capture
 
@@ -60,18 +60,18 @@ These two fields are the span-level source of truth for cost computation — see
 | `gen_ai.client.token.usage` | Histogram | `gen_ai.system`, `gen_ai.request.model`, token type (input/output) |
 | `gen_ai.client.operation.duration` | Histogram | `gen_ai.system`, `gen_ai.request.model`, operation name |
 
-The duration histogram is the raw material for TTFT/TPOT-style latency breakdowns in [[Concept - Latency, Throughput, and Cost in LLM Serving]]; the token-usage histogram feeds cost dashboards directly alongside the span-level attributes above.
+The duration histogram feeds TTFT/TPOT-style latency breakdowns in [[Concept - Latency, Throughput, and Cost in LLM Serving]]. The token-usage histogram feeds cost dashboards directly, next to the span-level attributes above.
 
 ## Instrumentation and stability
 
 | Aspect | Status (as of 2026) |
 |---|---|
-| Spec maturity | **Experimental** — attribute names and span shapes still change between semconv releases |
+| Spec maturity | **Experimental**; attribute names and span shapes still change between semconv releases |
 | Popular emitters | OpenLLMetry (Traceloop), OpenInference (Arize) |
 | Popular consumers | [[Breakdown - Langfuse]], Arize Phoenix, Traceloop backends |
-| Agent/tool-span coverage | Actively being extended (as of 2026) — do not assume a stable schema for multi-step agent traces yet, see [[Gotchas - Agents in Production]] |
+| Agent/tool-span coverage | Actively being extended (as of 2026). Don't assume a stable schema for multi-step agent traces yet; see [[Gotchas - Agents in Production]] |
 
-Because the spec is still Experimental, treat a semconv version upgrade as a breaking-change event for any dashboard or alert built directly on raw attribute names, and prefer instrumentation libraries that abstract the attribute names over hand-rolled `gen_ai.*` string literals scattered through application code.
+While the spec is Experimental, treat a semconv version upgrade as a breaking change for any dashboard or alert built on raw attribute names. Prefer instrumentation libraries that abstract the names over hand-rolled `gen_ai.*` string literals scattered through application code.
 
 ## Connections
 

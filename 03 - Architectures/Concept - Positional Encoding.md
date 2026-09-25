@@ -3,25 +3,25 @@ tags: [concept, domain/architectures, level/core]
 aliases: [position embeddings, positional embeddings, PE]
 summary: "The family of techniques for injecting order into permutation-equivariant self-attention: sinusoidal, learned, relative, ALiBi, NoPE, RoPE."
 ---
-> **One-paragraph hook:** Self-attention on its own cannot tell "dog bites man" from "man bites dog" — it's a weighted average over a set, and sets have no order. Every transformer needs some mechanism to inject position, and the twenty years of research condensed into modern LLMs boils down to five real families of solution, of which [[Concept - Rotary Position Embeddings (RoPE)]] is the current default. This note is the map; RoPE gets its own deep treatment.
+> **One-paragraph hook:** Self-attention by itself can't tell "dog bites man" from "man bites dog". It's a weighted average over a set, and sets have no order. Every transformer needs some way to inject position, and twenty years of research condensed into modern LLMs comes down to five real families of solution. [[Concept - Rotary Position Embeddings (RoPE)]] is the current default and has its own note; this one is the map.
 
 ## The mechanism
 
-Formally: $\text{Attn}(x_1, \ldots, x_n)$ built purely from $Q = xW_Q$, $K = xW_K$, $V = xW_V$ and softmax is *permutation-equivariant* — permute the input tokens and the outputs permute identically, with no signal about which position is which. Position must be injected somewhere: into the input embeddings, into the attention scores, or (as it turns out) obtained for free from the causal mask's asymmetry.
+Formally, $\text{Attn}(x_1, \ldots, x_n)$ built only from $Q = xW_Q$, $K = xW_K$, $V = xW_V$ and softmax is *permutation-equivariant*. Permute the input tokens and the outputs permute the same way, with no signal about which position is which. Position has to come in somewhere: through the input embeddings, through the attention scores, or (as it turns out) for free from the asymmetry of the causal mask.
 
-**Absolute sinusoidal** (Vaswani et al. 2017): add a fixed, non-learned vector to each token embedding before layer 1, built from sine/cosine at geometrically spaced frequencies:
+**Absolute sinusoidal** (Vaswani et al. 2017) adds a fixed, non-learned vector to each token embedding before layer 1, built from sine/cosine at geometrically spaced frequencies:
 $$PE_{(pos, 2i)} = \sin\!\left(\frac{pos}{10000^{2i/d}}\right), \quad PE_{(pos, 2i+1)} = \cos\!\left(\frac{pos}{10000^{2i/d}}\right)$$
-No learned parameters, and in principle continuable to any length — in practice extrapolation is poor because the model never trained on those specific phase combinations.
+It has no learned parameters and could in principle continue to any length. In practice it extrapolates poorly, because the model never trained on those particular phase combinations.
 
-**Learned absolute** (BERT, GPT-2): a trainable embedding table of shape `[max_len, d_model]` added to token embeddings. Simple and effective within range, but hard-capped: there is no row in the table for position `max_len + 1`, full stop.
+**Learned absolute** (BERT, GPT-2) is a trainable `[max_len, d_model]` embedding table added to token embeddings. Simple and effective within range, but hard-capped: there's no row for position `max_len + 1`, full stop.
 
-**Relative position** (Shaw et al. 2018; T5's relative-position bias buckets; Transformer-XL): instead of encoding *where* a token is, bias the attention score for pair $(i,j)$ by a function of $i-j$. This generalizes better to unseen lengths since the model only ever reasons about offsets, not absolute coordinates.
+**Relative position** (Shaw et al. 2018; T5's relative-position bias buckets; Transformer-XL) skips encoding *where* a token is. It biases the attention score for pair $(i,j)$ by a function of $i-j$. Since the model only ever reasons about offsets, never absolute coordinates, it generalizes better to unseen lengths.
 
-**ALiBi** (Press et al. 2021): no embeddings at all — subtract a linear, head-specific penalty directly from the raw attention scores: $\text{score}_{ij} \mathrel{-}= m_h \cdot (i - j)$ for $i \ge j$, where $m_h$ is a fixed geometrically-spaced slope per head. Zero added parameters, and empirically strong length extrapolation — a model trained at 1k tokens generalizes to several times that. Used in BLOOM and MPT.
+**ALiBi** (Press et al. 2021) uses no embeddings. It subtracts a linear, head-specific penalty straight from the raw attention scores: $\text{score}_{ij} \mathrel{-}= m_h \cdot (i - j)$ for $i \ge j$, where $m_h$ is a fixed, geometrically spaced slope per head. It adds zero parameters and extrapolates well empirically; a model trained at 1k tokens generalizes to several times that. BLOOM and MPT use it.
 
-**NoPE**: add nothing. Kazemnejad et al. (2023) showed decoder-only causal models can learn position *implicitly* from the causal mask alone and, at smaller scales, extrapolate surprisingly well without any explicit scheme — because the causal mask itself already breaks permutation equivariance (the *set* of tokens visible at position $i$ has size $i$, which is itself positional information).
+**NoPE** adds nothing. Kazemnejad et al. (2023) showed that decoder-only causal models can learn position *implicitly* from the causal mask and, at smaller scales, extrapolate surprisingly well with no explicit scheme. The causal mask already breaks permutation equivariance: the *set* of tokens visible at position $i$ has size $i$, and that size is positional information.
 
-**RoPE** (own note): rotates $Q$ and $K$ by a position-dependent angle in 2D subspaces so their dot product becomes a function of relative position with no added parameters and no bias table. It won on composability with linear attention and its KV-cache-friendliness, and is the default in essentially every 2024–2026 open-weight LLM.
+**RoPE** (own note) rotates $Q$ and $K$ by a position-dependent angle in 2D subspaces, so their dot product becomes a function of relative position with no added parameters and no bias table. It won on composability with linear attention and on KV-cache friendliness, and it's the default in essentially every 2024–2026 open-weight LLM.
 
 | Scheme | Params added | Extrapolation | Notes |
 |---|---|---|---|
@@ -34,15 +34,19 @@ No learned parameters, and in principle continuable to any length — in practic
 
 ## In practice
 
-Sinusoidal absolute lived in the original [[Concept - Encoder-Decoder and Decoder-Only Architectures]] Transformer and T5's encoder. Learned absolute powered BERT and GPT-2, both capped at 512/1024 tokens with no graceful way past it — extending context meant retraining the position table from scratch. ALiBi's biggest deployment is BLOOM (176B) and MPT-7B/30B, both explicitly built for extrapolation without fine-tuning. RoPE has been the default since roughly 2022 across the LLaMA/GPT-NeoX/Mistral/Qwen lineage, and its own extension machinery (Position Interpolation, NTK-aware scaling, YaRN — see [[Concept - Context Length Extension]]) is now the standard path to pushing a trained model past its original context length.
+Sinusoidal absolute appeared in the original [[Concept - Encoder-Decoder and Decoder-Only Architectures]] Transformer and in T5's encoder. Learned absolute powered BERT and GPT-2, capped at 512/1024 tokens with no graceful way past the cap; more context meant retraining the position table from scratch. ALiBi's biggest deployments are BLOOM (176B) and MPT-7B/30B, both built explicitly to extrapolate without fine-tuning. RoPE has been the default since roughly 2022 across the LLaMA/GPT-NeoX/Mistral/Qwen lineage. Its extension machinery (Position Interpolation, NTK-aware scaling, YaRN; see [[Concept - Context Length Extension]]) is now the standard way to push a trained model past its original context length.
 
 ## Failure modes
 
-Absolute schemes fail as a hard cliff: perplexity is fine up to `max_len`, then the model either has no embedding row to use (learned) or is evaluating frequency combinations it never saw in training (sinusoidal), and quality falls off a cliff rather than degrading gracefully. Relative and ALiBi-style schemes degrade more gently — perplexity rises smoothly past the trained length rather than exploding. **Detection**: plot perplexity (or task accuracy) against position bucket; a sharp knee exactly at the trained maximum is the signature of absolute-position dependence, while a smooth, gradual rise indicates a relative-style scheme running out of runway rather than breaking outright. This same diagnostic is the starting point for diagnosing [[Concept - Context Rot]] in long-context evaluation.
+Absolute schemes fail at a hard cliff. Perplexity is fine up to `max_len`. After that the model either has no embedding row (learned) or is evaluating frequency combinations it never saw in training (sinusoidal), and quality drops sharply instead of degrading gracefully. Relative and ALiBi-style schemes degrade more gently, with perplexity rising smoothly past the trained length.
+
+**Detection**: plot perplexity (or task accuracy) against position bucket. A sharp knee at the trained maximum is the signature of absolute-position dependence. A smooth, gradual rise means a relative-style scheme running out of runway, not breaking outright. The same plot is where diagnosing [[Concept - Context Rot]] in long-context evaluation starts.
 
 ## The non-obvious
 
-NoPE's success is not magic — it works because the causal mask is *already* an asymmetric structure that leaks position for free (the attended set's cardinality at position $i$ literally encodes $i$). That's a genuinely useful mental model even if you never ship a NoPE model: it explains why decoder-only architectures got away with weaker positional schemes than encoder-only ones ever could, since a bidirectional [[Concept - Attention Mechanism]] stack has no equivalent free signal. Folklore, weakly sourced: despite NoPE "working" in controlled academic settings, essentially no frontier lab ships it as the sole positional signal at 100B+ scale — the risk of a subtle degradation only visible at scale isn't worth the parameter savings, so RoPE (or RoPE plus NoPE-inspired tweaks in a subset of layers) remains the safe default even where NoPE alone would technically suffice.
+NoPE isn't magic. It works because the causal mask is *already* asymmetric and leaks position for free: the size of the attended set at position $i$ is literally $i$. That mental model is useful even if you never ship a NoPE model. It explains why decoder-only architectures got away with weaker positional schemes than encoder-only ones could, since a bidirectional [[Concept - Attention Mechanism]] stack has no equivalent free signal.
+
+Folklore, weakly sourced: NoPE "works" in controlled academic settings, yet essentially no frontier lab ships it as the sole positional signal at 100B+ scale. A subtle degradation that only appears at scale isn't worth the parameter savings. So RoPE (or RoPE plus NoPE-inspired tweaks in a subset of layers) stays the safe default, even where NoPE alone would technically suffice.
 
 ## Connections
 

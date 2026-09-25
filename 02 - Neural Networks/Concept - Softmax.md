@@ -5,40 +5,40 @@ summary: "Logits to probabilities. Shift-invariant, saturating, overflow-prone �
 ---
 
 # Concept - Softmax
-> **One-paragraph hook:** Softmax converts a vector of unnormalized scores (logits) into a probability distribution, and it sits at every output layer of every classifier and language model — plus inside every attention head, once per row of the score matrix. It looks like a two-line function; nearly everything an engineer needs to know about it lives in its pathologies: it overflows if implemented naively, its gradient dies exactly when the model is confident, and it structurally caps the expressivity of an LM's output distribution.
+> **One-paragraph hook:** Softmax turns a vector of unnormalized scores (logits) into a probability distribution. It sits at the output layer of every classifier and language model, and inside every attention head, once per row of the score matrix. It's a two-line function whose interest is all in its pathologies: implemented naively it overflows, its gradient dies right when the model is confident, and it caps how expressive an LM's output distribution can be.
 
 ## The mechanism
 
 $$\mathrm{softmax}(z)_i = \frac{e^{z_i}}{\sum_{j=1}^{C} e^{z_j}}$$
 
-The defining algebraic fact: softmax is **invariant to adding a constant** to every logit, since $e^{z_i + c} / \sum_j e^{z_j + c} = e^{z_i}/\sum_j e^{z_j}$. The mandatory numerically stable form exploits this by subtracting $m = \max_j z_j$ before exponentiating. This is not optional: $e^x$ overflows fp32 at $x > \ln(3.4\times10^{38}) \approx 88.7$ and fp16 at $x > \ln(65504) \approx 11.09$ — and trained LMs routinely produce logits in the 10–30 range, so a naive fp16 softmax NaNs on the first real batch.
+Adding a constant to every logit changes nothing, since $e^{z_i + c} / \sum_j e^{z_j + c} = e^{z_i}/\sum_j e^{z_j}$. The stable form uses this to subtract $m = \max_j z_j$ before exponentiating, and it's mandatory. $e^x$ overflows fp32 at $x > \ln(3.4\times10^{38}) \approx 88.7$ and fp16 at $x > \ln(65504) \approx 11.09$. Trained LMs routinely produce logits in the 10–30 range, so a naive fp16 softmax NaNs on the first real batch.
 
-**log-softmax** is computed via the log-sum-exp identity (see [[Snippet - The Log-Sum-Exp Trick]]), never as `log(softmax(x))`:
+Compute **log-softmax** through the log-sum-exp identity (see [[Snippet - The Log-Sum-Exp Trick]]), never as `log(softmax(x))`:
 
 $$\log \mathrm{softmax}(z)_i = z_i - \mathrm{LSE}(z), \qquad \mathrm{LSE}(z) = m + \log \sum_j e^{z_j - m}$$
 
-PyTorch fuses `log_softmax + nll_loss` into `F.cross_entropy` for exactly this stability reason — hand-rolling the composition is a classic NaN source (see [[Concept - Loss Functions for Neural Networks]]).
+PyTorch fuses `log_softmax + nll_loss` into `F.cross_entropy` for stability; hand-rolling the pair is a classic NaN source (see [[Concept - Loss Functions for Neural Networks]]).
 
-**The Jacobian** is $\partial s_i / \partial z_j = s_i(\delta_{ij} - s_j)$ — a rank-deficient matrix (rows sum to 0, another face of shift invariance). Composed with cross-entropy the whole thing collapses to the famously clean gradient $\partial L/\partial z = \hat{y} - y$, which is the reason softmax+CE dominates classification and why the fused pair backpropagates cheaply (see [[Concept - Backpropagation]]).
+**The Jacobian** is $\partial s_i / \partial z_j = s_i(\delta_{ij} - s_j)$. It's rank-deficient (rows sum to 0), shift invariance again. Composed with cross-entropy it collapses to the famously clean gradient $\partial L/\partial z = \hat{y} - y$. That's why softmax+CE dominates classification and why the fused pair backpropagates cheaply (see [[Concept - Backpropagation]]).
 
-**Temperature** divides logits before the exp: $\mathrm{softmax}(z/T)$. $T \to 0$ approaches argmax (one-hot), $T \to \infty$ approaches uniform. It is one knob wearing three hats: sampling sharpness at inference, soft-target smoothing in distillation, and calibration post-hoc (temperature scaling).
+**Temperature** divides the logits before the exp: $\mathrm{softmax}(z/T)$. As $T \to 0$ it approaches argmax (one-hot); as $T \to \infty$, uniform. One knob, three jobs: sampling sharpness at inference, soft-target smoothing in distillation, and post-hoc calibration (temperature scaling).
 
 ## In practice
 
-- **LM head:** softmax over the vocabulary — 50,257 entries for GPT-2, ~128K for Llama 3. At V=128K the softmax + sampling step is a nontrivial slice of per-token decode cost.
-- **Attention:** every row of $QK^\top/\sqrt{d_k}$ goes through softmax — the [[Concept - Attention Mechanism]] is softmax applied $N \times h$ times per layer, which is why fused/online softmax kernels matter so much.
-- **Sampling:** temperature, top-k, and top-p all operate on or after the softmax; see [[Concept - Sampling and Decoding Parameters]]. The same $T$ produces the soft targets in [[Concept - Knowledge Distillation]] (Hinton et al. 2015 used $T$ in the 2–5 range for most experiments).
-- **Kernels:** online softmax (Milakov & Gimelshein 2018) computes the running max and running sum in a single pass, enabling tiled, fused implementations — the numerical trick FlashAttention is built on. See [[Snippet - Fused Softmax Kernel in Triton]].
+- **LM head:** softmax over the vocabulary, 50,257 entries for GPT-2 and ~128K for Llama 3. At V=128K, softmax + sampling is a nontrivial slice of per-token decode cost.
+- **Attention:** every row of $QK^\top/\sqrt{d_k}$ goes through softmax. The [[Concept - Attention Mechanism]] applies it $N \times h$ times per layer, so fused/online softmax kernels matter a lot.
+- **Sampling:** temperature, top-k and top-p all act on or after the softmax; see [[Concept - Sampling and Decoding Parameters]]. The same $T$ produces the soft targets in [[Concept - Knowledge Distillation]] (Hinton et al. 2015 used $T$ in the 2–5 range for most experiments).
+- **Kernels:** online softmax (Milakov & Gimelshein 2018) keeps a running max and sum in one pass, allowing the tiled, fused implementations FlashAttention is built on. See [[Snippet - Fused Softmax Kernel in Triton]].
 
 ## Failure modes
 
-- **Overflow NaN.** Symptom: NaN loss on step ~1, especially under fp16. Cause: naive $e^{z}$ without max subtraction, or `log(softmax(...))`. Detection: `assert torch.isfinite(loss)`; check whether the logits' max exceeds ~11 in half precision. Fix: stable form, fused cross-entropy, compute the softmax in fp32.
-- **Saturation and logit drift.** Once one logit dominates, the winning probability pins near 1 and the softmax gradient $s_i(1-s_i)$ goes to ~0 — nothing in the loss pushes the logits back down, so their scale drifts upward through training. In the LM head this produces unbounded logit growth (remedies: label smoothing, weight decay on the head, or the z-loss auxiliary penalty $\sim 10^{-4}\log^2 Z$ used in PaLM — see [[Concept - z-loss and Logit Soft-Capping]]). In attention the same saturation appears as near-one-hot attention rows — see [[Concept - Attention Entropy Collapse]] and the related [[Concept - Attention Sinks]] phenomenon, where the shift-invariant, must-sum-to-1 structure forces heads to park probability mass somewhere even when no token deserves it.
-- **The softmax bottleneck.** Factoring an $N \times V$ log-probability matrix through a $d$-dimensional hidden state caps its rank at roughly $d$ (Yang et al. 2018), structurally limiting which output distributions the model can express at all — the full story is in [[Concept - The Softmax Bottleneck]].
+- **Overflow NaN.** Symptom: NaN loss on step ~1, especially under fp16. Cause: naive $e^{z}$ without max subtraction, or `log(softmax(...))`. Detection: `assert torch.isfinite(loss)`; in half precision, check whether the max logit exceeds ~11. Fix: stable form, fused cross-entropy, softmax computed in fp32.
+- **Saturation and logit drift.** Once one logit dominates, the winning probability pins near 1 and the softmax gradient $s_i(1-s_i)$ goes to ~0. Nothing in the loss pushes the logits back down, so their scale drifts up. In the LM head that means unbounded logit growth (remedies: label smoothing, weight decay on the head, or PaLM's z-loss auxiliary penalty $\sim 10^{-4}\log^2 Z$; see [[Concept - z-loss and Logit Soft-Capping]]). In attention, the same saturation shows up as near-one-hot rows. See [[Concept - Attention Entropy Collapse]] and the related [[Concept - Attention Sinks]], where the shift-invariant, must-sum-to-1 structure forces heads to park probability mass somewhere even when no token deserves it.
+- **The softmax bottleneck.** Factoring an $N \times V$ log-probability matrix through a $d$-dimensional hidden state caps its rank at roughly $d$ (Yang et al. 2018). That limits which output distributions the model can express at all; more is in [[Concept - The Softmax Bottleneck]].
 
 ## The non-obvious
 
-Logits are only defined **up to an additive constant per row**. A raw logit value of 14.2 means nothing in isolation — only differences between logits in the same row carry information. Practical consequences: you cannot compare absolute logit magnitudes across models, checkpoints, or even positions; the partition function $\log Z$ is a free parameter that wanders during training unless something (z-loss, weight decay) pins it; and interpretability tools that read logits, like [[Concept - The Logit Lens]], are only meaningful about relative structure. Folklore corollary: when two implementations "match" on probabilities but differ on logits by a constant per row, they are the same model — chasing that diff is a waste of an afternoon.
+Logits are defined only **up to an additive constant per row**. A raw logit of 14.2 means nothing by itself; only differences within a row carry information. You can't compare absolute logit magnitudes across models, checkpoints, or even positions. The partition function $\log Z$ is a free parameter that wanders during training unless something (z-loss, weight decay) pins it. Interpretability tools that read logits, like [[Concept - The Logit Lens]], only speak to relative structure. Folklore corollary: if two implementations match on probabilities but differ on logits by a constant per row, they're the same model, and chasing that diff wastes an afternoon.
 
 ## Connections
 

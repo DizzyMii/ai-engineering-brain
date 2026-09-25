@@ -3,23 +3,23 @@ tags: [concept, domain/architectures, level/core]
 aliases: [FFN, MLP block, SwiGLU, GEGLU, ReGLU, GLU]
 summary: "The position-wise sublayer holding most of a block's parameters, and the gated SwiGLU-style variants that replaced the plain two-layer MLP."
 ---
-> **One-paragraph hook:** Every transformer block has two sublayers: attention, which mixes information across positions, and the feed-forward network (FFN), which processes each position independently and holds the majority of the block's parameters and FLOPs. Since 2020 almost every frontier model has swapped the vanilla two-matrix FFN for a gated variant like SwiGLU — a change that adds a third weight matrix, consistently improves quality per parameter, and whose adoption is a good case study in "empirically works, theoretically unexplained."
+> **One-paragraph hook:** A transformer block has two sublayers. Attention mixes information across positions; the feed-forward network (FFN) processes each position on its own and holds most of the block's parameters and FLOPs. Since 2020 almost every frontier model has replaced the vanilla two-matrix FFN with a gated variant like SwiGLU. The change adds a third weight matrix and consistently improves quality per parameter, and its adoption is a good case study in "empirically works, theoretically unexplained."
 
 ## The mechanism
 
-The vanilla FFN is a position-wise two-layer MLP, structurally identical to a [[Concept - The Multilayer Perceptron]] applied independently to every token in the sequence:
+The vanilla FFN is a position-wise two-layer MLP, the same shape as a [[Concept - The Multilayer Perceptron]] applied separately to every token in the sequence:
 
 $$y = W_2 \, \text{act}(W_1 x + b_1) + b_2$$
 
-with hidden width $d_{ff}$ conventionally $4 \times d_{model}$ (the original Transformer's choice). Because it processes each position in isolation — no cross-token mixing, that's [[Concept - Attention Mechanism]]'s job — its parameter count per block is roughly $2 \cdot d_{ff} \cdot d_{model} = 8 d_{model}^2$ at the conventional 4x ratio, versus attention's roughly $4 d_{model}^2$ for QKVO projections. The FFN typically holds about two-thirds of a block's parameters and FLOPs.
+Hidden width $d_{ff}$ is conventionally $4 \times d_{model}$ (the original Transformer's choice). There's no cross-token mixing here; that's [[Concept - Attention Mechanism]]'s job. Per block the FFN costs roughly $2 \cdot d_{ff} \cdot d_{model} = 8 d_{model}^2$ parameters at the conventional 4x ratio, against roughly $4 d_{model}^2$ for attention's QKVO projections. So the FFN typically holds about two-thirds of a block's parameters and FLOPs.
 
-Activation choice evolved: ReLU in the original Transformer, then GELU (BERT, GPT-2/3 — a smooth approximation, $x \cdot \Phi(x)$, chosen for better gradient behavior than ReLU's hard kink), then SiLU/Swish ($x \cdot \sigma(x)$), which became the default paired with gating.
+The activation changed over time. The original Transformer used ReLU. BERT and GPT-2/3 used GELU, a smooth approximation ($x \cdot \Phi(x)$) picked for better gradient behavior than ReLU's hard kink. Then came SiLU/Swish ($x \cdot \sigma(x)$), which became the default once paired with gating.
 
-**GLU variants** (Shazeer 2020, "GLU Variants Improve Transformer") add a gate: instead of one activated branch, compute an elementwise product of an activated branch and a separate linear (ungated) branch, then project down:
+**GLU variants** (Shazeer 2020, "GLU Variants Improve Transformer") add a gate. You compute an activated branch and a separate linear (ungated) branch, multiply them elementwise, then project down:
 
 $$\text{SwiGLU}(x) = \big(\text{SiLU}(xW_1) \odot xW_3\big) W_2$$
 
-GEGLU and ReGLU swap in GELU or ReLU for the activated branch. The ablations in Shazeer's paper show a consistent perplexity improvement over vanilla ReLU/GELU FFNs at matched compute, and the pattern has held up across every major open-weight model family since.
+GEGLU and ReGLU put GELU or ReLU in the activated branch instead. Shazeer's ablations show a consistent perplexity improvement over vanilla ReLU/GELU FFNs at matched compute, and that has held up in every major open-weight model family since.
 
 ```
         x
@@ -35,29 +35,29 @@ GEGLU and ReGLU swap in GELU or ReLU for the activated branch. The ablations in 
       +residual
 ```
 
-**Parameter matching**: a GLU FFN has *three* weight matrices ($W_1, W_3 \in \mathbb{R}^{d_{model} \times d_{ff}}$, $W_2 \in \mathbb{R}^{d_{ff} \times d_{model}}$) instead of two, so at the same $d_{ff}$ it costs 50% more parameters and FLOPs than the vanilla version. To keep total params/FLOPs comparable to a plain 4x FFN, LLaMA scales $d_{ff}$ down to roughly $\frac{8}{3} d_{model}$, then rounds up to a hardware-friendly multiple (e.g., a multiple of 256) for clean GEMM tiling. Concretely: LLaMA-2 7B has $d_{model}=4096$; a vanilla 4x FFN would use $d_{ff}=16384$, while LLaMA-2's actual GLU $d_{ff}$ is 11008 — close to $\frac{8}{3}\times 4096 \approx 10922$, rounded to a friendly value.
+**Parameter matching.** A GLU FFN has *three* weight matrices ($W_1, W_3 \in \mathbb{R}^{d_{model} \times d_{ff}}$, $W_2 \in \mathbb{R}^{d_{ff} \times d_{model}}$), so at the same $d_{ff}$ it costs 50% more parameters and FLOPs than the vanilla FFN. To stay comparable to a plain 4x FFN, LLaMA shrinks $d_{ff}$ to roughly $\frac{8}{3} d_{model}$ and rounds up to a hardware-friendly multiple (e.g., a multiple of 256) so the GEMMs tile cleanly. Example: LLaMA-2 7B has $d_{model}=4096$. A vanilla 4x FFN would use $d_{ff}=16384$; LLaMA-2's actual GLU $d_{ff}$ is 11008, close to $\frac{8}{3}\times 4096 \approx 10922$ after rounding.
 
 ## In practice
 
-SwiGLU ships in LLaMA/LLaMA-2/LLaMA-3, PaLM, and Mistral/Mixtral; GeGLU ships in Gemma and Gemma 2. Bias terms ($b_1, b_2$) are dropped in nearly all modern FFN implementations — empirically harmless, and it saves parameters plus a small amount of compute and memory traffic.
+SwiGLU ships in LLaMA/LLaMA-2/LLaMA-3, PaLM, and Mistral/Mixtral. GeGLU ships in Gemma and Gemma 2. Nearly all modern FFN implementations drop the bias terms ($b_1, b_2$). That's empirically harmless and saves parameters plus a little compute and memory traffic.
 
-The **FFN-as-key-value-memory** view (Geva et al. 2021, "Transformer Feed-Forward Layers Are Key-Value Memories") is the standard interpretability bridge: treat each row of $W_1$ as a "key" — a pattern detector that fires when the input resembles some direction — and the corresponding column of $W_2$ as the "value" written into the [[Concept - The Residual Stream]] when that key fires:
+The standard interpretability bridge is the **FFN-as-key-value-memory** view (Geva et al. 2021, "Transformer Feed-Forward Layers Are Key-Value Memories"). Each row of $W_1$ is a "key", a pattern detector that fires when the input resembles some direction. The matching column of $W_2$ is the "value" written into [[Concept - The Residual Stream]] when that key fires:
 
 $$y = \sum_i \text{act}(k_i \cdot x) \, v_i, \quad k_i = \text{row}_i(W_1), \; v_i = \text{col}_i(W_2)$$
 
-This framing is exactly what underlies neuron-level interpretability work asking "what does hidden unit $i$ represent," and connects directly to [[Concept - Superposition]]: with $d_{ff}$ often 4–8x larger than $d_{model}$, the FFN is one of the two places (along with the residual stream itself) where superposed, polysemantic features are most studied.
+Neuron-level interpretability work ("what does hidden unit $i$ represent?") rests on this framing, and it ties straight into [[Concept - Superposition]]. With $d_{ff}$ often 4–8x larger than $d_{model}$, the FFN is one of the two places (the residual stream is the other) where superposed, polysemantic features get studied most.
 
 ## Failure modes
 
-Because the FFN carries roughly two-thirds of a block's parameters and FLOPs, it is precisely the sublayer that [[Concept - Mixture of Experts Architecture]] sparsifies — if you're chasing more capacity per active FLOP, the FFN is where the leverage is, which is why virtually every MoE architecture replaces the FFN (never the attention sublayer) with experts.
+The FFN carries roughly two-thirds of a block's parameters and FLOPs, which makes it the sublayer [[Concept - Mixture of Experts Architecture]] sparsifies. If you want more capacity per active FLOP, the FFN is where you get it. Virtually every MoE architecture swaps the FFN for experts and never touches the attention sublayer.
 
-A concrete porting bug: assuming the vanilla $d_{ff} = 4 d_{model}$ convention when writing inference code for a GLU-based checkpoint. Because GLU models use a scaled-down $d_{ff}$ (the 8/3 rule above), hardcoding the wrong ratio either produces a shape mismatch (loud failure) or, more dangerously if you're loading weights by position rather than by name, silently misassigns which matrix is $W_1$ vs $W_3$ — garbage output with no error.
+A common porting bug: assuming the vanilla $d_{ff} = 4 d_{model}$ convention when writing inference code for a GLU-based checkpoint. GLU models use a scaled-down $d_{ff}$ (the 8/3 rule above). Hardcode the wrong ratio and you get either a shape mismatch, which fails loudly, or, if you load weights by position instead of by name, a silent mix-up of $W_1$ and $W_3$. That one produces garbage output with no error.
 
-Activation-choice interacts with numerics: SwiGLU's unbounded gate branch can produce a wider dynamic range of activations than a plain GELU FFN, which matters when choosing tile/block scaling factors under [[Concept - Mixed Precision Training]] — an FFN that trained cleanly in bf16 can show larger quantization error under aggressive fp8 schemes if the gate branch's outlier activations aren't handled with per-tile rather than per-tensor scales.
+Activation choice also interacts with numerics. SwiGLU's unbounded gate branch can produce a wider dynamic range of activations than a plain GELU FFN, which matters when you pick tile/block scaling factors under [[Concept - Mixed Precision Training]]. An FFN that trained cleanly in bf16 can show larger quantization error under aggressive fp8 schemes unless the gate branch's outlier activations get per-tile scales instead of per-tensor ones.
 
 ## The non-obvious
 
-The "why 4x expansion" and "why SwiGLU specifically" defaults that nearly every frontier LLM inherits are largely empirical folklore, not derived from theory. Shazeer's own 2020 paper is explicit that it offers "no explanation" for why the SwiGLU/GEGLU family outperforms plain GELU — the paper reports the ablation result and stops there. That a one-page empirical note with no mechanistic theory became a load-bearing architectural default across nearly every open-weight LLM since 2022 is a useful reminder that a surprising amount of transformer architecture is "we tried it and it worked," not first-principles design (folklore, weakly sourced: some practitioners retroactively explain the gate as an implicit per-neuron soft feature-selection mechanism analogous to attention within the FFN — a plausible-sounding story, but a post-hoc rationalization rather than the original justification).
+The "4x expansion" and "SwiGLU specifically" defaults that nearly every frontier LLM inherits are mostly empirical folklore, not theory. Shazeer's 2020 paper says outright that it offers "no explanation" for why the SwiGLU/GEGLU family beats plain GELU; it reports the ablation and stops. A one-page empirical note with no mechanistic theory became a default across nearly every open-weight LLM since 2022. A surprising amount of transformer architecture is "we tried it and it worked" and not first-principles design. (Folklore, weakly sourced: some practitioners explain the gate after the fact as an implicit per-neuron soft feature-selection mechanism, like attention inside the FFN. It sounds plausible, but it's a post-hoc rationalization and wasn't the original justification.)
 
 ## Connections
 

@@ -6,28 +6,28 @@ summary: "End-to-end procedure for a sound experiment: pre-register, power, pick
 
 # Playbook - Running a Statistically Valid Experiment
 
-> **Goal:** Turn "model B looks better" into a defensible claim with a stated effect size, confidence interval, and false-positive control — not a number you talked yourself into.
-> **When to run this:** Any comparison whose outcome will move a decision — an A/B test, a fine-tune vs baseline eval, a kernel that "seems faster," a prompt change you want to ship.
-> **Prerequisites:** You can state one primary metric, you can generate independent (or paired) measurements, and you understand what a p-value is and is not — see [[Concept - Hypothesis Testing and p-values]].
+> **Goal:** Turn "model B looks better" into a defensible claim with a stated effect size, confidence interval and false-positive control, instead of a number you talked yourself into.
+> **When to run this:** Any comparison whose outcome will move a decision: an A/B test, a fine-tune vs baseline eval, a kernel that "seems faster," a prompt change you want to ship.
+> **Prerequisites:** You can state one primary metric, you can generate independent (or paired) measurements, and you know what a p-value is and isn't (see [[Concept - Hypothesis Testing and p-values]]).
 
-The default failure of engineering experiments is not bad math; it is *degrees of freedom*. Every unregistered choice — which metric, which slice, when to stop — is a lottery ticket for a false positive. This playbook removes those tickets in order.
+Engineering experiments mostly fail on *degrees of freedom*, not math. Every unregistered choice (which metric, which slice, when to stop) is a lottery ticket for a false positive. The steps below remove those tickets in order.
 
 ## Steps
 
-**1. Pre-register the hypothesis, primary metric, and decision rule — before touching data.**
-Write, in one place: the single primary metric, the direction and minimum effect size that would change your decision (the *minimum detectable effect*, MDE), the test you will run, and the alpha. Freeze it.
-→ *Expected:* A one-paragraph analysis plan you could hand to a skeptic.
-→ *Deviation:* If you find yourself choosing the metric *after* seeing results, you are in Gelman & Loken's "garden of forking paths" (2013) — every fork silently multiplies your false-positive rate. A pre-registered plan is the single strongest guard against it, and against the broader pathology Ioannidis (2005) named in "Why Most Published Research Findings Are False."
+**1. Pre-register the hypothesis, primary metric and decision rule before touching data.**
+Write down in one place: the single primary metric, the direction and minimum effect size that would change your decision (the *minimum detectable effect*, MDE), the test you'll run, and the alpha. Freeze it.
+→ *Expected:* A one-paragraph analysis plan you could hand a skeptic.
+→ *Deviation:* Picking the metric *after* seeing results puts you in Gelman & Loken's "garden of forking paths" (2013), where every fork multiplies your false-positive rate without you noticing. A pre-registered plan is the strongest guard against it, and against the broader pathology Ioannidis (2005) named in "Why Most Published Research Findings Are False."
 
 **2. Do a power analysis and size the experiment.**
-Estimate the metric's variance $\sigma^2$ (from a pilot or historical runs) and your MDE $\delta$. For comparing two means at power $1-\beta \approx 0.8$, two-sided $\alpha=0.05$:
+Estimate the metric's variance $\sigma^2$ (pilot or historical runs) and your MDE $\delta$. For comparing two means at power $1-\beta \approx 0.8$, two-sided $\alpha=0.05$:
 
 $$ n \approx \frac{2\,(z_{1-\alpha/2} + z_{1-\beta})^2\,\sigma^2}{\delta^2} = \frac{2\,(1.96 + 0.84)^2\,\sigma^2}{\delta^2} \approx \frac{15.7\,\sigma^2}{\delta^2}\ \text{per arm.}$$
 
-→ *Expected:* A concrete N per arm. Sample size scales as $\sigma^2/\delta^2$ — halving the effect you want to detect quadruples the cost.
-→ *Deviation:* If N is infeasible, **do not shrink the experiment — shrink the variance.** Pair or block: score both systems on the *identical* items and test the per-item differences. Pairing cancels item-difficulty variance, which usually dominates, and can cut required N by 10–100×. This is the highest-leverage move in the whole playbook and the one people skip.
+→ *Expected:* A specific N per arm. Sample size scales as $\sigma^2/\delta^2$, so halving the effect you want to detect quadruples the cost.
+→ *Deviation:* If N is infeasible, **shrink the variance, not the experiment.** Pair or block: score both systems on the *same* items and test the per-item differences. Pairing cancels item-difficulty variance, which usually dominates, and can cut required N by 10–100×. It's the biggest win here, and the step people skip.
 
-**3. Choose the test to match the data structure — not out of habit.**
+**3. Choose the test to match the data structure, not out of habit.**
 
 | Situation | Test | Why |
 |---|---|---|
@@ -36,29 +36,29 @@ $$ n \approx \frac{2\,(z_{1-\alpha/2} + z_{1-\beta})^2\,\sigma^2}{\delta^2} = \f
 | Arbitrary or non-normal metric (BLEU, pass@k, p95 latency) | Bootstrap CI (Efron 1979) | No distributional assumption; resample the *pairs* |
 | Small N, need an exact null | Permutation test | Exact under exchangeability; no asymptotics |
 
-→ *Expected:* A named test whose assumptions you can defend out loud.
-→ *Deviation:* Using an unpaired test on paired data throws away your best variance reduction; using a $t$-test on a heavy-tailed metric (latency, token counts) gives a CI that lies.
+→ *Expected:* A named test whose assumptions you can defend.
+→ *Deviation:* An unpaired test on paired data throws away your best variance reduction. A $t$-test on a heavy-tailed metric (latency, token counts) gives a CI that lies.
 
-**4. Run to the pre-registered N — do not peek and stop.**
-Fix N in advance, or if you must monitor live, use an *always-valid* method (alpha-spending / sequential confidence sequences).
-→ *Expected:* You compute significance once, at the planned stopping point.
-→ *Deviation:* Naive repeated interim looks inflate the false-positive rate far above your nominal $\alpha$ — checking a 0.05 test daily for two weeks yields a true FPR around 0.2–0.3. "It looked significant so we stopped" *invalidates the p-value.* This is the single most common sin in production A/B testing; it is exactly why platforms like Optimizely shipped sequential ("always-valid") statistics — the classic fixed-horizon test is wrong the moment a human watches the dashboard.
+**4. Run to the pre-registered N. Don't peek and stop.**
+Fix N in advance. If you must monitor live, use an *always-valid* method (alpha-spending / sequential confidence sequences).
+→ *Expected:* Significance computed once, at the planned stopping point.
+→ *Deviation:* Naive repeated interim looks push the false-positive rate far above your nominal $\alpha$. Checking a 0.05 test daily for two weeks gives a true FPR around 0.2–0.3. "It looked significant so we stopped" *invalidates the p-value.* It's the most common sin in production A/B testing, and it's why platforms like Optimizely shipped sequential ("always-valid") statistics: the classic fixed-horizon test is wrong the moment a human watches the dashboard.
 
 **5. Correct for multiplicity.**
-If you test many metrics, slices, or model variants, adjust. Bonferroni (divide $\alpha$ by the number of tests) is strict and controls family-wise error; Benjamini-Hochberg (1995) controls the false discovery rate and is far more powerful when you have many tests.
+Testing many metrics, slices or model variants? Adjust. Bonferroni (divide $\alpha$ by the number of tests) is strict and controls family-wise error. Benjamini-Hochberg (1995) controls the false discovery rate and has far more power when there are many tests.
 → *Expected:* Adjusted thresholds recorded alongside raw p-values.
-→ *Deviation:* An uncorrected sweep of 20 metrics at $\alpha=0.05$ expects ~1 spurious "win" by construction. The dashboard with 40 green cells has ~2 lies in it.
+→ *Deviation:* An uncorrected sweep of 20 metrics at $\alpha=0.05$ expects ~1 spurious "win" by construction. A dashboard with 40 green cells has ~2 lies in it.
 
-**6. Report the effect size with a confidence interval — not just the p-value.**
-State: effect size, its (1−α) CI, N, the test, and its assumptions. A p-value alone is uninterpretable; the CI carries the magnitude *and* the uncertainty.
+**6. Report the effect size with a confidence interval, beyond the p-value.**
+State the effect size, its (1−α) CI, N, the test and its assumptions. A p-value alone is uninterpretable. The CI carries the magnitude *and* the uncertainty.
 → *Expected:* "B beats A by 1.8 points (95% CI [0.4, 3.2]), paired bootstrap, n=2,000."
-→ *Deviation:* Reporting only "p<0.05" hides that the effect might be 0.4 points — statistically real, practically irrelevant.
+→ *Deviation:* Reporting only "p<0.05" hides that the effect might be 0.4 points: statistically real, practically irrelevant.
 
 ## Verification
 
-- **Reproduce on a fresh seed/split.** A real effect survives reseeding; a result that flips sign across seeds *is* the noise you were supposed to measure.
-- **Sanity-check the CI width against N.** A CI width wildly inconsistent with $\sigma/\sqrt{n}$ means a variance mis-estimate or a broken pairing.
-- **Run a negative control.** Compare a system to *itself* (two seeds of A). It should show no significant difference; if it does, your pipeline is leaking or your test's assumptions are violated.
+- **Reproduce on a fresh seed/split.** A real effect survives reseeding. A result that flips sign across seeds *is* the noise you were supposed to measure.
+- **Sanity-check the CI width against N.** If it's wildly off from $\sigma/\sqrt{n}$, you have a variance mis-estimate or a broken pairing.
+- **Run a negative control.** Compare A to *itself* (two seeds). It should show no significant difference. If it does, your pipeline is leaking or your test's assumptions don't hold.
 - **A/A test the harness** before trusting any A/B number.
 
 ## When it goes wrong
@@ -66,13 +66,13 @@ State: effect size, its (1−α) CI, N, the test, and its assumptions. A p-value
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Significant but tiny effect | Overpowered; N so large every trivial gap "wins" | Report effect size + CI; decide against the MDE, not against zero |
-| Wide CI spanning zero | Underpowered / high variance | Not "no difference" — inconclusive. Pair/block (Step 2) and add data |
+| Wide CI spanning zero | Underpowered / high variance | Inconclusive, which isn't "no difference". Pair/block (Step 2) and add data |
 | Result flips across seeds | You measured noise; item variance not controlled | Switch to a paired design; increase N |
 | Won "after we kept checking" | Optional-stopping inflation (Step 4) | Discard; rerun with fixed N or a sequential test |
 | One of 30 metrics is significant | Multiplicity (Step 5) | Apply Benjamini-Hochberg; treat unadjusted hits as hypotheses, not findings |
 | "Significant" but the CI barely clears zero and N is small | Winner's curse / Type M error (Gelman & Carlin 2014) | Underpowered wins overestimate the effect; replicate before believing the magnitude |
 
-For LLM- and benchmark-specific versions of these traps — judge variance, contamination, per-example scoring — cross over to the evaluation domain via the Connections below.
+The LLM- and benchmark-specific versions of these traps (judge variance, contamination, per-example scoring) live in the evaluation domain; see Connections below.
 
 ## Connections
 

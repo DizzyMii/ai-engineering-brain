@@ -6,14 +6,14 @@ summary: "Pre-flight checks before believing a leaderboard cell, a paper's headl
 
 # Checklist - Trusting a Benchmark Number
 
-Run every item below before a benchmark number changes a decision — a model choice, a launch claim, or a "we beat the competition" slide. A number that fails even one of these checks is not disqualified outright, but it needs a caveat attached before it goes anywhere near a decision document.
+Run every item below before a benchmark number changes a decision: a model choice, a launch claim, a "we beat the competition" slide. Failing one check doesn't disqualify a number outright, but it needs a caveat attached before it goes near a decision document.
 
 ## Reproducibility
 
 - [ ] The evaluation harness is named and version-pinned (e.g., a specific lm-evaluation-harness commit), not just "we ran the benchmark."
 - [ ] The prompt template and few-shot count are reported explicitly (0-shot vs. 5-shot changes the number materially).
 - [ ] The scoring method is stated: log-likelihood vs. free generation, and if MCQ, accuracy (`acc`) vs. length-normalized accuracy (`acc_norm`).
-- [ ] If comparing against a published number, the same harness version was used for both — cross-harness comparisons are not valid without re-running.
+- [ ] If comparing against a published number, the same harness version was used for both. Cross-harness comparisons aren't valid without re-running.
 
 ## Contamination
 
@@ -25,14 +25,14 @@ Run every item below before a benchmark number changes a decision — a model ch
 
 - [ ] Sample size (`n`) is reported for every score, not just the percentage.
 - [ ] A confidence interval or standard error accompanies the point estimate.
-- [ ] The claimed gap between two models is larger than the overlap of their confidence intervals — and ideally, a paired test (same items for both models) was used rather than comparing two independent marginal CIs, per [[Concept - Statistical Rigor in Model Evaluation]].
+- [ ] The claimed gap between two models is larger than the overlap of their confidence intervals. Ideally a paired test (same items for both models) was used instead of comparing two independent marginal CIs, per [[Concept - Statistical Rigor in Model Evaluation]].
 - [ ] On small benchmarks (roughly under a few hundred items, e.g. AIME's ~30/year), the per-item granularity is stated so a reader can judge whether the reported gap could be one or two flipped questions.
 
 ## Apples-to-apples
 
 - [ ] Every compared model used the same number of shots, the same benchmark subset/version, and the same answer-parsing logic.
-- [ ] Instruct/chat models were run with their correct chat template applied — an untemplated instruct model can lose 10–20 points for reasons unrelated to capability.
-- [ ] If one model's number is `pass@k`, `cons@k`, or `maj@k` and another's is `pass@1`, they are labeled as such and not silently presented as comparable — see [[Concept - Pass@k and Sampling-Based Evaluation]].
+- [ ] Instruct/chat models were run with their correct chat template. An untemplated instruct model can lose 10–20 points for reasons unrelated to capability.
+- [ ] If one model's number is `pass@k`, `cons@k`, or `maj@k` and another's is `pass@1`, they're labeled as such, not silently presented as comparable (see [[Concept - Pass@k and Sampling-Based Evaluation]]).
 
 ## Judge / human
 
@@ -47,11 +47,11 @@ Run every item below before a benchmark number changes a decision — a model ch
 
 ## Why these items
 
-- **Harness version-pinning** is on this list because of the 2023 Open LLM Leaderboard MMLU discrepancy: HuggingFace's own leaderboard, the original MMLU code, and Stanford HELM produced materially different numbers for the *same model*, purely from harness implementation differences — documented by the leaderboard maintainers themselves.
-- **The gaming check** exists because of Reflection-70B (Sept 2024): a claimed state-of-the-art release that independent evaluators could not reproduce, with evidence the serving API was silently proxying to another vendor's model — a well-documented fiasco, not a rumor.
-- **The length/formatting check under judge/human and gaming** exists because AlpacaEval's raw win-rate was measurably inflated by output length until the authors shipped a length-controlled version specifically to close that loophole.
-- **The statistics section's paired-test item** exists because GSM1k rebuilding GSM8K-style problems fresh exposed 8–13% drops in several model families that a same-benchmark, no-CI comparison would never have surfaced — the original number wasn't statistically wrong, it was measuring something narrower than "math capability" all along.
-- **Chat-template application** is here because it's one of the single largest, most silent sources of score variance in the field: the exact same weights can look like a materially weaker model purely from a missing template.
+- **Harness version-pinning** is here because of the 2023 Open LLM Leaderboard MMLU discrepancy. HuggingFace's own leaderboard, the original MMLU code and Stanford HELM produced materially different numbers for the *same model*, purely from harness implementation differences, as the leaderboard maintainers themselves documented.
+- **The gaming check** is here because of Reflection-70B (Sept 2024), a claimed state-of-the-art release that independent evaluators couldn't reproduce, with evidence that the serving API was silently proxying to another vendor's model. It's a well-documented fiasco, not a rumor.
+- **The length/formatting check under judge/human and gaming** is here because AlpacaEval's raw win-rate was measurably inflated by output length until the authors shipped a length-controlled version to close that loophole.
+- **The statistics section's paired-test item** is here because GSM1k, rebuilding GSM8K-style problems from scratch, exposed 8–13% drops in several model families that a same-benchmark, no-CI comparison would never have shown. The original number wasn't statistically wrong. It had been measuring something narrower than "math capability" all along.
+- **Chat-template application** is here because it's one of the largest and most silent sources of score variance in the field. Identical weights can look like a materially weaker model purely because of a missing template.
 
 ## Connections
 

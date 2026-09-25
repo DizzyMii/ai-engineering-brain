@@ -19,7 +19,7 @@ summary: "Lookup of AI mega-rounds, valuations, VC concentration, revenue multip
 | xAI | multi-billion raises | ~$50B+ | 2025 | E1/E2 |
 | Anysphere (Cursor) | $900M | $9.9B | Jun 2025 | E2 |
 
-OpenAI's ~$122B round at $852B post (Mar 31, 2026) is the **largest private tech raise in history**, surpassing its own prior record of $40B at $300B post (Mar 2025 — E2, Bloomberg/CNBC/TechCrunch). Anthropic's $30B Series G (Feb 12, 2026) is the **third-largest private tech round ever, after OpenAI's $122B (Mar 2026) and $40B (Mar 2025)**, and doubled its valuation from $183B to $380B in five months (E3, Anthropic newsroom / CNBC / Crunchbase) — the velocity of these marks is itself a signal. SoftBank's OpenAI commitment was structured to drop to as low as $20B if OpenAI failed to restructure to for-profit by end-2025 (E2) — a reminder that headline round size ≠ committed cash.
+OpenAI's ~$122B round at $852B post (Mar 31, 2026) is the **largest private tech raise in history**, beating its own prior record of $40B at $300B post (Mar 2025; E2, Bloomberg/CNBC/TechCrunch). Anthropic's $30B Series G (Feb 12, 2026) is the **third-largest private tech round ever, after OpenAI's $122B (Mar 2026) and $40B (Mar 2025)**. It doubled Anthropic's valuation from $183B to $380B in five months (E3, Anthropic newsroom / CNBC / Crunchbase), and the speed of these marks is a signal in itself. SoftBank's OpenAI commitment was structured to drop to as low as $20B if OpenAI failed to restructure to for-profit by end-2025 (E2). Headline round size ≠ committed cash.
 
 ## VC concentration
 
@@ -30,7 +30,7 @@ OpenAI's ~$122B round at $852B post (Mar 31, 2026) is the **largest private tech
 | AI share of US VC | ~86% of $412.7B | H1 2026 | E2 (PitchBook) |
 | US total VC | record ~$267B (Q-level) / global total VC $366.8B FY2025 | 2025 | E2 |
 
-Concentration cuts both ways: a handful of foundation-model labs absorbed most of the AI dollars, simultaneously **inflating** headline VC totals and **starving** everything that is not a frontier lab.
+A handful of foundation-model labs absorbed most of the AI dollars. That **inflates** headline VC totals and **starves** everything that isn't a frontier lab, both at once.
 
 ## Revenue multiples
 
@@ -40,18 +40,18 @@ Concentration cuts both ways: a handful of foundation-model labs absorbed most o
 | App-layer breakouts (Cursor) | ~15–20× ARR | E1/E2 |
 | Public SaaS comp (for contrast) | ~6–12× forward revenue | E3 |
 
-Lab multiples are richer than SaaS norms and are justified by growth rate and winner-take-most bets, **not** profitability — none of these companies is profitable (see [[Breakdown - Frontier Lab Economics]]). Whether the multiples are sane depends on the market forecasts of [[Reference - AI Market Sizing Claims]] actually materializing — the crux of [[Deep Dive - Bubble or Boom]].
+Lab multiples run richer than SaaS norms. Growth rate and winner-take-most bets justify them, **not** profitability: none of these companies is profitable (see [[Breakdown - Frontier Lab Economics]]). Whether the multiples are sane depends on the forecasts in [[Reference - AI Market Sizing Claims]] actually materializing, which is the crux of [[Deep Dive - Bubble or Boom]].
 
 ## Strategic / vendor money (the "funding" that is really compute)
 
 | Investor → investee | Amount | What it really is | Date | Tier |
 |---|---|---|---|---|
-| Nvidia → OpenAI | up to $100B | drawn as GPUs deploy — supplier funding customer | Sep 2025 | E2 |
+| Nvidia → OpenAI | up to $100B | drawn as GPUs deploy; supplier funding customer | Sep 2025 | E2 |
 | Nvidia → CoreWeave | ~$2B equity + $6.3B take-or-pay backstop | supplier + investor + demand backstop | 2025 | E2 |
 | Microsoft → OpenAI | tens of $B (cash + Azure credits) | cloud-credit-heavy | 2023–2025 | E2 |
 | SoftBank/Oracle/MGX → Stargate | $500B umbrella ($100B initial) | infra JV, spend commitment not cash raise | Jan 2025 | E2 |
 
-Strategic capital blurs the line between "funding," "revenue," and "spending commitment." When Nvidia invests in a lab that buys Nvidia chips, some of the "round" is effectively **pre-purchased GPU capacity** — the mechanism dissected in [[Deep Dive - Circular Financing in the AI Buildout]]. The CoreWeave structure is also the debt half of AI funding, where [[Concept - GPU Depreciation and Compute Capex Accounting]] determines whether the GPU collateral holds its value.
+Strategic capital blurs "funding," "revenue," and "spending commitment." When Nvidia invests in a lab that buys Nvidia chips, part of the "round" is effectively **pre-purchased GPU capacity**. [[Deep Dive - Circular Financing in the AI Buildout]] takes that mechanism apart. The CoreWeave structure is the debt half of AI funding, where [[Concept - GPU Depreciation and Compute Capex Accounting]] decides whether the GPU collateral holds its value.
 
 ## Secondaries and liquidity
 
@@ -60,17 +60,17 @@ Strategic capital blurs the line between "funding," "revenue," and "spending com
 | Employee tender offers | OpenAI, Anthropic, Anysphere | paper value → cash without IPO | E2 |
 | Structured strategic shares | SoftBank/Nvidia positions | valuation set by non-market-clearing buyers | E2 |
 
-Tenders converting equity to cash without an IPO mark a **private-market-heavy, IPO-light cycle** — capital and liquidity both stay private, so public-market price discovery never disciplines the marks.
+Tenders that turn equity into cash without an IPO mark a **private-market-heavy, IPO-light cycle**. Capital and liquidity both stay private, so public-market price discovery never checks the marks.
 
 ## Reading rules
 
 1. A private "valuation" is the price of the *last* (often strategic, structured) share, not a market-clearing price. Treat lab valuations as **E1 signals**, not audited worth.
-2. `raised ≠ revenue ≠ valuation`.[^1] Conflating any two of these is the single most common funding-headline error.
-3. Because much 2025-26 capital is earmarked for compute, a "raise" is frequently a **spending commitment routed straight to the infra layer** — the money enters the app/model layer and exits to Nvidia (see [[Concept - Value Capture Across the AI Stack]]).
+2. `raised ≠ revenue ≠ valuation`.[^1] Mixing up any two is the most common funding-headline error.
+3. Since much 2025-26 capital is earmarked for compute, a "raise" is frequently a **spending commitment routed straight to the infra layer**: the money enters the app/model layer and leaves for Nvidia (see [[Concept - Value Capture Across the AI Stack]]).
 4. Discount round sizes for structure: escrows, tranches, and conditionality (SoftBank's $40B→$20B clause) mean headline ≠ wired cash.
-5. Stress-test every valuation against real revenue: the [[Concept - The Pilot-to-Production Gap]] is why the ARR behind these marks can stall. For primary data, track filings and the trackers listed in [[Reference - Where Real AI Knowledge Lives]] rather than press-reported round sizes.
+5. Stress-test every valuation against real revenue: the [[Concept - The Pilot-to-Production Gap]] is why the ARR behind these marks can stall. For primary data, track filings and the trackers in [[Reference - Where Real AI Knowledge Lives]], not press-reported round sizes.
 
-[^1]: **raised** = capital committed to the company's balance sheet; **revenue** = sales to customers (ARR is annualized run-rate, not audited GAAP revenue); **valuation** = implied equity value from the marginal share price. A company can raise $13B, book $1B revenue, and be "worth" $183B simultaneously — Anthropic in Sep 2025.
+[^1]: **raised** = capital committed to the company's balance sheet; **revenue** = sales to customers (ARR is annualized run-rate, not audited GAAP revenue); **valuation** = implied equity value from the marginal share price. A company can raise $13B, book $1B revenue, and be "worth" $183B at the same time: Anthropic in Sep 2025.
 
 ## Connections
 - [[Breakdown - Frontier Lab Economics]] — where these raises go: funding the burn the multiples ignore.

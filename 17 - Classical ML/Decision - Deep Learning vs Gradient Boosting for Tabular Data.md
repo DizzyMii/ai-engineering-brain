@@ -4,7 +4,7 @@ aliases: [GBDT vs Deep Learning, Trees vs Neural Nets for Tabular Data]
 summary: "For tabular data under ~1M rows, gradient-boosted trees beat deep nets on accuracy, speed, and tuning cost — the default, with named exceptions."
 ---
 
-> On tabular data with heterogeneous numeric/categorical features and up to roughly 100k–1M rows, reach for [[Concept - Gradient Boosting]] first — XGBoost, LightGBM, or CatBoost, all stacks of shallow [[Concept - Decision Trees]] fit sequentially — not a deep net. The default only flips when the data stops looking tabular.
+> On tabular data with mixed numeric/categorical features and up to roughly 100k–1M rows, reach for [[Concept - Gradient Boosting]] first, not a deep net. That means XGBoost, LightGBM or CatBoost, all stacks of shallow [[Concept - Decision Trees]] fit in sequence. The default only flips when the data stops looking tabular.
 
 ## Decision flow
 
@@ -20,7 +20,7 @@ flowchart TD
     G -- Yes --> H[Deep tabular: FT-Transformer / TabTransformer,\nor a heavily regularized MLP;\nconsider a GBDT+DL ensemble]
 ```
 
-The default path resolves concretely to [[Breakdown - XGBoost]] (or an equivalent LightGBM/CatBoost run) for the large majority of real tabular projects — this is the empirically grounded verdict of Grinsztajn et al. (2022), "Why do tree-based models still outperform deep learning on tabular data?"
+For the large majority of real tabular projects the default path ends at [[Breakdown - XGBoost]] (or an equivalent LightGBM/CatBoost run). That's the empirical verdict of Grinsztajn et al. (2022), "Why do tree-based models still outperform deep learning on tabular data?"
 
 ## Tradeoff matrix
 
@@ -29,21 +29,21 @@ The default path resolves concretely to [[Breakdown - XGBoost]] (or an equivalen
 | Accuracy on small/medium tabular (<1M rows) | Best in most published benchmarks | Usually a bit behind unless heavily regularized (Kadra et al. 2021) | Matches tuned GBDT on <1k rows, <100 features |
 | Training compute | Seconds–minutes, CPU | Minutes–hours, GPU preferred | One GPU forward pass, no per-dataset training |
 | Tuning effort | Low–moderate; sane defaults + early stopping | High; architecture + regularization search | None per dataset (pretrained once) |
-| Handles uninformative features | Robust — splits simply ignore them | MLPs spread capacity across them, degrading signal | Inherited from the pretraining prior |
-| Fits irregular / non-smooth targets | Yes — piecewise-constant fits jagged functions well | NNs over-smooth sharp discontinuities | Inherits GBDT-like priors |
+| Handles uninformative features | Robust; splits just ignore them | MLPs spread capacity across them, degrading signal | Inherited from the pretraining prior |
+| Fits irregular / non-smooth targets | Yes; piecewise-constant fits handle jagged functions well | NNs over-smooth sharp discontinuities | Inherits GBDT-like priors |
 | Categorical / free-text / image columns | Needs encoding; poor at raw text/image | Natively embeds high-cardinality categoricals, text, images | v1: numeric only; v2 (2025) adds categoricals |
-| Interpretability | SHAP, gain importance, monotonic constraints | Harder; attention maps are a weak substitute | Low — opaque in-context inference |
+| Interpretability | SHAP, gain importance, monotonic constraints | Harder; attention maps are a weak substitute | Low; opaque in-context inference |
 | Deployment footprint | A few MB, CPU-servable | GPU-friendly, larger runtime | GPU required, dataset ships with every request |
-| Streaming / online updates | Awkward — full or incremental refit | Natural — a gradient step per batch | Not designed for this |
+| Streaming / online updates | Awkward; full or incremental refit | Natural; a gradient step per batch | Not designed for this |
 
 ## The details that flip the decision
 
-- **The columns are secretly a different modality.** If the highest-signal features are free text, images, or graph structure, the problem was never tabular — reach for a [[Concept - Vision Transformers]]-style or embedding-based pipeline, and, if you like, feed the resulting embeddings back into a GBDT as engineered features. This is the single most common reason GBDT "underperforms" in practice: the team never actually left tree-land when it should have.
-- **Rows are very few (<~1k) and features are mostly numeric.** [[Breakdown - TabPFN]] does no per-dataset training at all — it performs in-context inference with a transformer pretrained once on millions of synthetic datasets — and matched tuned GBDT in under a second on a GPU in v1's small-data regime. It stops being competitive as row count, feature count, or class count grow past its context limits.
-- **Representation transfer or end-to-end differentiability is required.** If the tabular model is one head bolted onto a larger neural system — jointly trained with an image tower, or sharing weights across related tasks — a deep tabular model is the only option that composes; GBDT is not differentiable end-to-end. This is the same build-vs-buy tension that shows up one layer up the stack in [[Decision - Fine-Tuning vs RAG vs Prompting]], and it's the practical analog of the transfer argument behind [[Concept - Scaling Laws]].
-- **"Deep tabular never wins" is folklore, not law.** A properly regularized MLP with the right dropout/weight-decay/data-augmentation cocktail (Kadra et al. 2021, "Well-Tuned Simple Nets Excel on Tabular Datasets") closes most of the gap to GBDT — most published DL-loses-to-trees results used under-regularized baselines. Budget for this before concluding DL "can't" work here.
-- **Cost and ops asymmetry rarely gets weighed.** A GBDT model that trains in 90 seconds on a laptop CPU and ships as an 8MB file changes the [[Concept - Cost Engineering for LLM Applications]]-style economics of a project versus a GPU-serving deep net — factor this in even when accuracy is a wash, echoing the more-capacity-isn't-free-capacity lesson familiar from [[Concept - Double Descent]].
-- **Kaggle-scale competitions sometimes stack both.** A small GBDT+DL ensemble occasionally adds a marginal lift on leaderboard-style problems — worth trying only after each model is independently tuned, not as a first move.
+- **The columns are secretly another modality.** If the highest-signal features are free text, images or graph structure, the problem was never tabular. Use a [[Concept - Vision Transformers]]-style or embedding-based pipeline, and if you like, feed the embeddings back into a GBDT as engineered features. This is the most common reason GBDT "underperforms" in practice: the team stayed in tree-land when it should have left.
+- **Very few rows (<~1k), mostly numeric features.** [[Breakdown - TabPFN]] does no per-dataset training. It runs in-context inference with a transformer pretrained once on millions of synthetic datasets, and in v1's small-data regime it matched tuned GBDT in under a second on a GPU. It stops being competitive once row, feature or class counts grow past its context limits.
+- **You need representation transfer or end-to-end differentiability.** If the tabular model is one head on a larger neural system (trained jointly with an image tower, or sharing weights across related tasks), only a deep tabular model composes. GBDT isn't differentiable end to end. It's the same build-vs-buy tension that appears one layer up in [[Decision - Fine-Tuning vs RAG vs Prompting]], and the practical analog of the transfer argument behind [[Concept - Scaling Laws]].
+- **"Deep tabular never wins" is folklore, not law.** A properly regularized MLP with the right dropout/weight-decay/data-augmentation cocktail (Kadra et al. 2021, "Well-Tuned Simple Nets Excel on Tabular Datasets") closes most of the gap to GBDT. Most published DL-loses-to-trees results used under-regularized baselines. Budget for this before concluding DL "can't" work here.
+- **The cost and ops asymmetry rarely gets weighed.** A GBDT that trains in 90 seconds on a laptop CPU and ships as an 8MB file has very different [[Concept - Cost Engineering for LLM Applications]]-style economics from a GPU-served deep net. Count it even when accuracy is a wash; it's the more-capacity-isn't-free lesson from [[Concept - Double Descent]].
+- **Kaggle-scale competitions sometimes stack both.** A small GBDT+DL ensemble occasionally adds a marginal lift on leaderboard-style problems. Try it only after each model is tuned on its own, never as a first move.
 
 ## Connections
 

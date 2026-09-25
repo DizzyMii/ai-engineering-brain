@@ -6,7 +6,7 @@ summary: "Minimal runnable causal multi-head attention in PyTorch: projections, 
 
 # Snippet - Scaled Dot-Product Attention from Scratch
 
-**What it does:** implements causal multi-head [[Concept - Attention Mechanism]] from raw [[Concept - Matrix Multiplication as the Atom of Deep Learning|matmuls]]: QKV projection, head split, scaled scores, causal masking, an fp32-upcast softmax, merge, output projection — the reference math that a fused kernel like [[Deep Dive - FlashAttention]] speeds up without changing. Single-config plain multi-head attention, no KV cache, no [[Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)|GQA/MQA]] head-sharing — meant to be read top to bottom, not to be fast.
+**What it does:** implements causal multi-head [[Concept - Attention Mechanism]] from raw [[Concept - Matrix Multiplication as the Atom of Deep Learning|matmuls]]: QKV projection, head split, scaled scores, causal masking, an fp32-upcast softmax, merge, output projection. This is the reference math that a fused kernel like [[Deep Dive - FlashAttention]] speeds up without changing. One config of plain multi-head attention: no KV cache, no [[Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)|GQA/MQA]] head-sharing. It's meant to be read top to bottom, and it isn't fast.
 
 **Dependencies:** `torch >= 2.0` (CPU is fine).
 
@@ -110,10 +110,10 @@ if __name__ == "__main__":
 
 ## Why it's written this way
 
-1. **fp32 softmax, cast back to the working dtype.** Attention scores can be large before masking and near-tied after it; computing `softmax` natively in bf16/fp16 risks saturating precision on the max-subtracted exponentials. Frameworks and fused kernels do the reduction in fp32 and the matmuls in low precision — this snippet spells that split out instead of hiding it in a library call.
-2. **`torch.triu(..., diagonal=1)`, not `diagonal=0`.** `diagonal=1` excludes the diagonal from the masked region, so position $i$ can attend to itself. Getting this one integer wrong either lets a token see the future (silent label leakage — loss looks *better*, not worse) or blocks it from seeing itself (loss plateaus visibly high). Both are catalogued in [[Gotchas - Implementing Attention]].
-3. **`view` then `transpose`, in that order, inside `split_heads`.** `view(B, T, H, d_head)` is a pure reinterpretation of contiguous memory that only works because the last dimension is genuinely `H * d_head` features; `transpose(1, 2)` then moves the head axis without touching data layout incorrectly. Reaching for a single `permute` with the wrong axis order produces a tensor of the *same shape* with heads and sequence positions mixed — a bug with no shape-based assertion that will catch it.
-4. **The causality self-test lives in `__main__`, not left as an exercise.** Perturbing future tokens and diffing the unaffected prefix is cheap (one extra forward pass) and catches the mask bugs in point 2 directly, rather than trusting a visual read of the mask tensor.
+1. **fp32 softmax, cast back to the working dtype.** Attention scores can be large before masking and near-tied after it, so a native bf16/fp16 `softmax` risks saturating precision on the max-subtracted exponentials. Frameworks and fused kernels do the reduction in fp32 and the matmuls in low precision. The snippet writes that split out where a library call would hide it.
+2. **`torch.triu(..., diagonal=1)`, not `diagonal=0`.** With `diagonal=1` the diagonal stays out of the masked region, so position $i$ can attend to itself. Get this one integer wrong and either a token sees the future (silent label leakage, and loss looks *better*) or it can't see itself (loss plateaus visibly high). [[Gotchas - Implementing Attention]] catalogs both.
+3. **`view` then `transpose` inside `split_heads`, in that order.** `view(B, T, H, d_head)` just reinterprets contiguous memory, which works only because the last dimension really is `H * d_head` features. `transpose(1, 2)` then moves the head axis without scrambling the layout. A single `permute` with the wrong axis order gives a tensor of the *same shape* with heads and sequence positions mixed, and no shape assertion will catch it.
+4. **The causality self-test is in `__main__`.** Perturbing future tokens and diffing the untouched prefix costs one extra forward pass. It catches the mask bugs from point 2 directly, so you don't have to trust your eyes on the mask tensor.
 
 ## Connections
 - [[Concept - Attention Mechanism]] — the theory this code implements verbatim: $Q$, $K$, $V$ projections, the $1/\sqrt{d_k}$ scale, and why softmax needs fp32.

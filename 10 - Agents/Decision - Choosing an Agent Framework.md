@@ -6,7 +6,7 @@ summary: "How to choose among the raw provider SDK and the major agent framework
 
 # Decision - Choosing an Agent Framework
 
-> The decision is whether to build your tool-use agent directly on a provider SDK or adopt a framework, and if a framework, which one. **Default for the 80% case (as of 2026):** start on the raw provider SDK with a single-tool-loop agent (see [[Playbook - Building a Tool-Use Agent from Scratch]]); adopt a framework only when a specific, named need appears.
+> The question is whether to build your tool-use agent directly on a provider SDK or adopt a framework, and if a framework, which one. **Default for the 80% case (as of 2026):** start on the raw provider SDK with a single-tool-loop agent (see [[Playbook - Building a Tool-Use Agent from Scratch]]). Adopt a framework only when a specific, named need shows up.
 
 ## Decision flow
 
@@ -27,28 +27,28 @@ flowchart TD
 
 | Option | Control granularity | Time-to-first-agent | Debuggability | Streaming + human-in-the-loop | State/checkpoint persistence | Vendor lock-in |
 |---|---|---|---|---|---|---|
-| Raw provider SDK | Full -- you own every line | Minutes to hours | Highest -- no abstraction to peel back | Manual, but simple to add | Manual (roll your own) | Low, but tied to one provider's tool-call wire format |
-| LangGraph | High -- explicit graph/state machine | Hours to a day | Good, once you learn the graph model | Built-in interrupt/resume nodes | Built-in checkpointers (durable execution) | Low (multi-provider) |
-| OpenAI Agents SDK / Claude Agent SDK | Medium -- framework owns handoffs and guardrails | Minutes | Medium | Built-in for the native use case | Partial | High -- provider-native |
-| CrewAI / AutoGen (AG2) | Medium -- role/conversation abstractions | Minutes to hours | Lower -- multi-agent chat logs are harder to trace | Varies by version | Varies | Low |
-| Pydantic AI | Medium -- validation-first wrapper | Minutes | Good -- type errors surface early | Built-in | Partial | Low |
-| DSPy | Orthogonal -- compiles prompts, not a runtime loop | Hours (setup plus an optimization run) | Different axis entirely | N/A | N/A | Low |
+| Raw provider SDK | Full: you own every line | Minutes to hours | Highest, no abstraction to peel back | Manual, but simple to add | Manual (roll your own) | Low, but tied to one provider's tool-call wire format |
+| LangGraph | High: explicit graph/state machine | Hours to a day | Good, once you learn the graph model | Built-in interrupt/resume nodes | Built-in checkpointers (durable execution) | Low (multi-provider) |
+| OpenAI Agents SDK / Claude Agent SDK | Medium: framework owns handoffs and guardrails | Minutes | Medium | Built-in for the native use case | Partial | High (provider-native) |
+| CrewAI / AutoGen (AG2) | Medium: role/conversation abstractions | Minutes to hours | Lower; multi-agent chat logs are harder to trace | Varies by version | Varies | Low |
+| Pydantic AI | Medium: validation-first wrapper | Minutes | Good, type errors surface early | Built-in | Partial | Low |
+| DSPy | Orthogonal: compiles prompts, isn't a runtime loop | Hours (setup plus an optimization run) | Different axis entirely | N/A | N/A | Low |
 
-This table is a distillation; see [[Reference - Agent Framework Landscape]] for the full per-framework feature matrix, which churns quarterly and is the one to re-check for current specifics.
+The table is a summary. [[Reference - Agent Framework Landscape]] has the full per-framework feature matrix; it churns quarterly, so check there for current specifics.
 
 ## The details that flip the decision
 
-**Need to pause and resume, or replay a run.** If the agent must survive a process restart mid-task (long-running approvals, multi-day workflows), durable execution stops being optional and the [[Deep Dive - The Agent Loop|raw loop]]'s in-memory message list is the wrong foundation -- this flips the decision to LangGraph or a Temporal-style durable-execution layer regardless of team size.
+**You need to pause and resume, or replay a run.** If the agent has to survive a process restart mid-task (long-running approvals, multi-day workflows), durable execution is mandatory and the [[Deep Dive - The Agent Loop|raw loop]]'s in-memory message list is the wrong foundation. Go to LangGraph or a Temporal-style durable-execution layer, whatever the team size.
 
-**Code-as-action need.** If the task is naturally "write and run a snippet" rather than "call a discrete tool" (data analysis, multi-step file manipulation), smolagents-style CodeAct cuts round-trips dramatically -- but it requires a real sandbox, which is a security decision, not just a framework one (see [[Checklist - Sandboxing an Agent]]).
+**The task is code-as-action.** When the work is naturally "write and run a snippet" instead of "call a discrete tool" (data analysis, multi-step file manipulation), smolagents-style CodeAct cuts round-trips dramatically. It also requires a real sandbox, which makes it a security decision as well as a framework one (see [[Checklist - Sandboxing an Agent]]).
 
-**Regulatory or audit need for full trace control.** Some environments (finance, health) require every prompt and decision to be reconstructable without a framework's internal state management obscuring it; this flips the decision back toward the thin raw-API stack even at larger team scale.
+**Regulators or auditors need full trace control.** Some environments (finance, health) require every prompt and decision to be reconstructable, with no framework state management obscuring it. That pushes you back toward the thin raw-API stack even at larger team scale.
 
-**A proven need for real multi-agent parallelism.** Let framework choice be downstream of [[Decision - Single-Agent vs Multi-Agent]], not the trigger for it -- don't reach for CrewAI/AutoGen before that decision is made on its own merits.
+**You've proven a need for multi-agent parallelism.** Framework choice should follow [[Decision - Single-Agent vs Multi-Agent]], never trigger it. Don't reach for CrewAI/AutoGen until that decision is made on its own merits.
 
-**Team already deep in one provider's ecosystem.** If you're all-in on Claude or all-in on OpenAI and don't need portability, the provider-native SDK's built-in handoffs and guardrails remove real glue code that LangGraph would otherwise make you write yourself.
+**The team is already deep in one provider's ecosystem.** If you're all-in on Claude or OpenAI and don't need portability, the provider-native SDK's built-in handoffs and guardrails remove glue code you'd otherwise write yourself in LangGraph.
 
-**Anti-pattern:** adopting a heavy multi-agent framework to compensate for a single agent that isn't working yet. Framework overhead does not fix a weak tool set, a bad system prompt, or missing [[Concept - LLM Observability and Tracing|observability]] -- it adds a debugging layer on top of the same underlying problem.
+**Anti-pattern:** adopting a heavy multi-agent framework to make up for a single agent that doesn't work yet. Framework overhead won't fix a weak tool set, a bad system prompt, or missing [[Concept - LLM Observability and Tracing|observability]]. It adds a debugging layer on top of the same problem.
 
 ## Connections
 - [[Reference - Agent Framework Landscape]] -- the descriptive feature matrix this decision's tradeoff table distills; check it for current specifics.

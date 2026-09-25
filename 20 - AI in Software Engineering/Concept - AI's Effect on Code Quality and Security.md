@@ -6,24 +6,24 @@ summary: "The measured downstream cost of AI-written code: rising churn/duplicat
 
 # Concept - AI's Effect on Code Quality and Security
 
-> AI writes code faster; the question this note answers is what that code costs *after* it's committed. The measured signals — code churn, duplication, declining refactoring, delivery instability, insecure patterns, and a new supply-chain attack class called slopsquatting — point the same direction: LLMs optimize for locally-plausible code and externalize the maintenance and security cost to whoever reads it next. The productivity gain and the quality debt can both be real at once; which one you see depends on whether you measure at commit time or twelve months out.
+> AI writes code faster. This note is about what that code costs *after* it's committed. The measured signals all point the same way: code churn, duplication, declining refactoring, delivery instability, insecure patterns, and a new supply-chain attack class called slopsquatting. LLMs optimize for locally plausible code and push the maintenance and security cost onto whoever reads it next. The productivity gain and the quality debt can both be real. Which one you see depends on whether you measure at commit time or twelve months out.
 
 ## The mechanism
 
-An LLM generates the most probable continuation of code given context. "Probable" is not "maintainable" and not "secure," and the divergence is systematic, not random:
+An LLM generates the most probable continuation of code given its context. Probable code isn't necessarily maintainable or secure, and the gap between them is systematic:
 
-- **It cannot feel maintenance cost.** Refactoring — extracting a shared abstraction, deleting a duplicate — is an investment that pays off later. The model has no later; it minimizes next-token loss over the current buffer. Presented with a near-duplicate block, generating a fresh copy is higher-probability and lower-friction than restructuring the codebase to share it. So AI **biases toward adding over refactoring**: copy-paste up, moved/refactored lines down.
-- **It asserts current behavior, not correct behavior.** When drafting tests or patches, the model's prior is "what does this code do," which freezes existing bugs into the regression suite — the oracle problem from [[Concept - AI in Software Testing]].
-- **It inherits its training corpus's vulnerabilities.** Public code is full of insecure patterns (string-concatenated SQL, disabled cert checks, hardcoded secrets). The model reproduces them at their training frequency, and does so with fluent, confident-looking code that *reads* as correct — which is exactly what defeats a skimming reviewer.
-- **It hallucinates referents.** Package names, API functions, config flags that don't exist are generated because they're plausible tokens. For dependencies this opens an attack surface (below).
+- **It can't feel maintenance cost.** Refactoring (extracting a shared abstraction, deleting a duplicate) is an investment that pays off later. The model has no later; it minimizes next-token loss over the current buffer. Given a near-duplicate block, a fresh copy is more probable and less friction than restructuring to share it. So AI **biases toward adding over refactoring**: copy-paste goes up, moved/refactored lines go down.
+- **It asserts current behavior instead of correct behavior.** Drafting tests or patches, the model's prior is "what does this code do," which freezes existing bugs into the regression suite. That's the oracle problem from [[Concept - AI in Software Testing]].
+- **It inherits its training corpus's vulnerabilities.** Public code is full of insecure patterns: string-concatenated SQL, disabled cert checks, hardcoded secrets. The model reproduces them at training frequency, in fluent code that *reads* as correct and gets past a skimming reviewer.
+- **It hallucinates referents.** Package names, API functions and config flags that don't exist get generated because they're plausible tokens. For dependencies that opens an attack surface (below).
 
-The through-line is the [[Concept - The Capability-Reliability Gap]]: the model is capable of correct, secure, well-factored code, but its *expected* output regresses toward the plausible mean of its corpus, and the last mile of quality is the expensive part.
+All four trace to [[Concept - The Capability-Reliability Gap]]. The model can write correct, secure, well-factored code, but its *expected* output regresses toward the plausible mean of its corpus, and the last mile of quality is the expensive part.
 
 ## In practice
 
-The measured evidence, tiered (see [[Reference - Developer Productivity Studies]] for the full catalog):
+The measured evidence, tiered (the full catalog is in [[Reference - Developer Productivity Studies]]):
 
-**Churn, duplication, refactoring — GitClear** (211M+ changed lines, Jan 2020–Dec 2024):
+**Churn, duplication, refactoring: GitClear** (211M+ changed lines, Jan 2020–Dec 2024):
 | Metric | 2020/21 baseline | 2024 | Tier |
 |---|---|---|---|
 | Code revised within 2 weeks of commit (churn) | 3.1% (2020) | 5.7% | E2 (single-vendor) |
@@ -31,26 +31,26 @@ The measured evidence, tiered (see [[Reference - Developer Productivity Studies]
 | Refactored / "moved" lines | 25% (2021) | <10% | E2 |
 | Blocks with 5+ duplicated lines | — | ~8x increase during 2024 | E2 |
 
-(Churn nearly doubled off its 2020 base; GitClear's earlier 2024 report *projected* it would reach ~7%, the actual 2024 figure came in at 5.7%. GitClear is single-vendor and its methodology is debated — E2, not E3.)
+(Churn nearly doubled off its 2020 base. GitClear's earlier 2024 report *projected* ~7%; the actual 2024 figure was 5.7%. GitClear is a single vendor and its methodology is debated, so this is E2, not E3.)
 
-**Delivery — Google DORA 2024** (large survey): a 25% increase in AI adoption is *associated with* a **−1.5%** delivery throughput and **−7.2%** delivery stability, with **growing batch size** as the proposed mechanism — AI makes it cheap to write more code per change, and larger changesets have always hurt stability (E2/E3). This is the individual-vs-org disconnect that [[Concept - Team Workflow Restructuring with AI]] centers on.
+**Delivery: Google DORA 2024** (large survey). A 25% increase in AI adoption is *associated with* **−1.5%** delivery throughput and **−7.2%** delivery stability. The proposed mechanism is **growing batch size**: AI makes it cheap to write more code per change, and larger changesets have always hurt stability (E2/E3). [[Concept - Team Workflow Restructuring with AI]] is built around this individual-vs-org disconnect.
 
-**Security — insecure code, Perry et al. 2023 (Stanford, ACM CCS):** in a controlled user study (codex-davinci-002), participants with an AI assistant wrote **less secure code on 4 of 5 tasks** yet were **more confident it was secure** — a measured "false sense of security" (E2). Participants who trusted the AI less and iterated on prompts produced more secure code.
+**Security, insecure code: Perry et al. 2023 (Stanford, ACM CCS).** In a controlled user study (codex-davinci-002), participants with an AI assistant wrote **less secure code on 4 of 5 tasks** and were **more confident it was secure**, a measured "false sense of security" (E2). Participants who trusted the AI less and iterated on prompts wrote more secure code.
 
-**Security — supply chain, Spracklen et al. 2025 (USENIX Security):** "We Have a Package for You!" — across 576,000 code samples from 16 models (Sept 2024 cohort), **~19.7% of recommended packages did not exist** (open-source models **21.7%**, commercial **5.2%**), yielding 205,474 unique hallucinated names (E2/E3). Attackers register those names on PyPI/npm — **slopsquatting** (term coined by Seth Larson, PSF), the first AI-native supply-chain attack class, and a fixture of [[Lore - AI Coding War Stories]]. It is distinct from, but rhymes with, [[Concept - Prompt Injection]] as an AI-specific attack surface.
+**Security, supply chain: Spracklen et al. 2025 (USENIX Security).** "We Have a Package for You!" looked at 576,000 code samples from 16 models (Sept 2024 cohort). **~19.7% of recommended packages did not exist** (open-source models **21.7%**, commercial **5.2%**), giving 205,474 unique hallucinated names (E2/E3). Attackers register those names on PyPI/npm. That's **slopsquatting** (Seth Larson of the PSF coined the term), the first AI-native supply-chain attack class and a fixture of [[Lore - AI Coding War Stories]]. It's distinct from [[Concept - Prompt Injection]], but rhymes with it as an AI-specific attack surface.
 
-**Maintainability lag** — "Echoes of AI" (2025) and related work find AI-assisted code trending toward lower maintainability, with the cost surfacing months later as tech debt rather than at commit time (E1/E2, emerging).
+**Maintainability lag.** "Echoes of AI" (2025) and related work find AI-assisted code trending toward lower maintainability, with the cost showing up months later as tech debt instead of at commit time (E1/E2, emerging).
 
 ## Failure modes
 
-- **Coverage theater.** AI cheaply inflates line/branch coverage while assertions stay weak, so a dashboard shows "quality up" while the suite catches nothing new — see [[Concept - AI in Software Testing]].
-- **Reviewer laundering.** AI writes the code, AI reviews the code (see [[Concept - AI Code Review]]), and no human ever reads it deeply. Alert fatigue from false positives makes reviewers rubber-stamp. The oversight loop thins exactly where the [[Concept - The Capability-Reliability Gap]] is widest.
-- **Silent dependency compromise.** A hallucinated `import` that a slopsquatter has pre-registered installs malware on first `pip install` — detected only by dependency allowlisting, not by tests. Autonomous agents that install packages unattended (see [[Gotchas - Agents in Production]]) amplify this.
-- **Debt that surfaces off-cycle.** Because maintainability is a lagging indicator, the team that measured a speedup at commit time gets the bill 6–12 months later as slowing feature velocity, and mis-attributes it.
+- **Coverage theater.** AI cheaply inflates line/branch coverage while assertions stay weak. The dashboard says "quality up" and the suite catches nothing new (see [[Concept - AI in Software Testing]]).
+- **Reviewer laundering.** AI writes the code, AI reviews it (see [[Concept - AI Code Review]]), and no human reads it closely. Alert fatigue from false positives turns reviewers into rubber stamps. Oversight thins where [[Concept - The Capability-Reliability Gap]] is widest.
+- **Silent dependency compromise.** A hallucinated `import` that a slopsquatter pre-registered installs malware on the first `pip install`. Tests won't catch it; dependency allowlisting will. Autonomous agents that install packages unattended make it worse (see [[Gotchas - Agents in Production]]).
+- **Debt that surfaces off-cycle.** Maintainability is a lagging indicator. The team that measured a speedup at commit time gets the bill 6–12 months later as slowing feature velocity, and blames something else.
 
 ## The non-obvious
 
-The productivity effect and the quality effect are **not in contradiction** — both are real, and they are measured at different times. AI genuinely makes code *faster to write* and often *costlier to maintain*, so "does AI help?" is underspecified until you name the measurement horizon. Nearly every vendor ROI claim stops measuring at commit time, where AI looks best; the churn, duplication, and stability costs land later, where nobody is still counting — an unpriced cost that the true [[Concept - Unit Economics of LLM Products]] of shipping with AI ought to include alongside the inference bill, but rarely does. An honest evaluation instruments rework rate and delivery stability over quarters, not keystrokes over minutes — the discipline [[Playbook - Measuring AI ROI]] exists to enforce — and this measurement horizon problem is why AI-written code sits at the center of emerging liability and disclosure regimes ([[Lore - Hallucination Liability Incidents]], [[Reference - The EU AI Act for Operators]]).
+The productivity effect and the quality effect **don't contradict each other**. Both are real, and they're measured at different times. AI makes code *faster to write* and often *costlier to maintain*, so "does AI help?" is underspecified until you name the measurement horizon. Nearly every vendor ROI claim stops measuring at commit time, where AI looks best. Churn, duplication and stability costs land later, when nobody is counting. The true [[Concept - Unit Economics of LLM Products]] of shipping with AI should price that in next to the inference bill, and rarely does. An honest evaluation tracks rework rate and delivery stability over quarters instead of keystrokes over minutes, which is what [[Playbook - Measuring AI ROI]] is for. The same horizon problem puts AI-written code at the center of emerging liability and disclosure regimes ([[Lore - Hallucination Liability Incidents]], [[Reference - The EU AI Act for Operators]]).
 
 ## Connections
 

@@ -6,7 +6,7 @@ summary: "Picking between execution-based, exact-match, LLM-judge, human eval, a
 
 # Decision - Choosing an Evaluation Method
 
-> The method follows from what kind of ground truth you have, not from what's cheapest or most impressive: default to execution-based or exact-match wherever a verifier exists, reach for [[Concept - LLM-as-Judge]] for fast open-ended dev-loop iteration, and escalate to [[Concept - Human Evaluation Methodology|human evaluation]] the moment a launch or safety decision is on the line. That covers the 80% case; the rest turns on stakes, traffic availability, and how gameable the open-ended surface is.
+> Pick the method by the kind of ground truth you have, not by what's cheapest or most impressive. Default to execution-based or exact-match wherever a verifier exists, use [[Concept - LLM-as-Judge]] for fast open-ended dev-loop iteration, and move to [[Concept - Human Evaluation Methodology|human evaluation]] as soon as a launch or safety decision is on the line. That's the 80% case. The rest depends on stakes, available traffic, and how gameable the open-ended surface is.
 
 ## Decision flow
 
@@ -31,22 +31,22 @@ flowchart TD
 
 | Method | Cost per sample | Latency | Correlation with true quality | Gameable? | Needs |
 |---|---|---|---|---|---|
-| Execution-based (unit tests, code run) | Near-free, deterministic | Seconds | High — unfakeable by surface-form tricks | Yes, if the verifier/test suite is weak | A real verifier for the task |
-| Exact-match / regex | Near-free, deterministic | Milliseconds | High only when the task genuinely has one correct answer | Yes, via lucky substring matches or answer-format quirks | A programmatically checkable ground truth |
-| LLM-as-judge | ~$0.001–0.01 | Seconds | Calibrated judge ≈ human-human agreement (~80%) on easy pairs; collapses on hard reasoning | Yes — position, length, self-preference biases; adversarial phrasing | A rubric, a pinned judge snapshot, ideally a cross-family judge |
+| Execution-based (unit tests, code run) | Near-free, deterministic | Seconds | High; surface-form tricks can't fake it | Yes, if the verifier/test suite is weak | A real verifier for the task |
+| Exact-match / regex | Near-free, deterministic | Milliseconds | High only when the task really has one correct answer | Yes, via lucky substring matches or answer-format quirks | A programmatically checkable ground truth |
+| LLM-as-judge | ~$0.001–0.01 | Seconds | Calibrated judge ≈ human-human agreement (~80%) on easy pairs; collapses on hard reasoning | Yes: position, length and self-preference biases; adversarial phrasing | A rubric, a pinned judge snapshot, ideally a cross-family judge |
 | Human evaluation | ~$0.5–5 | Days | The gold reference other methods are validated against | Harder to game, but rater drift/fatigue and pool mismatch still bite | Trained raters, agreement tracking (kappa/alpha) |
-| Online A/B | Traffic-dependent, not per-sample | Days to weeks | Measures actual real-world impact, not a proxy | Confounded by novelty effects and segment mix, not "gamed" in the same sense | Sufficient traffic, guardrail metrics, a randomization unit |
+| Online A/B | Traffic-dependent, not per-sample | Days to weeks | Measures actual real-world impact, not a proxy | Confounded by novelty effects and segment mix; not "gamed" in the same sense | Enough traffic, guardrail metrics, a randomization unit |
 
-Reliability ranking for correlation with true quality, roughly: human ≈ execution > calibrated LLM-judge > naive LLM-judge >> lexical overlap (BLEU/ROUGE — effectively dead as a quality metric because it correlates poorly with human judgment on open-ended generation).
+Rough reliability ranking by correlation with true quality: human ≈ execution > calibrated LLM-judge > naive LLM-judge >> lexical overlap. BLEU/ROUGE are effectively dead as quality metrics because they correlate poorly with human judgment on open-ended generation.
 
-## The details that flip the decision
+## What flips the decision
 
-- **A calibrated LLM-judge collapses exactly where you need it most: hard reasoning and adversarial phrasing.** A fluent-but-wrong answer reliably fools a judge the same way it fools an inattentive human skimmer — see [[Gotchas - LLM-as-Judge Evaluations]]. If your task's failure mode *is* subtle wrongness, don't trust a judge without validating it against held-out human labels on that specific hard slice first (see [[Concept - Meta-Evaluation of LLM Judges]]).
-- **Execution-based grading is only as good as the verifier.** A weak or flaky test suite gives false credit for wrong code, and math answer-matching gives false negatives on mathematically equivalent but differently-formatted answers (`1/2` vs `0.5`). Verifier quality caps the entire method regardless of how sophisticated the model is.
-- **Human evaluation is required, not optional, when subtlety or safety dominates** — a launch decision, a safety-critical refusal boundary, or any case where the cost of a false "pass" materially outweighs the cost of running humans. Mismatched rater pools (crowd raters grading PhD-level knowledge) silently invalidate the result — see [[Concept - Human Evaluation Methodology]].
-- **Online A/B is confounded by novelty effects and segment mix**, not by adversarial gaming — a new feature can look better purely because it's new, and a rollout skewed toward power users doesn't generalize. Guardrail metrics and holdout duration need to be long enough to wash out novelty before trusting the result.
-- **Reporting pass@k against a competitor's pass@1 (or vice versa) is a real, recurring inflation** seen in some reasoning-model launch comparisons — the two measure capability-with-retries and single-shot deployment behavior respectively, and are not the same number. See [[Concept - Pass@k and Sampling-Based Evaluation]].
-- **Don't pick once — combine.** The 80%-case default is a starting point per method, not a permanent choice: cheap LLM-judge for CI gating and fast iteration, a sampled human audit on top of it, and online A/B as the final arbiter before broad rollout. See [[Playbook - Building a Production Eval Suite]] for how this combination gets wired into an actual pipeline.
+- **A calibrated LLM-judge collapses on hard reasoning and adversarial phrasing**, which is where you need it most. A fluent-but-wrong answer reliably fools a judge the way it fools a human skimming ([[Gotchas - LLM-as-Judge Evaluations]]). If your task's failure mode *is* subtle wrongness, validate the judge against held-out human labels on that hard slice before trusting it ([[Concept - Meta-Evaluation of LLM Judges]]).
+- **Execution-based grading is only as good as the verifier.** A weak or flaky test suite gives false credit for wrong code. Math answer-matching gives false negatives on equivalent answers formatted differently (`1/2` vs `0.5`). Verifier quality caps the method however strong the model is.
+- **Human evaluation is required when subtlety or safety dominates:** a launch decision, a safety-critical refusal boundary, or any case where a false "pass" costs materially more than running humans. Mismatched rater pools (crowd raters grading PhD-level knowledge) silently invalidate the result; see [[Concept - Human Evaluation Methodology]].
+- **Online A/B is confounded by novelty effects and segment mix**, not adversarial gaming. A new feature can look better only because it's new, and a rollout skewed toward power users doesn't generalize. Holdouts need to run long enough to wash out novelty, with guardrail metrics in place, before you trust the result.
+- **Reporting pass@k against a competitor's pass@1 (or the reverse) is a real, recurring inflation** in some reasoning-model launch comparisons. One measures capability with retries, the other single-shot deployment behavior. See [[Concept - Pass@k and Sampling-Based Evaluation]].
+- **Combine methods instead of picking once.** The 80%-case default is a per-method starting point. Use a cheap LLM-judge for CI gating and fast iteration, a sampled human audit on top, and online A/B as the final arbiter before broad rollout. [[Playbook - Building a Production Eval Suite]] shows how to wire that into a pipeline.
 
 ## Connections
 

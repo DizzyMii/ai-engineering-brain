@@ -6,11 +6,11 @@ summary: "A ~45-line runnable PyTorch loop with correct op ordering, nanoGPT-sty
 
 # Snippet - A Minimal Training Loop in PyTorch
 
-**What it does:** trains a small [[Concept - The Multilayer Perceptron|MLP]] classifier on synthetic Gaussian blobs, demonstrating the correct ordering of [[Concept - The Training Loop]] operations, the weight-decay param-group split, gradient clipping with visible grad norms, and train/eval mode hygiene. One technique: the loop itself, done right.
+**What it does:** trains a small [[Concept - The Multilayer Perceptron|MLP]] classifier on synthetic Gaussian blobs. It shows correct ordering of [[Concept - The Training Loop]] operations, the weight-decay param-group split, gradient clipping with the grad norm printed, and train/eval mode hygiene. One technique: the loop itself, done right.
 
 **Dependencies:** `torch >= 2.0` (CPU is fine; no other packages).
 
-**Expected output:** train loss starts at $\approx \ln(4) = 1.386$ (uniform over 4 classes — if it doesn't, the loss or labels are broken before you ever blame the model) and falls below 0.05 by step 200; val accuracy reaches ~0.95+. Runs in under 10 seconds on a laptop CPU.
+**Expected output:** train loss starts at $\approx \ln(4) = 1.386$ (uniform over 4 classes; if not, the loss or labels are broken, so check them before blaming the model) and falls below 0.05 by step 200. Val accuracy reaches ~0.95+. Runs in under 10 seconds on a laptop CPU.
 
 ```python
 import torch
@@ -62,12 +62,12 @@ for step in range(201):
 
 ## Why it's written this way
 
-1. **`zero_grad(set_to_none=True)` before `backward()`.** `.backward()` *adds into* `.grad` by design (see [[Concept - Backpropagation]] — accumulation is what makes gradient accumulation and RNN-style reuse possible). Forgetting to zero is the classic silent bug: loss stalls while the grad norm climbs every step. `set_to_none` frees the grad tensors instead of writing zeros — a real memory and bandwidth win, and the PyTorch 2.x default — but it changes semantics: any code that reads `p.grad` must now handle `None` instead of a zero tensor.
-2. **The param-group split.** Decaying LayerNorm gains pulls them toward 0, directly fighting what the norm layer is for; decaying biases adds noise with no regularization payoff; decaying embeddings shrinks rare-token rows that get few gradient updates to push back. Only the 2-D matmul weights carry `weight_decay=0.1`. The `p.dim() >= 2` test is the entire trick — this is verbatim the logic in nanoGPT.
-3. **Clip between `backward()` and `step()`, and print the norm.** `clip_grad_norm_` returns the *pre-clip* global norm, which is the single cheapest training-health signal you can log: a spike to 10x baseline predicts a loss spike before you see it in the loss. Clipping after `step()` does nothing; clipping before `backward()` clips stale grads. In mixed precision this line moves — you must unscale first (see [[Concept - Mixed Precision Training]]).
-4. **`model.eval()` AND `torch.no_grad()` — two separate mechanisms.** `eval()` flips module *behavior* (Dropout off, BatchNorm uses running stats); `no_grad()` stops autograd from building a graph, so forward activations aren't retained — which is most of a training step's memory footprint (see [[Reference - Memory Math for Transformers]]). Each without the other is a distinct, common bug: eval-only leaks memory; no_grad-only evaluates a stochastic model.
+1. **`zero_grad(set_to_none=True)` before `backward()`.** `.backward()` *adds into* `.grad` by design; accumulation is what makes gradient accumulation and RNN-style reuse possible (see [[Concept - Backpropagation]]). Forgetting to zero is the classic silent bug: loss stalls while the grad norm climbs every step. `set_to_none` frees the grad tensors instead of writing zeros. It saves memory and bandwidth and is the PyTorch 2.x default, but code that reads `p.grad` must now handle `None` instead of a zero tensor.
+2. **The param-group split.** Decaying LayerNorm gains pulls them toward 0, which fights what the norm layer is for. Decaying biases adds noise with no regularization payoff. Decaying embeddings shrinks rare-token rows that get too few updates to push back. Only the 2-D matmul weights carry `weight_decay=0.1`. The `p.dim() >= 2` test is the whole trick, copied verbatim from nanoGPT.
+3. **Clip between `backward()` and `step()`, and print the norm.** `clip_grad_norm_` returns the *pre-clip* global norm. It's the cheapest training-health signal you can log: a spike to 10x baseline predicts a loss spike before the loss shows it. Clipping after `step()` does nothing, and clipping before `backward()` clips stale grads. Under mixed precision you unscale first (see [[Concept - Mixed Precision Training]]).
+4. **`model.eval()` AND `torch.no_grad()` are separate mechanisms.** `eval()` flips module *behavior* (Dropout off, BatchNorm uses running stats). `no_grad()` stops autograd from building a graph, so forward activations aren't retained, and those are most of a training step's memory footprint (see [[Reference - Memory Math for Transformers]]). Each alone is a common bug: eval-only leaks memory, no_grad-only evaluates a stochastic model.
 
-The optimizer choice and its betas are deliberate too — [[Concept - Adam and AdamW]] with $\beta_2 = 0.95$ is the modern transformer-flavored default, and the decoupled decay is the reason the param-group split works as intended. When a loop like this refuses to learn, walk [[Playbook - Debugging a Neural Network That Won't Train]] in order rather than tweaking randomly — step 1 of that playbook (loss at init $\approx \ln C$) is already printed by this code.
+The optimizer and betas are deliberate. [[Concept - Adam and AdamW]] with $\beta_2 = 0.95$ is the modern transformer-style default, and decoupled decay is why the param-group split behaves as intended. If a loop like this won't learn, walk [[Playbook - Debugging a Neural Network That Won't Train]] in order instead of tweaking at random. This code already prints step 1 of that playbook (loss at init $\approx \ln C$).
 
 ## Connections
 

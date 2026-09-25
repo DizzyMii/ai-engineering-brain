@@ -4,7 +4,7 @@ aliases: []
 summary: "How to pick an accelerator by capacity fit, then compute- vs memory-bound profile, then latency/throughput SLO, then $/hr — not by peak TFLOPs."
 ---
 
-> **The decision in one sentence:** pick the accelerator that first *fits* your model at the precision and batch size you need, then match its bandwidth/FLOPs profile to whether your workload is compute- or memory-bound — peak TFLOPs is the last column you should look at, not the first.
+> **The decision in one sentence:** first pick an accelerator that *fits* your model at the precision and batch size you need, then match its bandwidth/FLOPs profile to whether your workload is compute- or memory-bound. Peak TFLOPs is the last column to look at.
 > **Default answer for the 80% case (as of 2026):** H100 (or H200 where HBM capacity is the constraint) rented on-demand from a major cloud, tensor-parallel within a node if training beyond ~70B params, single-GPU or small tensor-parallel group for serving.
 
 ## Decision flow
@@ -45,23 +45,23 @@ flowchart TD
 
 ## The details that flip the decision
 
-**The FLOPs trap.** Buying peak [[Concept - Model FLOPs Utilization (MFU)|FLOPs]] you cannot feed is the most common expensive mistake. A B200 bought for its FP4 peak but run on a workload that's memory-bound (most decode, most norm/softmax-heavy work) never approaches that peak — see [[Concept - The Roofline Model]] for why arithmetic intensity, not sticker-FLOPs, determines what you actually get. Check whether your workload's arithmetic intensity clears the ridge point *before* paying a FLOPs premium.
+**The FLOPs trap.** Paying for peak [[Concept - Model FLOPs Utilization (MFU)|FLOPs]] you can't feed is the most common expensive mistake. A B200 bought for its FP4 peak and run on a memory-bound workload (most decode, most norm/softmax-heavy work) never gets near that peak. [[Concept - The Roofline Model]] explains why arithmetic intensity decides what you get, not sticker FLOPs. Check that your workload's intensity clears the ridge point *before* paying a FLOPs premium.
 
-**Decode is memory-bandwidth-bound, not compute-bound.** For inference, HBM bandwidth and capacity (for weights plus [[Concept - KV Cache]]) dominate the decode-phase cost far more than peak FLOPs — a GPU with mediocre FLOPs but excellent bandwidth beats a FLOPs monster at serving throughput. This is why the inference branch of the decision flow above routes on bandwidth-class hardware, and why cost per token, not raw hardware cost, is the metric that should decide — see [[Concept - Cost Engineering for LLM Applications]].
+**Decode is memory-bandwidth-bound.** In inference, HBM bandwidth and capacity (for weights plus [[Concept - KV Cache]]) drive decode cost far more than peak FLOPs. A GPU with mediocre FLOPs and excellent bandwidth beats a FLOPs monster on serving throughput. So the inference branch of the flow above routes on bandwidth-class hardware, and the deciding metric is cost per token, not raw hardware cost; see [[Concept - Cost Engineering for LLM Applications]].
 
-**Capacity gates everything.** If the model plus optimizer state (training) or weights plus KV cache (inference) doesn't fit in HBM at your target batch and precision, no amount of compute matters until you've solved the fit problem — shard, quantize, or upgrade to a higher-capacity SKU. Run the numbers with [[Reference - Memory Math for Transformers]] before shopping for hardware, not after.
+**Capacity gates everything.** If model plus optimizer state (training) or weights plus KV cache (inference) doesn't fit in HBM at your target batch and precision, compute doesn't matter until you solve the fit: shard, quantize, or move to a higher-capacity SKU. Run the numbers with [[Reference - Memory Math for Transformers]] before you shop for hardware.
 
-**Interconnect beats FLOPs at scale.** Past roughly one node (8 GPUs), training throughput is usually gated by how fast gradients synchronize, not by any single GPU's peak FLOPs — the [[Concept - GPU Interconnects (NVLink, InfiniBand, RoCE)|NVLink-vs-InfiniBand bandwidth cliff]] (an order of magnitude drop leaving the node) makes topology and interconnect generation a first-order purchasing decision, not an afterthought.
+**Interconnect beats FLOPs at scale.** Past roughly one node (8 GPUs), training throughput is usually limited by how fast gradients synchronize, not any one GPU's peak FLOPs. The [[Concept - GPU Interconnects (NVLink, InfiniBand, RoCE)|NVLink-vs-InfiniBand bandwidth cliff]], an order-of-magnitude drop when you leave the node, makes topology and interconnect generation a first-order purchasing decision.
 
-**Cloud vs owned is a utilization bet.** H100 on-demand rental runs roughly $2-4/hr (2026); owned capex only wins once sustained utilization clears roughly 50-70%, because idle owned hardware is pure sunk cost while idle rented hardware simply isn't rented. Spot/preemptible instances cut price further but add real risk to long, uninterruptible training runs — checkpoint discipline becomes load-bearing, not optional, when using them.
+**Cloud vs owned is a utilization bet.** H100 on-demand rental runs roughly $2-4/hr (2026). Owned capex only wins once sustained utilization clears roughly 50-70%, because idle owned hardware is sunk cost and idle rented hardware just isn't rented. Spot/preemptible instances cut the price further but add real risk to long, uninterruptible training runs. With them, checkpoint discipline is mandatory.
 
-**Consumer cards are a different product, not a cheaper H100.** No NVLink (PCIe-only inter-GPU bandwidth), no ECC memory, and capped HBM (24 GB on a 4090) rule consumer cards out for multi-node training and for any workload where a bit-flip is unacceptable. They're genuinely fine for single-GPU fine-tuning or low-stakes inference — but note the datacenter driver licensing caveat: NVIDIA's consumer driver EULA restricts datacenter deployment of GeForce cards, which matters if you're building a commercial serving fleet rather than a personal workstation.
+**Consumer cards are a different product, not a cheap H100.** No NVLink (PCIe-only inter-GPU bandwidth), no ECC memory, and capped memory (24 GB on a 4090) rule them out for multi-node training and for any workload where a bit-flip is unacceptable. They're fine for single-GPU fine-tuning or low-stakes inference. Mind the driver licensing caveat, though: NVIDIA's consumer driver EULA restricts datacenter deployment of GeForce cards, which matters for a commercial serving fleet and not for a personal workstation.
 
-**Concrete scenario picks (2026):**
-- **7B model inference, low request volume:** single L40S or even a consumer 4090 — capacity and bandwidth easily cover a 7B model's weights plus modest KV cache.
-- **70B model serving at scale:** tensor-parallel H100 group (typically 2-4 GPUs) inside one NVLink domain; H200 if KV cache pressure from long contexts pushes you over 80 GB.
-- **100B+ pretraining:** H100/H200/B200 cluster with full NVLink+InfiniBand fabric, thousands of GPUs — at this scale, [[Breakdown - The NVIDIA Datacenter GPU (Hopper and Blackwell)]]'s rack-scale NVLink domain (GB200 NVL72) becomes a first-order consideration, not a footnote.
-- **GCP-committed workloads at very large training scale:** [[Breakdown - The Google TPU]] is a legitimate alternative to the whole flow above, but only inside Google Cloud — its exclusion from most of this decision's scope is a platform-lock-in tradeoff, not a performance one.
+**Scenario picks (2026):**
+- **7B model inference, low request volume:** one L40S or even a consumer 4090. Capacity and bandwidth easily cover a 7B model's weights plus a modest KV cache.
+- **70B model serving at scale:** a tensor-parallel H100 group (typically 2-4 GPUs) inside one NVLink domain; H200 if long-context KV cache pressure pushes you over 80 GB.
+- **100B+ pretraining:** an H100/H200/B200 cluster with full NVLink+InfiniBand fabric and thousands of GPUs. At this scale the rack-scale NVLink domain (GB200 NVL72) from [[Breakdown - The NVIDIA Datacenter GPU (Hopper and Blackwell)]] is a first-order consideration.
+- **GCP-committed workloads at very large training scale:** [[Breakdown - The Google TPU]] is a legitimate alternative to this whole flow, but only inside Google Cloud. It's mostly out of scope here because of platform lock-in, not performance.
 
 ## Connections
 - [[Reference - AI Accelerator Landscape]] — the raw spec tables this decision's tradeoff matrix is condensed from; consult it for chips beyond the shortlist here (MI300X, Trainium2, inference specialists).

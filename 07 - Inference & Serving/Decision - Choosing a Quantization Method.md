@@ -4,7 +4,7 @@ aliases: []
 summary: "Weight and KV-cache precision are two independent axes; default fp8+fp8 on Hopper+, drop to AWQ int4 weights when you need more headroom."
 ---
 
-> **The decision, in one sentence:** how much precision to give up on weights, and separately on the KV cache, to fit your model and context on the GPUs you have without breaking the downstream task. **Default for a typical 2026 NVIDIA Hopper-or-newer deployment where quality matters:** fp8 weights + fp8 KV cache. Drop to AWQ int4 weight-only only once fp8 doesn't buy enough memory headroom to fit the model or context you need.
+> **The decision, in one sentence:** how much precision to give up on weights, and separately on the KV cache, so your model and context fit on the GPUs you have without breaking the downstream task. **Default for a typical 2026 NVIDIA Hopper-or-newer deployment where quality matters:** fp8 weights + fp8 KV cache. Go down to AWQ int4 weight-only only when fp8 doesn't free enough memory for the model or context you need.
 
 ## Decision flow
 
@@ -27,7 +27,7 @@ flowchart TD
     I -->|No, short context| K[Leave KV at fp16/bf16]
 ```
 
-Weight precision and KV precision are decided **independently** — pick a point on each axis, not one combined "quantization level." Long-context serving is frequently KV-bound even when weights comfortably fit at fp8 or bf16; short-context serving is frequently weight-bound even when the KV cache is trivially small. Conflating the two axes leads to over-quantizing whichever one wasn't actually the constraint.
+Weight precision and KV precision are **separate decisions**. Pick a point on each axis instead of one combined "quantization level." Long-context serving is frequently KV-bound even when the weights fit comfortably at fp8 or bf16. Short-context serving is frequently weight-bound even with a tiny KV cache. Treat the two as one knob and you end up over-quantizing whichever axis wasn't the constraint.
 
 ## Tradeoff matrix
 
@@ -42,16 +42,16 @@ Weight precision and KV precision are decided **independently** — pick a point
 | KV cache fp8 | 8 | ~2x KV capacity | more concurrent tokens/context | low | no | broad |
 | KV cache int4 | 4 | ~4x KV capacity | more concurrent tokens/context | moderate-high, esp. long context | sometimes | narrower, check engine |
 
-Weight-only formats (AWQ, GPTQ, GGUF k-quants) save memory and HBM bandwidth by dequantizing to bf16 inside the matmul — they cut the [[Concept - Latency, Throughput, and Cost in LLM Serving|decode-time bandwidth bottleneck]] but don't touch FLOPs. fp8 and fp4 additionally use faster tensor-core paths on supporting hardware, so they save both. See [[Concept - Post-Training Quantization Formats]] for the algorithms behind AWQ/GPTQ/GGUF and [[Concept - FP8 and Low-Precision Inference]] for the hardware-format side.
+Weight-only formats (AWQ, GPTQ, GGUF k-quants) save memory and HBM bandwidth by dequantizing to bf16 inside the matmul. That cuts the [[Concept - Latency, Throughput, and Cost in LLM Serving|decode-time bandwidth bottleneck]] and leaves FLOPs alone. fp8 and fp4 also get faster tensor-core paths on hardware that supports them, so they save both. The algorithms behind AWQ/GPTQ/GGUF are in [[Concept - Post-Training Quantization Formats]]; the hardware-format side is in [[Concept - FP8 and Low-Precision Inference]].
 
 ## The details that flip the decision
 
-- **Activation outliers rule out naive int8 activation quantization.** A handful of large-magnitude activation channels (the Dettmers LLM.int8() finding) blow up naive int8 W8A8; you need SmoothQuant-style outlier migration or fp8's wider dynamic range instead. If someone proposes plain int8 activations without mentioning outlier handling, that's the flag to push back.
-- **MoE experts, `lm_head`, and embeddings are precision-sensitive.** Uniformly quantizing every layer including these causes disproportionate damage relative to their size; production recipes commonly keep them at higher precision even while the bulk of transformer blocks go to 4-bit. See [[Concept - MoE Inference and Expert Parallelism]] for why expert weight *volume* already dominates memory in MoE models — that's exactly the layer type you don't also want degraded in quality.
-- **Long-context quality is dominated by KV precision, not weight precision, especially for sink/early tokens.** A model with bf16 weights but aggressively quantized KV can lose long-context retrieval quality that a weight-quantized, KV-fp16 configuration wouldn't — check which axis is actually driving your failure before "fixing" the wrong one.
-- **Reasoning, coding, and tool-calling degrade before perplexity does.** [[Gotchas - Quantization Quality Loss|WikiText perplexity delta is a weak proxy]] — a 4-bit model can look fine on perplexity and still fail structured tool calls or multi-step math. The accuracy budget has to be measured on the actual downstream task the model will run in production, not on a generic language-modeling benchmark.
-- **Hardware gating silently defeats the point.** fp8 kernels need Hopper or newer, fp4 needs Blackwell; running either on Ampere/Ada either errors or falls back to slow emulation. Verify the tensor-core path is actually engaging (check achieved throughput against the roofline expectation, not just that the flag was set) — otherwise you pay the quality cost of quantization with none of the speed benefit.
-- **Calibration data must be in-domain.** GPTQ/AWQ scales fit on a generic calibration corpus (e.g. WikiText) will skew toward general-text statistics; a model serving code or a narrow domain should be calibrated on representative in-domain data, or the quantization will degrade exactly the capability being served.
+- **Activation outliers rule out naive int8 activation quantization.** A handful of large-magnitude activation channels (the Dettmers LLM.int8() finding) blow up naive int8 W8A8. You need SmoothQuant-style outlier migration or fp8's wider dynamic range. If someone proposes plain int8 activations and says nothing about outliers, push back.
+- **MoE experts, `lm_head`, and embeddings are precision-sensitive.** Quantizing every layer uniformly, these included, does damage out of proportion to their size. Production recipes commonly keep them at higher precision while most transformer blocks go to 4-bit. [[Concept - MoE Inference and Expert Parallelism]] covers why expert weight *volume* already dominates memory in MoE models, and that's the layer type you least want degraded.
+- **Long-context quality is dominated by KV precision, especially for sink/early tokens.** A model with bf16 weights and aggressively quantized KV can lose long-context retrieval quality that a weight-quantized, KV-fp16 setup would keep. Find out which axis is causing the failure before you "fix" the wrong one.
+- **Reasoning, coding, and tool-calling degrade before perplexity does.** [[Gotchas - Quantization Quality Loss|WikiText perplexity delta is a weak proxy]]. A 4-bit model can look fine on perplexity and still fail structured tool calls or multi-step math. Measure the accuracy budget on the downstream task the model will run in production, not a generic language-modeling benchmark.
+- **Hardware gating silently defeats the point.** fp8 kernels need Hopper or newer and fp4 needs Blackwell. On Ampere/Ada either one errors or falls back to slow emulation. Confirm the tensor-core path is engaging by checking achieved throughput against the roofline expectation, not just that the flag is set. Otherwise you pay quantization's quality cost and get none of the speed.
+- **Calibration data must be in-domain.** GPTQ/AWQ scales fit on a generic corpus (e.g. WikiText) skew toward general-text statistics. A model serving code or a narrow domain should be calibrated on representative in-domain data, or quantization degrades the very capability you're serving.
 
 ## Connections
 - [[Breakdown - BitNet b1.58]] — the extreme end of the weight-precision axis this matrix stops short of: ternary weights trained QAT-from-scratch, removing the GEMM multiply entirely rather than just shrinking it.

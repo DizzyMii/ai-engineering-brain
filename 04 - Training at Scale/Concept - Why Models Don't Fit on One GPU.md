@@ -6,38 +6,38 @@ summary: "Why a modern LLM's parameters, gradients, optimizer states, and activa
 
 # Concept - Why Models Don't Fit on One GPU
 
-> **One-paragraph hook:** A 7B-parameter model sounds like it should fit in 14GB of bf16 weights on an 80GB H100 with room to spare. It doesn't — training needs four separate memory pools, not one, and by the time you add gradients, optimizer state, and activations, that same 7B model needs well over 100GB before a single training step runs. This gap between "the weights fit" and "the training run fits" is the entire reason distributed training exists.
+> **One-paragraph hook:** A 7B-parameter model is 14GB of bf16 weights, which looks like it fits on an 80GB H100 with room to spare. It doesn't. Training draws on four separate memory pools, and once you add gradients, optimizer state and activations, the same 7B model needs well over 100GB before a single training step runs. That gap between "the weights fit" and "the training run fits" is the whole reason distributed training exists.
 
 ## The mechanism
 
-Training memory has four distinct consumers, and conflating them is the single most common sizing mistake:
+Training memory has four consumers. Lumping them together is the single most common sizing mistake.
 
-1. **Parameters** — the weights themselves, 2 bytes each in bf16.
-2. **Gradients** — one gradient per parameter, typically 2-4 bytes (bf16 or fp32 accumulation).
-3. **Optimizer states** — for Adam/AdamW, an fp32 master-weight copy plus the first and second moment estimates (`m` and `v`), each fp32: 4 + 4 + 4 = 12 bytes/param. This is on top of the parameters and gradients, not instead of them — see [[Concept - Adam and AdamW]].
-4. **Activations** — the intermediate tensors saved during the forward pass for use in backprop. This pool doesn't scale with parameter count; it scales with `batch_size × sequence_length × num_layers × hidden_dim`, which means it can dwarf the other three at long context even for a small model.
+1. **Parameters**: the weights, 2 bytes each in bf16.
+2. **Gradients**: one per parameter, typically 2-4 bytes (bf16 or fp32 accumulation).
+3. **Optimizer states**: for Adam/AdamW, an fp32 master-weight copy plus the first and second moment estimates (`m` and `v`), each fp32, so 4 + 4 + 4 = 12 bytes/param. That comes on top of parameters and gradients (see [[Concept - Adam and AdamW]]).
+4. **Activations**: intermediate tensors saved in the forward pass for backprop. This pool scales with `batch_size × sequence_length × num_layers × hidden_dim`, not parameter count, so at long context it can dwarf the other three even for a small model.
 
-Sum the first three under standard mixed-precision training (see [[Concept - Mixed Precision Training]]) and you land at roughly **16-20 bytes per parameter** before a single activation is stored: 2 (bf16 weight) + 2 (bf16 grad, sometimes fp32) + 12 (Adam states) + a few bytes of slack for master-weight/grad fp32 copies depending on exact recipe.
+Add up the first three under standard mixed-precision training (see [[Concept - Mixed Precision Training]]) and you get roughly **16-20 bytes per parameter** with no activations stored yet: 2 (bf16 weight) + 2 (bf16 grad, sometimes fp32) + 12 (Adam states) + a few bytes of slack for fp32 master-weight/grad copies, depending on the recipe.
 
-Concretely: a 7B model needs `7e9 × ~16-20 bytes ≈ 112-140 GB` for weights + gradients + optimizer state alone — already past an 80GB H100's HBM (see [[Concept - GPU Memory Hierarchy]]) with zero activations stored. A 70B model needs over 1TB. There is no single-GPU configuration, no clever kernel, that makes 70B+ dense pretraining fit on one device; the memory arithmetic makes it flatly impossible.
+So a 7B model needs `7e9 × ~16-20 bytes ≈ 112-140 GB` for weights, gradients and optimizer state alone. That's already past an 80GB H100's HBM (see [[Concept - GPU Memory Hierarchy]]) with zero activations. A 70B model needs over 1TB. No single-GPU configuration or clever kernel makes 70B+ dense pretraining fit on one device; the arithmetic rules it out.
 
-Activation memory adds a second axis of pain. Unless you intervene, it grows linearly in layers and roughly with `batch × seq²` for naive attention. **Activation (gradient) checkpointing** trades this away: instead of storing every layer's activations, you store a sparse subset (e.g., one per transformer block) and recompute the rest during the backward pass. This drops peak activation memory from O(layers) to roughly O(√layers) at the cost of ~30% extra FLOPs — one of the best compute-for-memory trades in the field (Chen et al. 2016).
+Activations add a second axis of pain. Left alone, they grow linearly in layers and roughly with `batch × seq²` for naive attention. **Activation (gradient) checkpointing** trades that away: store a sparse subset of activations (say, one per transformer block) and recompute the rest in the backward pass. Peak activation memory drops from O(layers) to roughly O(√layers) for ~30% extra FLOPs, one of the best compute-for-memory trades in the field (Chen et al. 2016).
 
 ## In practice
 
-The practical ceiling: on a single 80GB GPU, without any sharding, you can train a dense model up to roughly **3-6B parameters** at reasonable batch/sequence sizes once you account for activations and framework overhead. Past that, you must split something across devices — either shard the redundant per-GPU state (ZeRO/[[Concept - Fully Sharded Data Parallel (FSDP)]] — same model, less state per rank) or shard the model itself ([[Concept - Tensor and Pipeline Parallelism]] — different layers/tensor slices on different ranks). These are the two orthogonal axes every large training run composes.
+On a single 80GB GPU with no sharding, the ceiling is a dense model of roughly **3-6B parameters** at reasonable batch/sequence sizes, once activations and framework overhead are counted. Beyond that you have to split something across devices. Either shard the redundant per-GPU state (ZeRO/[[Concept - Fully Sharded Data Parallel (FSDP)]]: same model, less state per rank) or shard the model itself ([[Concept - Tensor and Pipeline Parallelism]]: different layers or tensor slices on different ranks). Every large training run composes these two orthogonal axes.
 
-A useful framing: it is almost always **HBM capacity and bandwidth, not raw FLOPs**, that binds a training run's configuration. A GPU with 10x the compute but the same memory doesn't let you train a bigger model — it just finishes the same model faster. This is the memory wall, and it's the reason [[Concept - The Roofline Model]] (arithmetic intensity vs. peak bandwidth) is the right lens for reasoning about whether a training step is compute-bound or memory-bound. See [[Reference - Memory Math for Transformers]] for the exact per-tensor formulas.
+It is almost always **HBM capacity and bandwidth, not raw FLOPs**, that sets a training run's configuration. A GPU with 10x the compute and the same memory won't train a bigger model. It just finishes the same one faster. That's the memory wall, and it's why [[Concept - The Roofline Model]] (arithmetic intensity vs. peak bandwidth) is the right lens for deciding whether a training step is compute-bound or memory-bound. Per-tensor formulas are in [[Reference - Memory Math for Transformers]].
 
 ## Failure modes
 
-- **OOM at step 0**: the static footprint (params + grads + optimizer state, allocated eagerly) already exceeds HBM. Fix: shard state (ZeRO stage) or reduce model/GPU ratio — this is a sizing bug, not a runtime bug.
-- **OOM after N steps**: the static allocation fit, but activation *peak* (at the longest sequence in a batch, or during a specific layer) or lazy optimizer-state allocation (Adam allocates `m`/`v` on first `.step()`, not at init) pushes past the limit later. Fix: enable/tune activation checkpointing, reduce microbatch size, or check the allocator for fragmentation — a different bug requiring a different diagnostic than the step-0 case.
-- **Silent slowdown without OOM**: memory is technically sufficient but so tight that the allocator fragments and falls back to smaller, slower allocations — visible as unexplained throughput regression, not a crash.
+- **OOM at step 0**: the static footprint (params + grads + optimizer state, allocated eagerly) already exceeds HBM. Shard state (a ZeRO stage) or lower the model/GPU ratio. It's a sizing bug, not a runtime bug.
+- **OOM after N steps**: the static allocation fit, but the activation *peak* (at the longest sequence in a batch, or in one particular layer) or lazy optimizer-state allocation (Adam allocates `m`/`v` on the first `.step()`, not at init) pushes past the limit later. Enable or tune activation checkpointing, shrink the microbatch, or check the allocator for fragmentation. This needs a different diagnostic from the step-0 case.
+- **Silent slowdown without OOM**: memory technically suffices but is so tight that the allocator fragments and falls back to smaller, slower allocations. You see an unexplained throughput regression instead of a crash.
 
 ## The non-obvious
 
-The instinct to size a training run by "weights in bf16" is the single most common under-provisioning mistake junior engineers make — it's off by a factor of ~8-10x once gradients, Adam state, and activations are counted. The corollary is more useful: because optimizer state (12 bytes/param) is the largest of the three non-activation pools, and it is *pure redundancy* when replicated across data-parallel ranks, sharding it (ZeRO stage 1) is almost always the highest memory-per-engineering-effort win available before reaching for tensor or pipeline parallelism at all.
+Sizing a training run by "weights in bf16" is the most common under-provisioning mistake junior engineers make, and it's off by ~8-10x once gradients, Adam state and activations are counted. The more useful corollary: optimizer state (12 bytes/param) is the largest of the three non-activation pools, and when replicated across data-parallel ranks it is *pure redundancy*. Sharding it (ZeRO stage 1) is almost always the best memory win per unit of engineering effort, and it comes before tensor or pipeline parallelism.
 
 ## Connections
 - [[Reference - Memory Math for Transformers]] — the exact per-tensor byte formulas this note's numbers are drawn from.

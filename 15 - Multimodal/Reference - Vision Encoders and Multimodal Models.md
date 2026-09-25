@@ -8,7 +8,7 @@ summary: "Lookup tables for vision encoders, VLMs, image/video generators, and a
 
 ## Vision encoders
 
-Patch size $P$ (see [[Concept - Vision Transformers]]) determines both native-resolution handling and the token-count formula below.
+Patch size $P$ (see [[Concept - Vision Transformers]]) sets both native-resolution handling and the token-count formula below.
 
 | Encoder | Params | Native res | Tokens/image | Objective | License |
 |---|---|---|---|---|---|
@@ -17,11 +17,11 @@ Patch size $P$ (see [[Concept - Vision Transformers]]) determines both native-re
 | DINOv2-L/14 | 300M | 224–518px | resolution-dependent | Self-supervised, no text | Open |
 | EVA-CLIP-E | ~4.4B | 224–448px | resolution-dependent | Contrastive, scaled | Open |
 
-*(as of 2026 — the encoder landscape moves; current workhorse default is SigLIP-So400m / SigLIP2)*
+*(as of 2026; the encoder field keeps moving. The current workhorse default is SigLIP-So400m / SigLIP2)*
 
 ## VLMs
 
-*Fusion family follows the [[Concept - VLM Architectures]] taxonomy: Projector, Cross-attention, or Native. Full lineage and derivation of these checkpoints: [[Reference - Model Genealogy]].*
+*Fusion family follows the [[Concept - VLM Architectures]] taxonomy: Projector, Cross-attention or Native. Lineage of these checkpoints: [[Reference - Model Genealogy]].*
 
 | Model | LLM base | Encoder | Connector | Max image tokens | Fusion family |
 |---|---|---|---|---|---|
@@ -42,7 +42,7 @@ Patch size $P$ (see [[Concept - Vision Transformers]]) determines both native-re
 | SD3 | up to 8B | 16 | CLIP-L + CLIP-bigG + T5-XXL | MMDiT | Rectified flow |
 | FLUX.1 | 12B | 16 | T5-XXL + CLIP | DiT | Flow matching |
 
-*(as of 2026 — specs for closed models like DALL-E 3, Imagen, and Sora change without notice; see [[Breakdown - Stable Diffusion]] for the full version-by-version SD detail behind the rows above)*
+*(as of 2026. Specs for closed models like DALL-E 3, Imagen and Sora change without notice. [[Breakdown - Stable Diffusion]] has the version-by-version SD detail behind these rows)*
 
 ## Audio models
 
@@ -56,13 +56,13 @@ Patch size $P$ (see [[Concept - Vision Transformers]]) determines both native-re
 ## Formulas
 
 - **Image tokens per tile:** $\text{tokens} = \left(\frac{H}{P}\right)\times\left(\frac{W}{P}\right) \div r^2$, where $P$ = patch size, $r$ = pixel-shuffle/unshuffle reduction factor ($r=1$ if none, $r=2$ for a 2×2 merge).
-- **AnyRes/tiling total tokens:** $\text{tokens}_{\text{total}} = (\text{tiles} + 1_{\text{thumbnail}}) \times \text{tokens per tile}$ — e.g. 4 tiles + 1 thumbnail at 576 tokens/tile ≈ 2880 tokens for one image.
-- **Audio token rate:** $\text{tokens/sec} = \text{frame\_rate} \times N_q$ (codebooks per frame) — e.g. a 75Hz frame rate with 8 codebooks ≈ 600 tokens/sec of audio.
-- **VAE latent scaling constant:** latents are multiplied by a fixed constant before/after the diffusion model so their variance ≈ 1 — SD1.x/SDXL: 0.18215 / 0.13025 respectively. Forgetting this constant is a silent-corruption bug, not a crash — see [[Gotchas - Diffusion Training and Sampling]].
-- **Latent channel counts**† : 4 for SD1.x/SDXL, 16 for SD3/FLUX — the jump to 16 channels is what fixed most SD1/SDXL fine-detail (text, hands) loss.
-- Converting any of the above token counts into actual activation/KV-cache bytes needs [[Reference - Memory Math for Transformers]].
+- **AnyRes/tiling total tokens:** $\text{tokens}_{\text{total}} = (\text{tiles} + 1_{\text{thumbnail}}) \times \text{tokens per tile}$. E.g. 4 tiles + 1 thumbnail at 576 tokens/tile ≈ 2880 tokens for one image.
+- **Audio token rate:** $\text{tokens/sec} = \text{frame\_rate} \times N_q$ (codebooks per frame). E.g. a 75Hz frame rate with 8 codebooks ≈ 600 tokens/sec of audio.
+- **VAE latent scaling constant:** latents are multiplied by a fixed constant before/after the diffusion model so their variance ≈ 1. SD1.x/SDXL: 0.18215 / 0.13025. Forgetting it silently corrupts output without crashing; see [[Gotchas - Diffusion Training and Sampling]].
+- **Latent channel counts**† : 4 for SD1.x/SDXL, 16 for SD3/FLUX. The jump to 16 channels fixed most of the SD1/SDXL fine-detail loss (text, hands).
+- To turn any of these token counts into activation/KV-cache bytes, use [[Reference - Memory Math for Transformers]].
 
-† footnote: "latent channels" are not RGB channels — they are a learned compressed representation with no direct pixel meaning.
+† footnote: "latent channels" aren't RGB channels. They're a learned compressed representation with no direct pixel meaning.
 
 ## Connections
 - [[Concept - VLM Architectures]] — the taxonomy (projector/cross-attention/native) that the VLM table's "fusion family" column encodes.

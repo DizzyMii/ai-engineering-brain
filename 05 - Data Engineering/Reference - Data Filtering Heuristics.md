@@ -6,7 +6,7 @@ summary: "Lookup sheet of the exact filtering rules and thresholds used by C4, G
 
 # Reference - Data Filtering Heuristics
 
-All thresholds below are corpus-specific choices made by their original authors, not universal constants — treat every number as a starting point to ablation-validate against your own data via [[Decision - Choosing a Quality Filtering Strategy]], not a rule to copy blindly. Date-stamped as of 2026; these are the published, citable values.
+Every threshold below is a corpus-specific choice its original authors made. None are universal constants. Treat each number as a starting point and ablation-validate it on your own data via [[Decision - Choosing a Quality Filtering Strategy]] before copying it. These are the published, citable values, as of 2026.
 
 ## C4 (Raffel et al. 2020)
 
@@ -21,7 +21,7 @@ All thresholds below are corpus-specific choices made by their original authors,
 | Blocklist | drop documents matching a "dirty, naughty, obscene" word list<sup>†</sup> | remove obscene/spam content |
 | Span dedup | dedup any repeated 3-sentence span | remove templated repetition |
 
-† See [[Lore - The C4 Blocklist Incident]] — this rule is the canonical cautionary tale for lexical blocklist over-reach, not a rule to reuse as-is.
+† See [[Lore - The C4 Blocklist Incident]]. This rule is the standard cautionary tale for lexical blocklist over-reach; don't reuse it as-is.
 
 ## Gopher / MassiveText (Rae et al. 2021)
 
@@ -39,7 +39,7 @@ All thresholds below are corpus-specific choices made by their original authors,
 
 | Rule | Value | Purpose |
 |---|---|---|
-| Extraction | `trafilatura` on raw WARC (not WET) | the pipeline's central quality lever — see [[Concept - Text Extraction from Web Pages]] |
+| Extraction | `trafilatura` on raw WARC (not WET) | the pipeline's central quality lever; see [[Concept - Text Extraction from Web Pages]] |
 | Line filters | drop mostly-digit lines, short lines, policy boilerplate | Gopher-style cleanup, applied post-extraction |
 | Dedup | document-level + line-level | remove exact and templated near-duplicates |
 | URL blocklist | domain-level adult-content blocklist | remove NSFW sources at the source level |

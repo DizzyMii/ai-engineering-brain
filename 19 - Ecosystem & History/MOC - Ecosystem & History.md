@@ -6,13 +6,13 @@ summary: "Map of Ecosystem & History: labs, model lineage, open-vs-closed licens
 
 # MOC - Ecosystem & History
 
-This domain owns the field's social, organizational, and historical layer: who built what, when, under what license, and why — the context that turns a benchmark number into an informed bet instead of a headline. It traces the mechanism behind AI's booms and winters, maps the labs and their strategic postures, tracks how models actually descend from one another, and catalogs the recurring traps in reading a lab's own announcement. It matters because every architecture, training, or deployment decision made elsewhere in this vault is also, implicitly, a bet on an organization's licensing terms, a hardware supplier's compute allocation, or a lineage's legal exposure — bets this domain makes explicit. It is also where the vault keeps its best-verified war stories: the training runs, leaks, and origin stories that turn abstract mechanisms into lived, checkable history.
+This domain covers the field's social, organizational and historical layer: who built what, when, under what license, and why. That context turns a benchmark number into an informed bet instead of a headline. It traces the mechanism behind AI's booms and winters, maps the labs and their strategic postures, tracks how models descend from one another, and catalogs the traps in reading a lab's own announcement. Every architecture, training or deployment decision elsewhere in the vault is also an implicit bet on an organization's licensing terms, a hardware supplier's compute allocation or a lineage's legal exposure, and this domain spells those bets out. It's also where the vault keeps its best-verified war stories: the training runs, leaks and origin stories that ground abstract mechanisms in checkable history.
 
 ## Start here
 
 - **Surface** → [[Deep Dive - From Perceptron to ChatGPT]] — the recurring data+compute+algorithm unlock behind every AI boom, and the funding-gap signature behind every winter, from the 1958 perceptron to the 2025 reasoning turn.
 - **Core** → [[Reference - The AI Lab Landscape]] — who's actually building frontier and open models, and the five strategic postures (platform-API, safety-brand, commoditize-the-complement, sovereign, efficiency-challenger) that predict what they'll release next.
-- **Advanced** → [[Concept - The Open vs Closed Model Divide]] — why open vs. closed weights is a business decision about capital recovery and distillation risk, not an ideology, and why the same lab makes both choices.
+- **Advanced** → [[Concept - The Open vs Closed Model Divide]] — open vs. closed weights as a business decision about capital recovery and distillation risk (no ideology involved), and why the same lab makes both choices.
 - **Frontier** → [[Breakdown - DeepSeek]] — the release run that erased ~$600B of NVIDIA market cap in a day and compressed the open-vs-closed reasoning gap from quarters to weeks.
 - **Unicorn** → [[Lore - The Attention Is All You Need Origin Story]] — eight authors, a Beatles-referenced title, and a diaspora that went on to found or lead a meaningful fraction of the LLM industry.
 
@@ -55,4 +55,4 @@ This domain owns the field's social, organizational, and historical layer: who b
 - [[MOC - Architectures]] — the Transformer this domain's history and lore orbit (Attention Is All You Need, the GPT/Llama lineages) is built and explained mechanically on that side of the vault.
 - [[MOC - Hardware & Systems]] — the GPU/TPU internals and kernel programming that sit underneath this domain's hardware-market and CUDA-moat notes.
 - [[MOC - AI Economics]] — the unit economics, pricing, and capex accounting that explain *why* labs choose the open/closed postures and pricing wars documented here.
-- [[MOC - Post-Training]] — RLHF and reasoning-training mechanisms (InstructGPT, GRPO) that this domain's timeline and lab breakdowns treat as organizational history rather than re-deriving.
+- [[MOC - Post-Training]] — RLHF and reasoning-training mechanisms (InstructGPT, GRPO) that this domain's timeline and lab breakdowns treat as organizational history instead of re-deriving.

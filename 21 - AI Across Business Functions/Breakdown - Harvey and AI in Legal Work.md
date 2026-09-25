@@ -5,7 +5,7 @@ summary: "Harvey, the OpenAI-backed legal AI deployed across elite law firms —
 ---
 
 # Breakdown - Harvey and AI in Legal Work
-> Harvey is the OpenAI-backed legal-AI company that put a GPT-based copilot inside elite law firms, starting with Allen & Overy's firmwide rollout in February 2023. It is the flagship of the legal vertical: large measured adoption, a strictly review-mandatory design forced by the profession's zero-tolerance for fabricated citations, and a valuation that ran from ~$3B to ~$11B in thirteen months. (Assessed as of 2026-07.)
+> Harvey is the OpenAI-backed legal-AI company that put a GPT-based copilot inside elite law firms, starting with Allen & Overy's firmwide rollout in February 2023. It's the flagship of the legal vertical. Adoption is large and measured. The design makes review mandatory, because the profession has zero tolerance for fabricated citations. And the valuation ran from ~$3B to ~$11B in thirteen months. (Assessed as of 2026-07.)
 
 ## The headline numbers
 
@@ -18,18 +18,18 @@ summary: "Harvey, the OpenAI-backed legal AI deployed across elite law firms —
 | Reach | 142,000+ lawyers, 1,500+ customers, ~50% of Am Law 100 | E2 (Harvey, 2026) |
 | ARR | ~$100M (Aug 2025) → ~$195M (end 2025) → ~$300M (May 2026) | E1/E2 (Sacra estimates) |
 
-Valuation trajectory — each an announced round, a marker of investor conviction in the legal vertical, **not** of realized value:
+Valuation trajectory. Each is an announced round and marks investor conviction in the legal vertical, **not** realized value:
 
 | Date | Round | Valuation | Tier |
 |---|---|---|---|
 | Feb 2025 | Series D ($300M, Sequoia-led) | ~$3B | E2 |
 | Jun 2025 | Series E | ~$5B | E2 |
 | Dec 2025 | Series F ($160M, a16z-led) | ~$8B | E2 |
-| Mar 2026 | Growth ($200M, GIC/Sequoia) | ~$11B — most valuable legal-tech company ever | E2 (CNBC, 2026-03-25) |
+| Mar 2026 | Growth ($200M, GIC/Sequoia) | ~$11B; most valuable legal-tech company ever | E2 (CNBC, 2026-03-25) |
 
-## How it actually works
+## How it works
 
-Harvey is a retrieval-grounded legal assistant built on frontier models (OpenAI, later multi-model), tuned on legal corpora and wired into a firm's own document sets, with a **licensed lawyer as the mandatory commit gate** on every output.
+Harvey is a retrieval-grounded legal assistant on frontier models (OpenAI, later multi-model), tuned on legal corpora and wired into a firm's own document sets. A **licensed lawyer is the mandatory commit gate** on every output.
 
 ```mermaid
 flowchart TD
@@ -41,30 +41,30 @@ flowchart TD
     E -->|hallucinated cite / wrong holding| G[Reject / rewrite]
 ```
 
-The whole system is designed around one constraint: **unreviewed legal output carries direct, uninsurable liability**, so Harvey is a [[Concept - Copilot vs Autopilot Deployment Modes|copilot]], never an autopilot. It drafts research memos, contract redlines, and first-pass diligence; a lawyer reviews against the cited sources and signs. The [[Deep Dive - RAG Architectures|retrieval-grounding]] (domain 11) exists specifically so a reviewer can check each claim against a real document rather than trusting the model — the same verify-against-source shape used in finance and healthcare.
+Everything is designed around one constraint: **unreviewed legal output carries direct, uninsurable liability.** So Harvey is a [[Concept - Copilot vs Autopilot Deployment Modes|copilot]] and never an autopilot. It drafts research memos, contract redlines and first-pass diligence; a lawyer checks them against the cited sources and signs. The [[Deep Dive - RAG Architectures|retrieval-grounding]] (domain 11) is there so a reviewer can check each claim against a real document instead of trusting the model. Finance and healthcare use the same verify-against-source shape.
 
-The tasks Harvey targets — research, review, drafting, diligence — are chosen because they are **high-billable-hour, document-bounded, and already have a senior-review step in the workflow**. The accountable reviewer already exists; Harvey slots a draft in front of them. This is the identical logic that made [[Breakdown - AI Medical Scribes|medical scribes]] scale where autonomous diagnosis did not: pick the task where a licensed human is *already* the legal owner of the output.
+Harvey targets research, review, drafting and diligence because those tasks are **high-billable-hour, bounded by documents, and already have a senior-review step**. The accountable reviewer exists; Harvey puts a draft in front of them. [[Breakdown - AI Medical Scribes|Medical scribes]] scaled where autonomous diagnosis didn't for the same reason: pick the task where a licensed human *already* legally owns the output.
 
 ## The clever parts
 
-- **Anchor-client land-grab.** A&O (3,500 lawyers) and PwC (4,000+ professionals) as launch partners in early 2023 converted "AI legal startup" into "the tool the top of the market already uses." That reference set unlocked Am Law 100 adoption faster than any benchmark could — the distribution *is* the moat (see [[Concept - Moats in the AI Application Layer]], domain 22).
-- **Citations as the trust primitive.** Grounding every claim in a retrievable source document turns review from "re-do the research" into "check the footnotes," which is what makes the copilot economically worthwhile rather than pure overhead.
-- **Vertical depth over horizontal breadth.** Co-building PwC's tax assistant on 6M+ curated tax sources (2023) signals the strategy: domain data and firm-specific integration, not the base model, as the defensible layer — a direct answer to wrapper commoditization.
+- **Anchor-client land-grab.** A&O (3,500 lawyers) and PwC (4,000+ professionals) as launch partners in early 2023 turned "AI legal startup" into "the tool the top of the market already uses." That reference set drove Am Law 100 adoption faster than any benchmark could. Distribution *is* the moat here (see [[Concept - Moats in the AI Application Layer]], domain 22).
+- **Citations as the trust primitive.** Grounding every claim in a retrievable source changes review from "redo the research" to "check the footnotes." That's what makes the copilot worth paying for instead of pure overhead.
+- **Vertical depth over horizontal breadth.** Co-building PwC's tax assistant on 6M+ curated tax sources (2023) shows the strategy: domain data and firm-specific integration are the defensible layer, not the base model. It's a direct answer to wrapper commoditization.
 
 ## What it got wrong / what's dated
 
-The core risk is **confident fabrication of citations and holdings**, and the evidence that this is not solved is strong — but it must be cited precisely. The widely-quoted Stanford RegLab study ("Hallucination-Free?", Magesh, Surani, Dahl et al., May 2024, E2/E3) tested **Lexis+ AI and Westlaw AI-Assisted Research — not Harvey** — and found hallucination rates of ~17% (Lexis+) to ~33% (Westlaw), against GPT-4's ~43% baseline, despite vendors' "hallucination-free" marketing. An earlier Stanford study (Dahl et al., "Large Legal Fictions," Jan 2024) found *general* LLMs hallucinate on 58-88% of specific legal queries. Harvey was not independently measured in that work; the honest statement is that **the category hallucinates at material rates**, which is precisely why Harvey's human-review gate is non-negotiable, not that Harvey's own rate is published. Anyone citing "specialized legal AI hallucinates" should attach it to the tools actually tested.
+The core risk is **confident fabrication of citations and holdings**. The evidence that this isn't solved is strong, but cite it precisely. The widely quoted Stanford RegLab study ("Hallucination-Free?", Magesh, Surani, Dahl et al., May 2024, E2/E3) tested **Lexis+ AI and Westlaw AI-Assisted Research, not Harvey**. It found hallucination rates of ~17% (Lexis+) to ~33% (Westlaw), against GPT-4's ~43% baseline, despite the vendors' "hallucination-free" marketing. An earlier Stanford study (Dahl et al., "Large Legal Fictions," Jan 2024) found *general* LLMs hallucinate on 58-88% of specific legal queries. Neither measured Harvey. The honest statement is that **the category hallucinates at material rates**, which is why Harvey's human-review gate is non-negotiable. Harvey's own rate isn't published. If you cite "specialized legal AI hallucinates," attach it to the tools that were tested.
 
-The liability is not hypothetical: *Mata v. Avianca* (2023) saw lawyers sanctioned for filing a brief with fake ChatGPT-invented citations — the incident that made "verify every cite" a professional-conduct baseline (see [[Lore - Hallucination Liability Incidents]], domain 23).
+The liability is real. In *Mata v. Avianca* (2023) lawyers were sanctioned for filing a brief with fake citations ChatGPT had invented. That incident made "verify every cite" a professional-conduct baseline (see [[Lore - Hallucination Liability Incidents]], domain 23).
 
-What is dated fastest is the valuation. `$3B→$11B` in thirteen months prices near-flawless execution; realized ARR (~$300M mid-2026, E1/E2 Sacra) implies a revenue multiple that only holds if legal AI retention proves durable — a bet, not a fact.
+The valuation dates fastest. `$3B→$11B` in thirteen months prices near-flawless execution. Realized ARR (~$300M mid-2026, E1/E2 Sacra) implies a revenue multiple that only holds if legal AI retention proves durable. That's a bet, not a fact.
 
 ## What to steal
 
-- **Sell time-per-matter savings under a mandatory-review contract.** Never position legal AI as replacing the lawyer's sign-off; the sign-off is the product's legal container.
-- **Ground every claim in a retrieved source with a citation**, so review is verification, not redo — the economic hinge of the copilot.
-- **Win the anchor clients first.** In regulated professional services, a marquee reference is worth more than a benchmark; adoption is gated on trust, not accuracy points.
-- **Assume the base model hallucinates and build the workflow around catching it** — the durable answer to the [[Concept - The Capability-Reliability Gap|capability-reliability gap]] (domain 20) is process, not a cleaner model.
+- **Sell time-per-matter savings under a mandatory-review contract.** Never pitch legal AI as replacing the lawyer's sign-off. The sign-off is the product's legal container.
+- **Ground every claim in a retrieved source with a citation**, so review means verifying instead of redoing. The copilot's economics hinge on it.
+- **Win the anchor clients first.** In regulated professional services a marquee reference is worth more than a benchmark. Adoption is gated on trust, not accuracy points.
+- **Assume the base model hallucinates and build the workflow to catch it.** The durable answer to the [[Concept - The Capability-Reliability Gap|capability-reliability gap]] (domain 20) is process, not a cleaner model.
 
 ## Connections
 - [[Concept - The Front-Office Back-Office Adoption Split]] — legal drafting/review is high-liability work that adopted only in copilot form; Harvey shows why.

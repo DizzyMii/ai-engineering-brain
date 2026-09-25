@@ -6,13 +6,13 @@ summary: "Splitting a target batch into microbatches whose gradients sum before 
 
 # Concept - Gradient Accumulation and Microbatching
 
-> **One-paragraph hook:** A pretraining run wants a 4-million-token batch for stable, efficient gradient estimates; a single GPU can physically hold maybe a few hundred thousand tokens of activations at once. Gradient accumulation is the trick that reconciles the two — run several small forward/backward passes, sum their gradients, and take exactly one optimizer step — and it is so mechanically simple that a subtle bug in it (mis-weighting the summed gradient) went unnoticed in mainstream training frameworks for years.
+> **One-paragraph hook:** A pretraining run wants a 4-million-token batch for stable, efficient gradient estimates. A single GPU can hold maybe a few hundred thousand tokens of activations at once. Gradient accumulation reconciles the two: run several small forward/backward passes, sum their gradients, and take one optimizer step. It's mechanically simple, and still a subtle bug in it (mis-weighting the summed gradient) went unnoticed in mainstream training frameworks for years.
 
 ## The mechanism
 
-The core identity: **effective batch size = microbatch_size × grad_accum_steps × data_parallel_world_size**. This is the lever every large run pulls to hit a fixed token-per-step target (e.g., 4M tokens) regardless of how much HBM any single GPU has — see [[Concept - Why Models Don't Fit on One GPU]] for why that HBM ceiling exists in the first place.
+The identity to remember: **effective batch size = microbatch_size × grad_accum_steps × data_parallel_world_size**. Every large run uses it to hit a fixed token-per-step target (e.g., 4M tokens) no matter how much HBM a single GPU has. [[Concept - Why Models Don't Fit on One GPU]] covers where that HBM ceiling comes from.
 
-The mechanism is a loop, not a single fused step:
+It's a loop, not one fused step:
 
 ```python
 optimizer.zero_grad()
@@ -24,26 +24,26 @@ for i, microbatch in enumerate(microbatches):
 optimizer.step()
 ```
 
-Each microbatch runs a full forward and backward pass, and PyTorch's autograd accumulates gradients additively into `.grad` by default — that's the entire trick, no special API needed for the summation itself. Under DDP, wrapping every microbatch *except the last* in `no_sync()` matters: without it, DDP all-reduces gradients after every microbatch's backward, which is correct but wastes communication — with it, the all-reduce fires once per accumulation window instead of once per microbatch, at zero cost to correctness (see [[Concept - Data Parallelism and ZeRO]] for the all-reduce mechanics being economized here).
+Each microbatch runs a full forward and backward pass. PyTorch's autograd adds gradients into `.grad` by default, so the summation needs no special API. Under DDP, wrap every microbatch *except the last* in `no_sync()`. Without it DDP all-reduces after every microbatch's backward. That's correct but wastes communication. With it, the all-reduce fires once per accumulation window, at zero cost to correctness ([[Concept - Data Parallelism and ZeRO]] has the all-reduce mechanics being saved here).
 
-**The 2024 loss-normalization bug**: dividing each microbatch's *mean* loss by `accum_steps` is only correct if every microbatch has the same number of contributing (non-padding) tokens. When microbatches have unequal token counts — from padding to different lengths, or from sequence packing — that per-microbatch mean silently over- or under-weights microbatches with fewer real tokens, mis-scaling the effective gradient. This was surfaced publicly by Unsloth in 2024 and confirmed as a bug present in Hugging Face's `Trainer` and other frameworks; the fix is to **sum per-token losses across all microbatches and divide once by the global token count**, not average per-microbatch means.
+**The 2024 loss-normalization bug.** Dividing each microbatch's *mean* loss by `accum_steps` is only correct if every microbatch has the same number of contributing (non-padding) tokens. When token counts differ, from padding to different lengths or from sequence packing, the per-microbatch mean over- or under-weights microbatches with fewer real tokens and mis-scales the effective gradient without any error. Unsloth surfaced this publicly in 2024, and it was confirmed in Hugging Face's `Trainer` and other frameworks. The fix: **sum per-token losses across all microbatches and divide once by the global token count** instead of averaging per-microbatch means.
 
 ## In practice
 
-LLM pretraining batches typically span 0.5M-16M tokens; grad-accum steps of 4-64 are common depending on cluster size and per-GPU memory. A useful framing: accumulation is *free* in FLOP terms — the same total compute runs regardless of how it's split into microbatches — but it changes the **communication-to-compute ratio**: more accumulation steps means fewer data-parallel all-reduce syncs per token processed, which is a real throughput win on bandwidth-constrained interconnects. It interacts directly with [[Concept - Tensor and Pipeline Parallelism]]: pipeline parallelism's microbatches are the same physical mechanism used to fill the pipeline, not a separate concept.
+LLM pretraining batches typically span 0.5M-16M tokens, and grad-accum steps of 4-64 are common depending on cluster size and per-GPU memory. Accumulation is *free* in FLOPs, since the same total compute runs however you split it. What it changes is the **communication-to-compute ratio**: more accumulation steps means fewer data-parallel all-reduce syncs per token, a real throughput win on bandwidth-constrained interconnects. It also ties directly to [[Concept - Tensor and Pipeline Parallelism]]. The microbatches used to fill a pipeline are the same physical mechanism, not a separate concept.
 
-Precision interactions matter too, tying into [[Concept - Mixed Precision Training]]: when loss scaling is in play (fp16), unscale the accumulated gradient *before* clipping, not per-microbatch. Gradient clipping itself (see [[Concept - AdamW at Scale]]) must be computed on the **global norm of the fully accumulated gradient**, after all microbatches have contributed — clipping per-microbatch clips a partial, smaller-magnitude gradient and silently changes the effective step.
+Precision matters too (see [[Concept - Mixed Precision Training]]). With fp16 loss scaling, unscale the accumulated gradient *before* clipping, not per-microbatch. Gradient clipping itself (see [[Concept - AdamW at Scale]]) has to use the **global norm of the fully accumulated gradient**, after every microbatch has contributed. Clipping per-microbatch clips a partial, smaller-magnitude gradient and silently changes the effective step.
 
 ## Failure modes
 
-- **Forgetting the `1/accum_steps` scaling** (or getting it wrong under unequal microbatch token counts, per the bug above): silently multiplies the effective learning rate by `accum_steps`, which at 16-64x accumulation is enough to destabilize or diverge a run that looks correctly configured everywhere else.
-- **Clipping per-microbatch instead of on the accumulated gradient**: clips a gradient that hasn't finished accumulating, changing the effective clip threshold in a way that's invisible unless you specifically check where clipping is called relative to the accumulation loop.
-- **Missing `no_sync()` under DDP**: not a correctness bug, but a throughput bug — every microbatch triggers a full all-reduce, wasting bandwidth proportional to `accum_steps`.
-- **Packed sequences without correcting the denominator**: sequence packing (multiple documents per training sequence) changes the token count per microbatch in ways that make the naive per-microbatch-mean loss bug above especially likely to bite.
+- **Forgetting the `1/accum_steps` scaling**, or getting it wrong under unequal microbatch token counts as above. This silently multiplies the effective learning rate by `accum_steps`. At 16-64x accumulation that's enough to destabilize or diverge a run that looks correctly configured everywhere else.
+- **Clipping per-microbatch instead of on the accumulated gradient.** You clip a gradient that hasn't finished accumulating, which changes the effective clip threshold. You won't see it unless you check where clipping sits relative to the accumulation loop.
+- **Missing `no_sync()` under DDP.** A throughput bug, not a correctness bug: every microbatch triggers a full all-reduce, wasting bandwidth in proportion to `accum_steps`.
+- **Packed sequences without correcting the denominator.** Packing multiple documents per training sequence changes the token count per microbatch, which makes the naive per-microbatch-mean bug above especially likely to bite.
 
 ## The non-obvious
 
-Gradient accumulation *feels* like a pure memory workaround, but it also functions as a communication-cost dial: for a fixed total token budget, more accumulation steps per optimizer step means proportionally fewer all-reduces, which is a real lever for tuning MFU on a bandwidth-limited cluster independent of the memory motivation. The loss-normalization bug is the sharper lesson, though — it's a case where code that is *locally* correct (each microbatch computes a standard mean-reduced loss, exactly as single-batch training would) becomes *globally* wrong the moment token counts vary across microbatches, and it survived in widely-used training code for years because the mis-weighting is subtle enough not to crash anything, just to quietly change what the model learns.
+Accumulation *feels* like a pure memory workaround, but it's also a communication-cost dial. For a fixed token budget, more accumulation steps per optimizer step means proportionally fewer all-reduces, which you can use to tune MFU on a bandwidth-limited cluster regardless of memory. The loss-normalization bug is the sharper lesson. Each microbatch computes a standard mean-reduced loss, the same as single-batch training would, so the code is *locally* correct. It becomes *globally* wrong once token counts vary across microbatches. It survived in widely used training code for years because the mis-weighting crashes nothing; it just changes what the model learns.
 
 ## Connections
 - [[Concept - Why Models Don't Fit on One GPU]] — the memory ceiling that makes microbatching necessary in the first place.

@@ -6,7 +6,7 @@ summary: "The reproducible open VLM recipe: frozen CLIP + a projector + Vicuna, 
 
 # Breakdown - LLaVA
 
-> LLaVA (Large Language and Vision Assistant, Liu et al. 2023, NeurIPS) is the open-source vision-language model that made building a competent VLM a reproducible weekend project rather than a DeepMind-scale undertaking. It matters less for architectural novelty — it wires a frozen vision encoder into a frozen-then-unfrozen LLM through a small connector, the simplest thing that could work — and more for the training-data trick that made it work at all: using text-only GPT-4 to synthesize multimodal instruction data. LLaVA-1.5 (2024) and LLaVA-NeXT (2024) iterated the recipe into the reference baseline nearly every subsequent open VLM (Qwen-VL, InternVL, Idefics) is implicitly benchmarked against. *(as of 2026, superseded on raw quality but still the canonical teaching example and default "Family B" reference point.)*
+> LLaVA (Large Language and Vision Assistant, Liu et al. 2023, NeurIPS) turned building a competent VLM from a DeepMind-scale project into a reproducible weekend one. The architecture is plain: a frozen vision encoder wired into a frozen-then-unfrozen LLM through a small connector, the simplest thing that could work. Its importance comes from the training-data trick that made it work at all, text-only GPT-4 synthesizing multimodal instruction data. LLaVA-1.5 (2024) and LLaVA-NeXT (2024) refined the recipe into the reference baseline that nearly every later open VLM (Qwen-VL, InternVL, Idefics) is implicitly benchmarked against. *(as of 2026, superseded on raw quality but still the standard teaching example and default "Family B" reference point.)*
 
 ## The headline numbers
 
@@ -21,9 +21,9 @@ summary: "The reproducible open VLM recipe: frozen CLIP + a projector + Vicuna, 
 | LLaVA-1.5 result | SOTA on 11 of 12 benchmarks using only ~1.2M total public data points |
 | LLaVA-NeXT (1.6) addition | [[Concept - Any-Resolution Vision Encoding|AnyRes tiling]] for higher effective resolution and OCR |
 
-## How it actually works
+## How it works
 
-LLaVA is a [[Concept - VLM Architectures|projector-style VLM]]: a frozen vision tower produces a fixed set of patch tokens, a small trainable connector maps them into the LLM's embedding space, and those tokens are prepended into the token stream as a soft visual prefix that the LLM attends over like any other tokens.
+LLaVA is a [[Concept - VLM Architectures|projector-style VLM]]. A frozen vision tower produces a fixed set of patch tokens, a small trainable connector maps them into the LLM's embedding space, and they get prepended to the token stream as a soft visual prefix the LLM attends over like any other tokens.
 
 ```mermaid
 flowchart LR
@@ -37,27 +37,29 @@ flowchart LR
     LLM --> OUT["response"]
 ```
 
-**Stage 1 — feature alignment.** Freeze both the CLIP encoder and the LLM; train *only* the connector on 558K image-caption pairs. The objective is purely to teach the projector to map CLIP's feature space into something the LLM's embedding space can interpret as tokens — a cheap, stable warm-up before touching the expensive LLM weights.
+**Stage 1: feature alignment.** Freeze the CLIP encoder and the LLM and train *only* the connector on 558K image-caption pairs. The only goal is teaching the projector to map CLIP's feature space into something the LLM's embedding space reads as tokens. It's a cheap, stable warm-up before the expensive LLM weights move.
 
-**Stage 2 — visual instruction tuning.** Unfreeze the LLM (the encoder stays frozen) and run [[Concept - Supervised Fine-Tuning (SFT)|supervised fine-tuning]] on the 158K instruction samples plus academic VQA-style data. This is where the model learns to actually follow multimodal instructions rather than just caption images.
+**Stage 2: visual instruction tuning.** Unfreeze the LLM (the encoder stays frozen) and run [[Concept - Supervised Fine-Tuning (SFT)|supervised fine-tuning]] on the 158K instruction samples plus academic VQA-style data. Here the model learns to follow multimodal instructions instead of only captioning images.
 
-The data-generation trick behind stage 2 is the paper's real contribution: rather than pay for human-annotated multimodal conversations, the authors fed text-only GPT-4 *symbolic* representations of images — existing COCO captions and bounding boxes, never the pixels — and prompted it to synthesize three kinds of training targets: multi-turn conversation, detailed description, and complex reasoning. GPT-4 never saw an image; it hallucinated plausible visual conversations from structured metadata, and that synthesized data turned out to be enough to teach a real VLM to follow instructions about real images.
+The paper's main contribution is the data generation behind stage 2. Human-annotated multimodal conversations are expensive, so the authors gave text-only GPT-4 *symbolic* descriptions of images (existing COCO captions and bounding boxes, never pixels) and prompted it for three kinds of targets: multi-turn conversation, detailed description and complex reasoning. GPT-4 never saw an image. It made up plausible visual conversations from structured metadata, and that was enough to teach a real VLM to follow instructions about real images.
 
 ## The clever parts
 
-1. **Visual instruction data distilled from a text-only teacher.** Using GPT-4 to generate instruction-following targets from caption/box metadata is a form of [[Concept - Knowledge Distillation|knowledge distillation]] with an unusual twist — the teacher never observes the modality it's teaching about, only a lossy symbolic proxy for it. This is also a canonical case of [[Concept - Synthetic Training Data|synthetic training data]] making a training regime tractable that human annotation would have made prohibitively expensive.
-2. **Freeze-then-unfreeze staging.** Training the connector alone first, on frozen towers, prevents the classic failure of end-to-end training from scratch: a randomly-initialized projector feeding garbage into the LLM would otherwise corrupt the LLM's pretrained weights before the projector has learned anything useful.
-3. **A dumb connector, staged correctly, beats a clever one trained badly.** LLaVA-1.5's bump from a linear layer to a 2-layer MLP was a small architectural change; the larger quality gains came from data and staging discipline, not connector sophistication — a lesson that outran the contemporaneous push toward complex query-based resamplers (see [[Concept - Vision-Language Connectors]]).
-4. **Penultimate-layer features, not the last layer.** LLaVA uses CLIP's second-to-last transformer layer rather than its final layer, because the final layer is over-specialized to the contrastive objective (maximizing image-text cosine similarity) and discards spatial/local detail a generative LLM needs.
-5. **AnyRes as a bolt-on, not a redesign.** LLaVA-NeXT added [[Concept - Any-Resolution Vision Encoding|tiling]] on top of the existing pipeline rather than retraining a new encoder, showing the two-stage recipe composes with later resolution fixes.
+1. **Instruction data distilled from a text-only teacher.** Generating instruction-following targets with GPT-4 from caption/box metadata is [[Concept - Knowledge Distillation|knowledge distillation]] with an odd twist: the teacher never observes the modality it teaches, only a lossy symbolic proxy. It's also a standard case of [[Concept - Synthetic Training Data|synthetic training data]] making a regime affordable that human annotation would have priced out.
+2. **Freeze-then-unfreeze staging.** Training the connector alone on frozen towers first avoids the classic failure of end-to-end training from scratch, where a randomly initialized projector feeds garbage into the LLM and corrupts its pretrained weights before the projector has learned anything.
+3. **A dumb connector, staged correctly, beats a clever one trained badly.** LLaVA-1.5's move from a linear layer to a 2-layer MLP was a small change. The bigger gains came from data and staging discipline. That lesson outlasted the push at the time toward complex query-based resamplers (see [[Concept - Vision-Language Connectors]]).
+4. **Penultimate-layer features.** LLaVA takes CLIP's second-to-last transformer layer. The final layer is over-specialized to the contrastive objective (maximizing image-text cosine similarity) and drops the spatial/local detail a generative LLM needs.
+5. **AnyRes bolted on.** LLaVA-NeXT added [[Concept - Any-Resolution Vision Encoding|tiling]] on top of the existing pipeline without retraining a new encoder, which shows the two-stage recipe composes with later resolution fixes.
 
 ## What it got wrong / what's dated
 
-The frozen CLIP encoder caps everything downstream: no amount of LLM-side SFT recovers fine text or small objects CLIP's 336px training resolution never resolved, which is why OCR and dense counting remained weak until AnyRes tiling was bolted on. 576 tokens per image was already a meaningful chunk of a 2048-4096 context window, and grounding/counting stayed weak because nothing in the recipe explicitly supervises spatial precision. Hallucination is a persistent issue — a strong LLM prior plus SFT data that describes prototypical scenes teaches the model to describe what's *usually* there rather than what's actually in this image (see [[Gotchas - Vision-Language Models]]). LLaVA's benchmark-topping numbers also carry the same [[Concept - Benchmark Contamination|contamination]] risk as most VLM leaderboards, since GPT-4-generated data and academic benchmarks share underlying image sources.
+The frozen CLIP encoder caps everything downstream. No amount of LLM-side SFT recovers fine text or small objects that CLIP's 336px training resolution never resolved, so OCR and dense counting stayed weak until AnyRes tiling was bolted on. 576 tokens per image already ate a meaningful chunk of a 2048-4096 context window. Grounding and counting were weak too, since nothing in the recipe supervises spatial precision directly.
+
+Hallucination never went away. A strong LLM prior plus SFT data describing prototypical scenes teaches the model to describe what's *usually* there instead of what's in this image (see [[Gotchas - Vision-Language Models]]). And LLaVA's benchmark-topping numbers carry the same [[Concept - Benchmark Contamination|contamination]] risk as most VLM leaderboards, because GPT-4-generated data and academic benchmarks share underlying image sources.
 
 ## What to steal
 
-The freeze-then-unfreeze two-stage recipe, distilling instruction data from a stronger (even cross-modally blind) teacher model, the simple MLP connector, and the penultimate-layer feature choice are all directly reusable defaults for building a VLM from an off-the-shelf encoder and LLM — see [[Playbook - Training a VLM from a Vision Encoder and an LLM]] for the generalized procedure this Breakdown is a concrete instance of.
+The freeze-then-unfreeze two-stage recipe, distilling instruction data from a stronger teacher (even one blind to the modality), the simple MLP connector and the penultimate-layer features. All four are reusable defaults when you build a VLM from an off-the-shelf encoder and LLM. [[Playbook - Training a VLM from a Vision Encoder and an LLM]] has the general procedure this Breakdown is one instance of.
 
 ## Connections
 - [[Concept - VLM Architectures]] — LLaVA is the textbook instantiation of the projector/prefix family in the general VLM taxonomy.

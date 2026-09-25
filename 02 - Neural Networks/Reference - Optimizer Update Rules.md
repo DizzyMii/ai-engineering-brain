@@ -6,11 +6,11 @@ summary: "Lookup sheet of optimizer update equations, default hyperparameters, a
 
 # Reference - Optimizer Update Rules
 
-*State variables, exact per-step update expressions, and default hyperparameters for the optimizer family used across [[Concept - Stochastic Gradient Descent and Momentum]] and [[Concept - Adam and AdamW]]. Numbers date-stamped (as of 2026); the derivations and intuition live in the linked concept notes, not here.*
+*State variables, per-step update expressions and default hyperparameters for the optimizers used in [[Concept - Stochastic Gradient Descent and Momentum]] and [[Concept - Adam and AdamW]]. Numbers are date-stamped (as of 2026). Derivations and intuition live in those concept notes.*
 
-## Table 1 — update rules
+## Table 1: update rules
 
-$g_t$ is the current gradient, $\theta_t$ the parameter, $\eta$ the learning rate. All operations on vector state ($m, v, G$) are elementwise.
+$g_t$ is the gradient, $\theta_t$ the parameter, $\eta$ the learning rate. Operations on vector state ($m, v, G$) are elementwise.
 
 | Optimizer | State | Update |
 |---|---|---|
@@ -24,7 +24,7 @@ $g_t$ is the current gradient, $\theta_t$ the parameter, $\eta$ the learning rat
 | Nadam | $m, v$ | Adam with Nesterov-style lookahead applied to $\hat m_t$ before the division (Dozat 2016) |
 | Adafactor | factored $v$ (row + col sums, no $m$ by default) | Reconstructs an approximate $v$ from rank-1 row/column accumulators instead of storing the full second-moment tensor (Shazeer & Stern 2018) |
 
-## Table 2 — default hyperparameters (as of 2026)
+## Table 2: default hyperparameters (as of 2026)
 
 | Optimizer | Learning rate | Momentum / $\beta_1$ | $\beta_2$ / $\rho$ | $\epsilon$ | Weight decay |
 |---|---|---|---|---|---|
@@ -34,29 +34,29 @@ $g_t$ is the current gradient, $\theta_t$ the parameter, $\eta$ the learning rat
 | RMSProp | 1e-3 | — | 0.9 (a.k.a. $\rho$) | 1e-8 | — |
 | Adafactor | relative step size, ~1e-2 scale | — | 0.8 – 0.999 (decayed) | 1e-30 (inside sqrt) | 0.0 typical |
 
-The $\beta_2 = 0.95$ LLM-pretraining default trades a ~2000-step second-moment memory ($1/(1-\beta_2)$ at $0.999$) for a ~20-step one — faster, more stable adaptation at large batch, and fewer loss spikes; see [[Concept - Adam and AdamW]].
+The $\beta_2 = 0.95$ LLM-pretraining default swaps a ~2000-step second-moment memory ($1/(1-\beta_2)$ at $0.999$) for a ~20-step one. You get faster, more stable adaptation at large batch and fewer loss spikes; see [[Concept - Adam and AdamW]].
 
-## Table 3 — optimizer-state memory per parameter
+## Table 3: optimizer-state memory per parameter
 
-Assumes fp32 optimizer state (the norm even under bf16/fp16 compute, per [[Concept - Mixed Precision Training]]).
+Assumes fp32 optimizer state, which is the norm even under bf16/fp16 compute ([[Concept - Mixed Precision Training]]).
 
 | Optimizer | Extra state bytes/param | Notes |
 |---|---|---|
 | SGD | 0 | No persistent state beyond the weight itself |
 | SGD + Momentum / Nesterov | 4 | One fp32 buffer ($v$) |
-| Adagrad | 4 | One fp32 buffer ($G$), monotonically growing — LR effectively decays to 0 over training |
+| Adagrad | 4 | One fp32 buffer ($G$) that only grows, so the effective LR decays to 0 over training |
 | RMSProp | 4 | One fp32 buffer ($v$) |
-| Adam / AdamW | 8 | $m$ + $v$, both fp32 — dominates training memory; full accounting in [[Reference - Memory Math for Transformers]] |
+| Adam / AdamW | 8 | $m$ + $v$, both fp32; dominates training memory. Full accounting in [[Reference - Memory Math for Transformers]] |
 | Nadam | 8 | Same as Adam |
-| Adafactor | ≪8, sublinear | $O(d_{\text{in}} + d_{\text{out}})$ per matrix instead of $O(d_{\text{in}} \cdot d_{\text{out}})$ — the whole point of the design, at a mild quality cost vs. full Adam |
+| Adafactor | ≪8, sublinear | $O(d_{\text{in}} + d_{\text{out}})$ per matrix instead of $O(d_{\text{in}} \cdot d_{\text{out}})$, which is the point of the design; mild quality cost vs. full Adam |
 
-A 70B-parameter model under AdamW carries **560 GB** of optimizer state alone (8 bytes × 70B) — the single largest line item in LLM training memory, and precisely what [[Concept - Data Parallelism and ZeRO]] stage-1 sharding targets first. [[Concept - AdamW at Scale]] covers the engineering response: sharded, fused, and 8-bit optimizer states.
+A 70B-parameter model under AdamW carries **560 GB** of optimizer state alone (8 bytes × 70B). That's the largest single line item in LLM training memory, and it's what [[Concept - Data Parallelism and ZeRO]] stage-1 sharding goes after first. [[Concept - AdamW at Scale]] covers the engineering response: sharded, fused and 8-bit optimizer states.
 
 ## Footnotes
 
-- **Epsilon placement.** Adam adds $\epsilon$ *outside* the square root — $\hat m_t/(\sqrt{\hat v_t}+\epsilon)$ — while LAMB and some variants add it *inside*, $\hat m_t/\sqrt{\hat v_t + \epsilon}$. These differ substantially when $\hat v_t$ is tiny, a silent cross-framework reproducibility trap covered fully in [[Concept - Adam's Epsilon and Bias Correction]].
-- **Coupled vs. decoupled decay.** "Adam + L2" folds $\lambda\theta$ into the gradient before it hits $m$ and $v$, so Adam's per-coordinate $1/\sqrt{v}$ scaling distorts the intended uniform shrinkage. AdamW applies $\lambda\theta$ directly to the weights, outside the adaptive machinery — the two are *not* interchangeable at matched $\lambda$; see [[Concept - Adam and AdamW]].
-- **Mixed precision requires fp32 state.** Even when forward/backward compute runs in bf16 or fp16, $m$, $v$, and the master weight copy stay fp32 — low-precision accumulation underflows the small updates these buffers are meant to track. Details in [[Concept - Mixed Precision Training]].
+- **Epsilon placement.** Adam adds $\epsilon$ *outside* the square root, $\hat m_t/(\sqrt{\hat v_t}+\epsilon)$. LAMB and some variants add it *inside*, $\hat m_t/\sqrt{\hat v_t + \epsilon}$. The two differ a lot when $\hat v_t$ is tiny, which makes this a silent cross-framework reproducibility trap. Full treatment in [[Concept - Adam's Epsilon and Bias Correction]].
+- **Coupled vs. decoupled decay.** "Adam + L2" folds $\lambda\theta$ into the gradient before it reaches $m$ and $v$, so the per-coordinate $1/\sqrt{v}$ scaling distorts what should be uniform shrinkage. AdamW applies $\lambda\theta$ directly to the weights, outside the adaptive scaling. At matched $\lambda$ the two are *not* interchangeable; see [[Concept - Adam and AdamW]].
+- **Mixed precision still needs fp32 state.** With forward/backward in bf16 or fp16, $m$, $v$ and the master weight copy stay fp32, because low-precision accumulation underflows the small updates these buffers exist to track. Details in [[Concept - Mixed Precision Training]].
 
 ## Connections
 

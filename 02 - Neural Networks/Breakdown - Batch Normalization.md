@@ -6,7 +6,7 @@ summary: "BatchNorm's real mechanism, why 'internal covariate shift' was debunke
 
 # Breakdown - Batch Normalization
 
-> Batch Normalization was introduced by Sergey Ioffe and Christian Szegedy at Google in February 2015 (published at ICML 2015), targeting a specific pain point in training deep CNNs: as weights in early layers updated, the distribution of inputs to later layers kept shifting, forcing conservative learning rates and delicate initialization. BN inserted a per-channel normalize-then-rescale operation between the linear layer and the nonlinearity. The empirical effect was immediate: on Inception, the paper reports matching the original model's accuracy in **14x fewer training steps**, and an ensemble of batch-normalized networks reached **4.9% top-5 ImageNet validation error**, a new record at the time that the authors describe as exceeding contemporary human-rater accuracy. Within two years BN was in nearly every CNN that mattered — ResNet, Inception-v3/v4, VGG-with-BN. It's also one of the field's best-documented cases of a hugely impactful technique whose own paper's explanation for *why* it worked turned out to be wrong.
+> Sergey Ioffe and Christian Szegedy at Google introduced Batch Normalization in February 2015 (published at ICML 2015). The target was a specific pain in training deep CNNs: as early-layer weights updated, the input distribution to later layers kept moving, which forced conservative learning rates and delicate initialization. BN puts a per-channel normalize-then-rescale step between the linear layer and the nonlinearity. The effect showed up immediately. On Inception the paper reports matching the original model's accuracy in **14x fewer training steps**, and an ensemble of batch-normalized networks hit **4.9% top-5 ImageNet validation error**, a record at the time that the authors describe as beating contemporary human-rater accuracy. Within two years BN was in nearly every CNN that mattered: ResNet, Inception-v3/v4, VGG-with-BN. It's also one of the best-documented cases of a hugely impactful technique whose own paper got the *why* wrong.
 
 ## The headline numbers
 
@@ -15,21 +15,21 @@ summary: "BatchNorm's real mechanism, why 'internal covariate shift' was debunke
 | Introduced | Ioffe & Szegedy, Feb 2015 (ICML 2015) |
 | Claimed training speedup | 14x fewer steps to match prior Inception accuracy |
 | ImageNet result | Ensemble: 4.9% top-5 validation error (new SOTA at publication) |
-| Default running-stat momentum (PyTorch convention) | 0.1 — i.e. `running = 0.9*running + 0.1*batch_stat` |
+| Default running-stat momentum (PyTorch convention) | 0.1, i.e. `running = 0.9*running + 0.1*batch_stat` |
 | Default eps | 1e-5 |
 | Extra learnable params per channel | 2 (gamma, beta) |
 | Dominant era | ~2015–2020 in vision; displaced by [[Concept - RMSNorm and LayerNorm]] once transformers took over sequence modeling |
-| Compute cost | Negligible FLOPs vs. the surrounding conv/matmul; the op is memory-bandwidth-bound, not compute-bound |
+| Compute cost | Negligible FLOPs next to the surrounding conv/matmul; the op is memory-bandwidth-bound |
 
-## How it actually works
+## How it works
 
-For a mini-batch $B = \{x_1, \dots, x_m\}$ of activations in one channel (in a conv net, statistics are pooled over the batch *and* spatial dimensions per channel):
+Take a mini-batch $B = \{x_1, \dots, x_m\}$ of activations in one channel (in a conv net, statistics are pooled over the batch *and* spatial dimensions per channel):
 
 $$\mu_B = \frac{1}{m}\sum_{i=1}^m x_i \qquad \sigma_B^2 = \frac{1}{m}\sum_{i=1}^m (x_i - \mu_B)^2$$
 
 $$\hat x_i = \frac{x_i - \mu_B}{\sqrt{\sigma_B^2 + \epsilon}} \qquad y_i = \gamma \hat x_i + \beta$$
 
-At train time $\mu_B, \sigma_B^2$ come from the current batch. Because inference must be deterministic and work at any batch size (including 1), BN also maintains running estimates via an EMA updated every training step, and switches to them at eval time:
+During training, $\mu_B, \sigma_B^2$ come from the current batch. Inference has to be deterministic and work at any batch size (including 1), so BN also keeps running estimates via an EMA updated every training step and switches to them at eval time:
 
 ```mermaid
 flowchart TD
@@ -46,29 +46,29 @@ flowchart TD
     end
 ```
 
-This train/eval split is exactly what [[Concept - The Training Loop]]'s `model.train()` / `model.eval()` toggle controls. The original paper places BN *before* the nonlinearity (`Wx → BN → ReLU`); later ablations found post-activation placement roughly comparable, but pre-activation remains the default.
+That train/eval split is what the `model.train()` / `model.eval()` toggle in [[Concept - The Training Loop]] controls. The original paper puts BN *before* the nonlinearity (`Wx → BN → ReLU`). Later ablations found post-activation placement roughly comparable, but pre-activation is still the default.
 
 ## The clever parts
 
-1. **Normalize-then-affine, not normalize-alone.** Forcing every layer's output to zero mean / unit variance could destroy representational power a layer needs (e.g. a sigmoid may need to sit off-center to reach its useful range). The learnable $\gamma, \beta$ let the network undo the normalization if that's optimal, so BN can never make the model *strictly* less expressive — only better-conditioned to optimize. Every later norm layer, including RMSNorm, copies this template.
-2. **Higher learning rates via scale invariance.** BN's output is invariant to rescaling the preceding layer's weight matrix by a positive constant — only weight *direction* matters post-normalization, not magnitude. That decouples the effective step size from raw weight-norm growth, which is the mechanistic reason BN tolerates much larger learning rates than unnormalized nets.
-3. **Running statistics as a stateful (non-parameter) buffer.** BN needed inference to be deterministic and batch-size-independent, so it introduces an EMA buffer that isn't trained by gradient descent at all. At deployment this buffer folds algebraically into the preceding conv's weights and bias — "BN fusion" is a standard, free inference-time graph optimization.
-4. **The wrong stated mechanism, caught red-handed.** Santurkar, Tsipras, Ilyas & Madry (2018) directly tested the internal-covariate-shift (ICS) story by injecting noise that reintroduces the very distribution-shift BN is supposed to eliminate — and BN-with-noise trained just as well as BN-without-noise. Instead, they showed BN measurably improves the *Lipschitzness* of the loss and its gradient, making gradient descent's local linear approximation accurate over larger step sizes. That's the real mechanism behind "BN lets you raise the LR" — reducing ICS is not.
-5. **Batch-size dependence is structural, not incidental.** Because $\mu_B, \sigma_B^2$ are batch statistics, small batches make them noisy estimates of the population statistics, and at batch size 1 the variance is degenerate. This is the direct reason detection/segmentation pipelines — which often run batch size 1-2 per GPU under memory pressure — switched to Group Normalization (Wu & He 2018), which normalizes over channel groups within a single example instead of across the batch.
-6. **Cross-example leakage.** Normalizing over the batch axis means each example's output depends on every other example currently sharing its batch. Mostly harmless for plain classification, but a real correctness hazard in contrastive/metric-learning setups where batch composition itself encodes label structure, and a complication for any pipeline that wants strict per-example determinism.
+1. **Normalize, then affine.** Forcing every layer's output to zero mean and unit variance could remove representational power a layer needs (a sigmoid may need to sit off-center to reach its useful range, for example). The learnable $\gamma, \beta$ let the network undo the normalization if that's optimal, so BN can never make the model *strictly* less expressive. It only makes it better-conditioned to optimize. Every later norm layer, RMSNorm included, copies this template.
+2. **Higher learning rates via scale invariance.** BN's output doesn't change if you rescale the preceding layer's weight matrix by a positive constant. After normalization only the weight *direction* matters. That decouples the effective step size from raw weight-norm growth, and it's the mechanistic reason BN tolerates much larger learning rates than unnormalized nets.
+3. **Running statistics as a stateful (non-parameter) buffer.** To make inference deterministic and batch-size-independent, BN adds an EMA buffer that gradient descent never trains. At deployment the buffer folds algebraically into the preceding conv's weights and bias. "BN fusion" is a standard inference-time graph optimization and costs nothing.
+4. **The stated mechanism was wrong.** Santurkar, Tsipras, Ilyas & Madry (2018) tested the internal-covariate-shift (ICS) story directly: they injected noise that reintroduces the distribution shift BN is supposed to remove, and BN-with-noise trained just as well as BN-without-noise. What they did find is that BN measurably improves the *Lipschitzness* of the loss and its gradient, so gradient descent's local linear approximation holds over larger steps. That, and not reduced ICS, is why BN lets you raise the LR.
+5. **Batch-size dependence is built in.** $\mu_B, \sigma_B^2$ are batch statistics, so small batches give noisy estimates of the population statistics, and at batch size 1 the variance is degenerate. Detection and segmentation pipelines often run batch size 1-2 per GPU under memory pressure, which is why they switched to Group Normalization (Wu & He 2018). GN normalizes over channel groups within a single example instead of across the batch.
+6. **Cross-example leakage.** Normalizing over the batch axis makes each example's output depend on every other example in its batch. For plain classification that's mostly harmless. In contrastive or metric-learning setups, where batch composition itself encodes label structure, it's a real correctness hazard, and it complicates any pipeline that needs strict per-example determinism.
 
 ## What it got wrong / what's dated
 
-- **The paper's own explanation didn't survive scrutiny.** ICS reduction, the headline justification in the original title, is now understood to be largely beside the point (Santurkar et al. 2018); the loss-landscape-smoothing story replaced it.
-- **Structurally incompatible with variable-length sequences and autoregressive decoding.** Padded batches pollute batch statistics, and single-token autoregressive inference has no meaningful batch to normalize against — a first-order reason RNNs and transformers moved to per-example normalization via [[Concept - RMSNorm and LayerNorm]].
-- **The train/eval discrepancy is a standing production liability.** A forgotten `model.eval()` — leaving running stats updating during what should be an inference-only pass, or leaving batch statistics active on a lone validation example — silently degrades accuracy with no error thrown. It remains one of the most common real-world training bugs (see [[Gotchas - Training Neural Networks]]).
-- **Superseded in the dominant architecture family.** As of 2026, essentially no frontier LLM uses BatchNorm; it survives mainly in CNN backbones and a shrinking slice of production vision pipelines, while transformer-based [[Concept - Vision Transformers]] carried LayerNorm into vision too.
+- **The paper's own explanation didn't hold up.** ICS reduction, the headline justification in the original title, is now understood to be largely beside the point (Santurkar et al. 2018). The loss-smoothing story replaced it.
+- **Incompatible by design with variable-length sequences and autoregressive decoding.** Padded batches pollute the batch statistics, and single-token autoregressive inference has no meaningful batch to normalize against. That's a first-order reason RNNs and transformers moved to per-example normalization via [[Concept - RMSNorm and LayerNorm]].
+- **The train/eval discrepancy is a standing production liability.** Forget `model.eval()` and you either keep updating running stats during what should be inference-only, or apply batch statistics to a lone validation example. Accuracy degrades and nothing throws. It's still one of the most common real-world training bugs (see [[Gotchas - Training Neural Networks]]).
+- **Superseded in the dominant architecture family.** As of 2026, essentially no frontier LLM uses BatchNorm. It survives mainly in CNN backbones and a shrinking slice of production vision pipelines, and transformer-based [[Concept - Vision Transformers]] carried LayerNorm into vision too.
 
 ## What to steal
 
-- The normalize-then-affine pattern — a learnable gain/bias that can undo the normalization — is the template every subsequent norm layer copies.
-- The general lesson that controlling activation scale buys a larger usable learning rate is worth re-deriving mechanistically for any normalization scheme, rather than trusting a paper's stated rationale at face value — BN is the canonical warning that the stated mechanism and the real one can diverge.
-- What to avoid: BatchNorm in any small-batch, variable-length-sequence, or cross-example-sensitive regime — that's exactly the territory [[Decision - Choosing a Normalization Layer]] routes elsewhere.
+- Normalize-then-affine, with a learnable gain/bias that can undo the normalization. Every subsequent norm layer copies it.
+- Controlling activation scale buys a larger usable learning rate. Re-derive that mechanistically for any normalization scheme instead of trusting the paper's stated rationale; BN is the standard warning that the stated mechanism and the real one can diverge.
+- Avoid BatchNorm in any small-batch, variable-length-sequence or cross-example-sensitive regime. That's the territory [[Decision - Choosing a Normalization Layer]] routes elsewhere.
 
 ## Connections
 

@@ -3,11 +3,11 @@ tags: [snippet, domain/multimodal, level/advanced]
 aliases: [DDPM, DDIM sampling, diffusion training loop, minimal diffusion]
 summary: "Minimal runnable PyTorch DDPM: schedule buffers, the L_simple training step, and a deterministic DDIM sampler on toy 2D data."
 ---
-> **What it does:** trains a tiny MLP to denoise samples from a 2D "two-moons" distribution using the DDPM simple loss (Ho et al. 2020), then generates new samples with a deterministic DDIM loop (Song et al. 2021). Every load-bearing piece of a real image-diffusion trainer is here — the closed-form forward process, the noise-schedule buffers, the ε-prediction MSE, the sinusoidal timestep embedding, and few-step deterministic sampling — with the U-Net swapped for a 4-layer MLP so the whole thing runs on CPU in under a minute.
+> **What it does:** trains a tiny MLP to denoise samples from a 2D "two-moons" distribution with the DDPM simple loss (Ho et al. 2020), then generates new samples with a deterministic DDIM loop (Song et al. 2021). Every essential piece of a real image-diffusion trainer is here: the closed-form forward process, the noise-schedule buffers, the ε-prediction MSE, the sinusoidal timestep embedding and few-step deterministic sampling. The U-Net is swapped for a 4-layer MLP so the whole thing runs on CPU in under a minute.
 >
 > **Dependencies:** `python>=3.10`, `torch>=2.0`, `scikit-learn>=1.0`, `numpy`. CPU is fine.
 >
-> **Expected output:** a printed loss that decreases and settles into roughly the **0.03–0.05** band (low because two-moons is nearly a 1-D manifold, so ε is highly predictable from $x_t$ and $t$), and final samples whose mean is ~0 and std ~1, tracing the two-moons shape.
+> **Expected output:** a printed loss that falls and settles around the **0.03–0.05** band (low because two-moons is nearly a 1-D manifold, so ε is very predictable from $x_t$ and $t$), and final samples with mean ~0 and std ~1 that trace the two-moons shape.
 
 ```python
 """Minimal DDPM (Ho et al. 2020) + deterministic DDIM sampler (Song et al. 2021)."""
@@ -95,12 +95,15 @@ if __name__ == "__main__":
 
 ## Why it's written this way
 
-- **`L_simple` drops the ELBO weighting on purpose.** The true variational bound weights each timestep's loss by a $t$-dependent factor. Ho et al. 2020 found that *deleting* those weights — plain uniform-over-$t$ MSE on the predicted noise — trains better and simpler. That is why the loss is a bare `.mean()` with no schedule term. (Rebalancing $t$ *back* with min-SNR is a later refinement; see [[Gotchas - Diffusion Training and Sampling]].)
-- **Predict ε, not $x_0$.** At high $t$, $x_t$ is almost pure noise, so $x_t$ *already contains* most of ε; the network only has to subtract off the small $\sqrt{\bar\alpha_t}x_0$ contribution. That makes ε a better-conditioned regression target than $x_0$ across the whole schedule, and it's why the same trained weights sample cleanly. The [[Concept - Backpropagation|gradients]] flow through a single MSE — no reparameterization tricks needed because `q_sample` is a closed-form linear combination.
-- **DDIM (η=0) is deterministic and few-step.** Ancestral DDPM sampling needs ~1000 stochastic steps. DDIM shares the exact same training marginals but defines a *non-Markovian* deterministic reverse process, so the same weights generate in ~50 steps by repeatedly estimating $x_0$ and re-noising to the next timestep. This is the whole reason production samplers exist — see [[Concept - Diffusion Samplers and Schedulers]].
-- **The net is a 4-layer MLP because this is didactic.** The schedule buffers, `q_sample`, the training step, and the DDIM loop are byte-for-byte what a real trainer uses; only `EpsMLP` would be replaced by a U-Net or [[Deep Dive - Diffusion Models|DiT]]. The **sinusoidal timestep embedding** is deliberately the same $\sin/\cos$ construction as [[Concept - Positional Encoding]] — timestep conditioning and sequence positions are the same "inject a scalar index as a smooth vector" problem.
+**`L_simple` drops the ELBO weighting on purpose.** The true variational bound weights each timestep's loss by a $t$-dependent factor. Ho et al. 2020 found that *deleting* those weights, leaving plain uniform-over-$t$ MSE on the predicted noise, trains better and is simpler. So the loss is a bare `.mean()` with no schedule term. (Rebalancing $t$ *back* with min-SNR came later; see [[Gotchas - Diffusion Training and Sampling]].)
 
-To layer text conditioning and [[Concept - Classifier-Free Guidance]] on top, you would drop the condition ~10% of the time during training and extrapolate `eps_cond`/`eps_uncond` at sampling — mechanically a two-line change to the loop above, at the cost of a second forward per step.
+**Predict ε, not $x_0$.** At high $t$, $x_t$ is almost pure noise and *already contains* most of ε, so the network only has to subtract the small $\sqrt{\bar\alpha_t}x_0$ contribution. ε is a better-conditioned regression target than $x_0$ across the whole schedule, which is why the same trained weights sample cleanly. The [[Concept - Backpropagation|gradients]] flow through a single MSE. No reparameterization tricks are needed, because `q_sample` is a closed-form linear combination.
+
+**DDIM (η=0) is deterministic and few-step.** Ancestral DDPM sampling needs ~1000 stochastic steps. DDIM keeps the same training marginals but defines a *non-Markovian* deterministic reverse process, so the same weights generate in ~50 steps by repeatedly estimating $x_0$ and re-noising to the next timestep. That's why production samplers exist at all; see [[Concept - Diffusion Samplers and Schedulers]].
+
+**The net is a 4-layer MLP because this is a teaching example.** The schedule buffers, `q_sample`, the training step and the DDIM loop are byte-for-byte what a real trainer uses; only `EpsMLP` would become a U-Net or [[Deep Dive - Diffusion Models|DiT]]. The **sinusoidal timestep embedding** is deliberately the same $\sin/\cos$ construction as [[Concept - Positional Encoding]], since timestep conditioning and sequence position are the same problem: inject a scalar index as a smooth vector.
+
+To add text conditioning and [[Concept - Classifier-Free Guidance]], drop the condition ~10% of the time in training and extrapolate `eps_cond`/`eps_uncond` at sampling. Mechanically that's a two-line change to the loop above, and it costs a second forward pass per step.
 
 ## Connections
 - [[Deep Dive - Diffusion Models]] — the derivation this code implements: forward/reverse processes, the ELBO, and where `L_simple` comes from.

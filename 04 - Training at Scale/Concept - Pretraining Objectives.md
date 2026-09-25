@@ -6,27 +6,27 @@ summary: "The self-supervised objectives that shape LLM pretraining: causal LM, 
 
 # Concept - Pretraining Objectives
 
-> **One-paragraph hook:** The pretraining objective isn't an implementation detail — it decides whether the resulting model can generate text at all, how much of each training document turns into gradient signal, and whether it will ever be any good at completing code with context on both sides. Decoder-only causal language modeling won the field not because it's the most theoretically elegant objective, but because it is the densest one whose training-time task is identical to its deployment-time task.
+> **One-paragraph hook:** The pretraining objective decides whether the resulting model can generate text at all, how much of each training document becomes gradient signal, and whether it will ever be any good at completing code with context on both sides. Decoder-only causal language modeling won the field because it is the densest objective whose training-time task is identical to its deployment-time task. Theoretical elegance had little to do with it.
 
 ## The mechanism
 
-**Causal LM (CLM)** predicts token $t{+}1$ from tokens $\le t$ under teacher forcing, minimizing cross-entropy summed over every position in the sequence, computed over next-token probabilities across the vocabulary that [[Concept - Byte-Pair Encoding]] (or a unigram tokenizer) defines — see [[Concept - Entropy and Cross-Entropy]] for the loss itself:
+**Causal LM (CLM)** predicts token $t{+}1$ from tokens $\le t$ under teacher forcing. It minimizes cross-entropy summed over every position in the sequence, over next-token probabilities across the vocabulary that [[Concept - Byte-Pair Encoding]] (or a unigram tokenizer) defines. The loss itself is in [[Concept - Entropy and Cross-Entropy]].
 
 $$\mathcal{L}_{CLM} = -\sum_{t=1}^{T} \log P_\theta(x_t \mid x_{<t})$$
 
-Every position contributes a loss term — a document of length $T$ yields $T$ training signals from one forward pass. This density is the main reason decoder-only CLM dominates modern LLM pretraining, and it maps directly onto the causal attention pattern inside the [[Deep Dive - The Transformer]] architecture.
+Every position contributes a loss term, so a document of length $T$ yields $T$ training signals from one forward pass. That density is the main reason decoder-only CLM dominates modern LLM pretraining, and it maps directly onto the causal attention pattern in the [[Deep Dive - The Transformer]] architecture.
 
-**Masked LM (MLM)**, from BERT (Devlin et al., 2018), instead masks ~15% of tokens and predicts them using bidirectional context:
+**Masked LM (MLM)**, from BERT (Devlin et al., 2018), masks ~15% of tokens and predicts them from bidirectional context:
 
 $$\mathcal{L}_{MLM} = -\sum_{t \in M} \log P_\theta(x_t \mid x_{\setminus M})$$
 
-Only the masked ~15% contribute loss — roughly 7x less signal per sequence than CLM — and the bidirectional attention that makes MLM's representations good for classification also makes it not natively generative: there's no way to sample text left-to-right from a model trained this way without extra machinery.
+Only the masked ~15% contribute loss, roughly 7x less signal per sequence than CLM. The bidirectional attention that makes MLM representations good for classification also makes the model not natively generative. You can't sample text left-to-right from it without extra machinery.
 
-**Span corruption** (T5, Raffel et al., 2020) generalizes MLM by masking contiguous spans rather than single tokens and replacing each span with a sentinel token; an encoder-decoder model then generates the corrupted spans, delimited by sentinels, autoregressively. UL2 (Tay et al., 2022) unifies several corruption regimes — short-span "R-denoising," long-span/high-corruption-rate "X-denoising," and prefix-style "S-denoising" — behind a mode token the model conditions on at training and inference time.
+**Span corruption** (T5, Raffel et al., 2020) generalizes MLM: it masks contiguous spans instead of single tokens and replaces each span with a sentinel token. An encoder-decoder model then generates the corrupted spans autoregressively, delimited by sentinels. UL2 (Tay et al., 2022) puts several corruption regimes behind a mode token the model conditions on at training and inference time: short-span "R-denoising," long-span/high-corruption-rate "X-denoising," and prefix-style "S-denoising."
 
-**Fill-in-the-middle (FIM)** (Bavarian et al., 2022) is the trick that makes a purely causal decoder capable of infilling: a training document is split into prefix/middle/suffix, then reordered with sentinel tokens — either prefix-suffix-middle (PSM) or suffix-prefix-middle (SPM) — so the model learns to predict the "middle" span having already seen the "suffix" earlier in its causal context. It's a data-reordering trick, not an architecture change, which is why it's cheap to add: FIM rates of 50-90% of training documents cost essentially nothing in the autoregressive loss.
+**Fill-in-the-middle (FIM)** (Bavarian et al., 2022) lets a purely causal decoder infill. A training document is split into prefix/middle/suffix and reordered with sentinel tokens, either prefix-suffix-middle (PSM) or suffix-prefix-middle (SPM), so the model predicts the "middle" span after already seeing the "suffix" earlier in its causal context. It reorders data and leaves the architecture alone, which is why it's cheap to add: FIM rates of 50-90% of training documents cost essentially nothing in the autoregressive loss.
 
-**Prefix-LM** sits between CLM and MLM: attention over the prompt/prefix region is bidirectional, while attention over the continuation stays causal — one model, two attention regimes depending on position, useful for tasks with a clear instruction/completion split.
+**Prefix-LM** sits between CLM and MLM. Attention over the prompt/prefix region is bidirectional and attention over the continuation stays causal, so one model runs two attention regimes depending on position. It suits tasks with a clear instruction/completion split.
 
 ```text
 CLM:          x1 x2 x3 x4 x5     each xt attends only to x<=t   (lower-triangular mask)
@@ -37,18 +37,20 @@ FIM (PSM):    <prefix> <SUF> <suffix> <MID> <middle>     -- reordered, still cau
 
 ## In practice
 
-Production pretraining is overwhelmingly causal-LM-first, with FIM mixed in for models expected to do code completion — StarCoder- and DeepSeek-Coder-style recipes train on a majority-CLM, ~50%+-FIM-sampled mixture rather than a separate FIM-only phase, because a decoder trained purely left-to-right never sees the "suffix already exists" scenario at all. Encoder-decoder span corruption and UL2-style denoiser mixtures remain relevant for retrieval/embedding-adjacent or translation-style models but lost the frontier-LLM race to decoder-only CLM, largely on loss-density and inference-simplicity grounds. See [[Deep Dive - Anatomy of a Pretraining Run]] for where the objective choice sits in overall run design, and [[Concept - Tokenizer Training]] for why sentinel and FIM markers have to be reserved as vocabulary slots before a single byte of the corpus is tokenized. The causal-LM loss itself carries over unchanged into [[Concept - Supervised Fine-Tuning (SFT)]], which restricts the same objective to completion tokens only via loss masking.
+Production pretraining is overwhelmingly causal-LM-first, with FIM mixed in for models expected to do code completion. StarCoder- and DeepSeek-Coder-style recipes train on a majority-CLM, ~50%+-FIM-sampled mixture instead of a separate FIM-only phase, since a decoder trained purely left-to-right never sees the "suffix already exists" case. Encoder-decoder span corruption and UL2-style denoiser mixtures still matter for retrieval/embedding-adjacent or translation-style models. They lost the frontier-LLM race to decoder-only CLM, largely on loss density and inference simplicity.
+
+[[Deep Dive - Anatomy of a Pretraining Run]] covers where the objective choice sits in overall run design. [[Concept - Tokenizer Training]] explains why sentinel and FIM markers have to be reserved as vocabulary slots before a single byte of the corpus is tokenized. The causal-LM loss carries over unchanged into [[Concept - Supervised Fine-Tuning (SFT)]], which uses loss masking to restrict it to completion tokens.
 
 ## Failure modes
 
-- **FIM train/inference format mismatch.** Serving PSM-formatted completions when the model was trained SPM (or vice versa) silently degrades infilling quality with no error, just worse completions.
-- **Document-packing attention bleed.** Packing multiple documents into one training sequence for efficiency lets attention (and RoPE position IDs) leak across the document boundary unless you insert reset masks or rely on EOS-token separators — the masking and packing machinery itself is covered in [[Concept - Loss Masking and Sequence Packing]].
-- **Loss computed over padding.** Forgetting to mask padding tokens out of the CLM loss inflates the denominator and quietly biases the reported loss downward relative to the model's real per-token performance.
-- **Unreserved sentinel tokens.** Adding FIM or corruption sentinel tokens to the tokenizer after pretraining has started forces an embedding-matrix resize and initializes those rows with no gradient history behind them.
+- **FIM train/inference format mismatch.** Serving PSM-formatted completions to a model trained SPM (or vice versa) degrades infilling with no error. Completions just get worse.
+- **Document-packing attention bleed.** Packing several documents into one training sequence lets attention (and RoPE position IDs) leak across document boundaries unless you insert reset masks or rely on EOS-token separators. The masking and packing machinery is in [[Concept - Loss Masking and Sequence Packing]].
+- **Loss computed over padding.** If padding tokens aren't masked out of the CLM loss, the denominator is inflated and the reported loss is biased downward relative to real per-token performance.
+- **Unreserved sentinel tokens.** Adding FIM or corruption sentinels to the tokenizer after pretraining has started forces an embedding-matrix resize, and the new rows start with no gradient history.
 
 ## The non-obvious
 
-CLM's dominance is usually explained as "it's simpler," but the sharper reason is that CLM is the only major objective with **zero train/deploy mismatch**: the task the model is trained on (predict the next token given everything before it) is exactly the task it performs at inference. BERT needs a task-specific head bolted on for anything generative; span-corruption models need their encoder-decoder machinery reproduced at serving time. Every bit of extra representational power MLM buys from bidirectional context gets paid back, and then some, by CLM's training-signal density and architectural simplicity at the scale modern LLMs operate at — which is why the field converged on it despite MLM's early popularity for encoder-only representation models.
+People usually say CLM won because it's simpler. The better reason: CLM is the only major objective with **zero train/deploy mismatch**. The model trains on predicting the next token given everything before it, and that's the task it performs at inference. BERT needs a task-specific head bolted on for anything generative, and span-corruption models need their encoder-decoder machinery reproduced at serving time. At the scale modern LLMs run at, CLM's training-signal density and architectural simplicity more than pay for the representational power MLM gets from bidirectional context. So the field converged on CLM despite MLM's early popularity for encoder-only representation models.
 
 ## Connections
 - [[Concept - Entropy and Cross-Entropy]] — the loss function every objective in this note is a variant of.

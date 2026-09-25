@@ -51,21 +51,21 @@ Solid edges = weight descent (the child's parameters derive from the parent's, v
 | Model merging | Weight-space combination, no gradient step | SLERP, TIES, DARE merges published on the Hub |
 | LoRA-adapter stacks | Small trainable deltas layered on a frozen base | Hub adapters keyed to one `base_model_name_or_path` |
 
-Cross-link the mechanisms behind each edge type: [[Concept - Byte-Pair Encoding]] for tokenizer inheritance, [[Concept - Mixture of Experts Architecture]] for sparse-MoE lineages like Mixtral and DeepSeek, [[Concept - Knowledge Distillation]] for the distillation edges, and [[Concept - Scaling Laws]] for why continued-pretraining children often outperform same-size from-scratch models.
+Mechanisms behind each edge type: [[Concept - Byte-Pair Encoding]] for tokenizer inheritance, [[Concept - Mixture of Experts Architecture]] for sparse-MoE lineages like Mixtral and DeepSeek, [[Concept - Knowledge Distillation]] for the distillation edges, and [[Concept - Scaling Laws]] for why continued-pretraining children often outperform same-size from-scratch models.
 
 ## Tokenizer inheritance as a lineage fingerprint
 
-Many models silently reuse the GPT-2, Llama, or Qwen tokenizer even when the model card is vague or silent about ancestry — tokenizer vocabulary and merge rules survive fine-tuning essentially unchanged, so a tokenizer hash match is stronger evidence of lineage than a self-reported `base_model` field. See [[Snippet - Tracing Model Lineage via Hugging Face Metadata]] for the concrete archaeology technique.
+Many models silently reuse the GPT-2, Llama or Qwen tokenizer even when the model card is vague or silent about ancestry. Vocabulary and merge rules survive fine-tuning essentially unchanged, so a tokenizer hash match is stronger lineage evidence than a self-reported `base_model` field. [[Snippet - Tracing Model Lineage via Hugging Face Metadata]] has the archaeology technique.
 
 ## The distillation-from-closed pattern
 
-A large share of the open instruct-model ecosystem descends, by data rather than by weight, from closed frontier models: ShareGPT-scraped GPT-4 conversations and similar corpora seeded a generation of open "instruct" models — the pattern nicknamed "GPT-4 in a trench coat." This lives in a legal grey zone, since most closed-lab terms of service prohibit training competing models on their outputs, but enforcement against a decentralized open-source ecosystem has been essentially nonexistent (see [[Lore - The LLaMA Leak]] for the parallel case of weights, rather than outputs, escaping containment).
+A large share of the open instruct-model ecosystem descends from closed frontier models by data, with no shared weights. ShareGPT-scraped GPT-4 conversations and similar corpora seeded a generation of open "instruct" models, the pattern nicknamed "GPT-4 in a trench coat." It's a legal grey zone: most closed-lab terms of service prohibit training competing models on their outputs, but enforcement against a decentralized open-source ecosystem has been essentially nonexistent. [[Lore - The LLaMA Leak]] is the parallel case where weights, not outputs, escaped containment.
 
 ## How to read a family tree
 
-- Solid edges = weight descent; dashed edges = data/output descent — mixing these up is the most common lineage-reading error.
-- A `base_model` field on the Hub is a *claim*, not a fact — corroborate with tokenizer fingerprint and config architecture before trusting it.
-- Distillation-from-closed edges are usually undeclared, since declaring them creates ToS exposure — treat an unusually GPT-style formatting or refusal pattern as circumstantial evidence, not proof.
+- Solid edges = weight descent; dashed edges = data/output descent. Mixing them up is the most common lineage-reading error.
+- A `base_model` field on the Hub is a *claim*, not a fact. Corroborate it with the tokenizer fingerprint and config architecture before trusting it.
+- Distillation-from-closed edges are usually undeclared, since declaring them creates ToS exposure. Treat unusually GPT-style formatting or refusal patterns as circumstantial evidence, not proof.
 - Merges typically have multiple parents; a single-parent assumption will misread a TIES or DARE merge as a simple fine-tune.
 
 ## Connections

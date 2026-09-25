@@ -3,11 +3,13 @@ tags: [concept, domain/inference-serving, level/core]
 aliases: [KV cache, key-value cache]
 summary: "Caching per-token K/V turns O(N²) attention recompute into O(N) reads — and its memory footprint caps serving concurrency."
 ---
-> **One-paragraph hook:** The KV cache is the single most important data structure in LLM serving — not the model weights, not the scheduler, this. It's what makes autoregressive generation tractable at all, and once you understand its memory math you understand why "how many concurrent users can this GPU serve" is really a question about bytes per token, not FLOPs.
+> **One-paragraph hook:** The KV cache is the most important data structure in LLM serving, ahead of the model weights and the scheduler. It's what makes autoregressive generation tractable at all. Once you understand its memory math, "how many concurrent users can this GPU serve" turns out to be a question about bytes per token, not FLOPs.
 
 ## The mechanism
 
-Under a causal mask, token `t`'s key and value projections (`K_t = x_t W_K`, `V_t = x_t W_V`) never change once computed — they don't depend on any token that comes later, because [[Concept - Attention Mechanism]]'s causal mask guarantees position `t` never attends to future positions. That means K and V for every past token can be computed once and reused forever. Without caching, generating token `N+1` would require recomputing attention over all `N` prior tokens from scratch — an `O(N^2)` total cost across a full generation. With caching, each decode step computes a query for only the *new* token and attends over the already-cached K,V of everything before it, turning the per-step cost into `O(N)` (a read, not a recompute) and the total generation cost into `O(N^2)` amortized as `N` cheap `O(N)` steps instead of `N` increasingly expensive `O(N^2)` recomputations. This is *the* mechanism [[Concept - The Inference Request Lifecycle]]'s prefill/decode split rests on: prefill populates the cache in one shot, and every decode step thereafter is a read-and-append.
+Under a causal mask, token `t`'s key and value projections (`K_t = x_t W_K`, `V_t = x_t W_V`) never change once computed. [[Concept - Attention Mechanism]]'s causal mask guarantees position `t` never attends to future positions, so K and V for every past token can be computed once and reused forever.
+
+Without caching, generating token `N+1` means recomputing attention over all `N` prior tokens from scratch, an `O(N^2)` total cost across a full generation. With caching, each decode step computes a query for only the *new* token and attends over the cached K,V of everything before it. The per-step cost becomes `O(N)` (a read, not a recompute), and the total generation cost is `O(N^2)` amortized as `N` cheap `O(N)` steps instead of `N` increasingly expensive `O(N^2)` recomputations. [[Concept - The Inference Request Lifecycle]]'s prefill/decode split rests on this: prefill fills the cache in one shot, and every decode step after that is a read-and-append.
 
 ```
 step t:      Q_t  (new query, 1 token)
@@ -22,23 +24,23 @@ step t:      Q_t  (new query, 1 token)
      step t+1 repeats, cache now has t entries
 ```
 
-**Memory formula.** The cache must store both K and V, for every layer, every KV head, every position, at some byte width:
+**Memory formula.** The cache stores both K and V, for every layer, every KV head and every position, at some byte width:
 
 $$\text{bytes} = 2 \times n_{\text{layers}} \times n_{\text{kv\_heads}} \times d_{\text{head}} \times \text{seq\_len} \times \text{batch} \times \text{bytes\_per\_elem}$$
 
-Worked example — Llama-3-70B (80 layers, 8 KV heads via grouped-query attention, `d_head=128`, fp16 → 2 bytes/elem):
+Worked example, Llama-3-70B (80 layers, 8 KV heads via grouped-query attention, `d_head=128`, fp16 → 2 bytes/elem):
 
 $$2 \times 80 \times 8 \times 128 \times 2 = 327{,}680 \text{ bytes/token} \approx 0.31\text{ MB/token}$$
 
-A single 128K-context sequence therefore costs `327{,}680 \times 131{,}072 \approx 43 \text{ GB}` of KV cache alone — on the same order of magnitude as the model weights themselves.
+One 128K-context sequence costs `327{,}680 \times 131{,}072 \approx 43 \text{ GB}` of KV cache alone. That's the same order of magnitude as the model weights.
 
 ## In practice
 
-**GQA/MQA are the dominant lever on this number.** [[Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)]] describes sharing K,V across multiple query heads; Llama-3-70B's 8 KV heads against 64 query heads is an 8x cache reduction versus naive multi-head attention with one KV head per query head — architecture decisions made at *training* time are directly felt as a serving-time memory bill. DeepSeek's Multi-Head Latent Attention (MLA, in DeepSeek-V2/V3) goes further, storing a compressed low-rank latent instead of full per-head K,V, cutting the cache far more aggressively than GQA alone.
+GQA/MQA are the biggest lever on this number. [[Concept - Multi-Head Attention Variants (MHA MQA GQA MLA)]] covers sharing K,V across query heads: Llama-3-70B's 8 KV heads against 64 query heads is an 8x cache reduction versus naive multi-head attention with one KV head per query head, so a *training*-time architecture decision lands directly on the serving-time memory bill. DeepSeek's Multi-Head Latent Attention (MLA, in DeepSeek-V2/V3) goes further: it stores a compressed low-rank latent in place of full per-head K,V and cuts the cache far more than GQA alone.
 
-**Cache size grows linearly with both sequence length and batch**, so the total live KV footprint at any moment is `per_token_bytes × Σ(seq_len over all live requests)` — not a fixed number, but a sum that changes every scheduling iteration as [[Concept - Continuous Batching]] admits and evicts sequences.
+Cache size grows linearly with both sequence length and batch. The total live KV footprint at any moment is `per_token_bytes × Σ(seq_len over all live requests)`, a sum that changes every scheduling iteration as [[Concept - Continuous Batching]] admits and evicts sequences.
 
-**In practice, KV cache — not model weights — is the binding constraint on capacity.** An 80 GB H100 serving a 70B model at fp16 needs ~140 GB just for weights, so two GPUs are required; whatever HBM remains after weights and framework overhead — commonly on the order of ~20 GB per GPU — is the entire KV budget, and that number is what actually determines max concurrent requests and max context length, not the GPU's FLOPs. The full worked formulas (KV bytes/token across model families, decode step time, max concurrent tokens given VRAM) live in [[Reference - Inference Performance Math]] and its companion [[Reference - Memory Math for Transformers]]; the practical tuning knobs that trade this budget against throughput are in [[Playbook - Tuning an LLM Serving Deployment]].
+In practice the KV cache limits capacity more than the model weights do. A 70B model at fp16 needs ~140 GB just for weights, so on 80 GB H100s you need two GPUs. Whatever HBM is left after weights and framework overhead (commonly on the order of ~20 GB per GPU) is the whole KV budget, and that number sets max concurrent requests and max context length, far more than the GPU's FLOPs do. Full worked formulas (KV bytes/token across model families, decode step time, max concurrent tokens given VRAM) are in [[Reference - Inference Performance Math]] and its companion [[Reference - Memory Math for Transformers]]. The tuning knobs that trade this budget against throughput are in [[Playbook - Tuning an LLM Serving Deployment]].
 
 | Model | Layers | KV heads | `d_head` | Bytes/token (fp16) |
 |---|---|---|---|---|
@@ -48,13 +50,13 @@ A single 128K-context sequence therefore costs `327{,}680 \times 131{,}072 \appr
 
 ## Failure modes
 
-- **Mid-generation OOM.** If live sequences' cumulative KV grows past the allocated budget, the server has no way to conjure more HBM — it must preempt (evict and later recompute) a request, which shows up as a sudden latency spike or a dropped request under load. Detect via KV utilization and preemption-count metrics, not just GPU memory percentage.
-- **Pre-paging fragmentation.** Before block-based allocation, reserving one contiguous buffer sized to `max_seq_len` per request wasted enormous amounts of memory to internal fragmentation (most requests generate far fewer tokens than the reserved maximum) and external fragmentation (variable-size holes between allocations) — measured at 60-80% of the KV region wasted in the original vLLM paper's motivating analysis. [[Concept - PagedAttention]] is the direct fix, and [[Lore - The KV Cache Fragmentation Crisis]] is the origin story.
-- **Underestimating long-context cost during capacity planning.** Because cache size scales linearly with sequence length per request, a service that advertises a large max context window but sizes capacity off average-case short prompts will silently degrade or reject requests the moment several users simultaneously use the full window.
+- **Mid-generation OOM.** If the live sequences' cumulative KV outgrows the allocated budget, the server can't conjure more HBM. It has to preempt a request (evict, recompute later), which shows up as a sudden latency spike or a dropped request under load. Watch KV utilization and preemption counts, not just GPU memory percentage.
+- **Pre-paging fragmentation.** Before block-based allocation, each request reserved one contiguous buffer sized to `max_seq_len`. That lost enormous amounts of memory to internal fragmentation (most requests generate far fewer tokens than the reserved maximum) and external fragmentation (variable-size holes between allocations). The original vLLM paper's motivating analysis measured 60-80% of the KV region wasted. [[Concept - PagedAttention]] is the direct fix, and [[Lore - The KV Cache Fragmentation Crisis]] is the origin story.
+- **Underestimating long-context cost in capacity planning.** Cache size scales linearly with each request's sequence length. Advertise a large max context window, size capacity off short average-case prompts, and the service silently degrades or rejects requests once several users hit the full window at once.
 
 ## The non-obvious
 
-Practitioners coming from a training background instinctively think about memory in terms of *parameters*, but serving memory is dominated by a completely different quantity: *live tokens across all in-flight sequences*. A 70B model and an 8B model with the same KV-cache configuration (same layer count, head count, head dim) cost wildly different amounts to hold in weights but can cost *similar* amounts in KV cache per token — meaning two models with very different parameter counts can have surprisingly close serving-concurrency ceilings if their attention configuration wasn't specifically designed (via GQA/MLA) to shrink the cache. This is why architecture teams increasingly treat KV-cache size as a first-class design target alongside parameter count and training FLOPs, not an afterthought discovered at serving time.
+Training people think about memory in *parameters*. Serving memory is dominated by *live tokens across all in-flight sequences*. A 70B model and an 8B model with the same KV-cache configuration (same layer count, head count, head dim) cost wildly different amounts to hold in weights but can cost *similar* amounts in KV cache per token. Two models with very different parameter counts can end up with surprisingly close serving-concurrency ceilings if their attention configuration wasn't designed (via GQA/MLA) to shrink the cache. Architecture teams increasingly treat KV-cache size as a design target next to parameter count and training FLOPs.
 
 ## Connections
 - [[Concept - Prefill and Decode Phases]] — the prerequisite split this note assumes: prefill writes the cache in one pass, decode reads and appends to it every step.
